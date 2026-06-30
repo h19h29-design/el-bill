@@ -2,9 +2,15 @@ import { useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { AlertTriangle, CheckCircle2, TrendingDown } from 'lucide-react'
-import type { MonthlyBill, PeakScenario, RatePlan } from '../../types'
+import type {
+  MonthlyBill,
+  PeakScenario,
+  PlanCandidateComparison,
+  RatePlan,
+} from '../../types'
 import { comparePlans, formatWon } from '../../lib/calculations'
 import { rateChangeCaution } from '../../lib/documentTemplates'
+import { PlanCandidateTable } from '../diagnosis/PlanCandidateTable'
 
 const scenarioSchema = z.object({
   targetPeakKw: z.coerce.number().min(1),
@@ -20,6 +26,7 @@ interface RateSimulatorProps {
   bills: MonthlyBill[]
   currentPlan: RatePlan
   candidatePlan: RatePlan
+  candidates: PlanCandidateComparison[]
   scenario: PeakScenario
   onScenarioChange: (scenario: PeakScenario) => void
 }
@@ -28,6 +35,7 @@ export function RateSimulator({
   bills,
   currentPlan,
   candidatePlan,
+  candidates,
   scenario,
   onScenarioChange,
 }: RateSimulatorProps) {
@@ -164,6 +172,14 @@ export function RateSimulator({
       <section className="panel muted-panel">
         <strong>판정 근거</strong>
         <p>{comparison.basis}</p>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <h2>자동 비교 후보 TOP 3</h2>
+          <span>현재 계약종별·수전전압 우선</span>
+        </div>
+        <PlanCandidateTable candidates={candidates} />
       </section>
     </div>
   )

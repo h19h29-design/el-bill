@@ -2,6 +2,7 @@ import {
   Activity,
   Building2,
   Calculator,
+  ClipboardCheck,
   FileSpreadsheet,
   FileText,
   LayoutDashboard,
@@ -17,6 +18,7 @@ const navItems: Array<{
   icon: typeof LayoutDashboard
 }> = [
   { key: 'dashboard', label: '대시보드', icon: LayoutDashboard },
+  { key: 'diagnosis', label: '자동진단', icon: ClipboardCheck },
   { key: 'school', label: '학교정보', icon: Building2 },
   { key: 'bills', label: '고지서 입력', icon: FileSpreadsheet },
   { key: 'powerPlanner', label: '파워플래너', icon: PlugZap },

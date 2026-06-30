@@ -1,5 +1,6 @@
 export type ViewKey =
   | 'dashboard'
+  | 'diagnosis'
   | 'school'
   | 'bills'
   | 'powerPlanner'
@@ -11,6 +12,10 @@ export type ViewKey =
 export type Recommendation = '변경 추천' | '유지 추천' | '추가 검토 필요'
 
 export type Season = 'springAutumn' | 'summer' | 'winter'
+
+export type CalculationMode = 'billDelta' | 'tariffFull'
+
+export type DataConfidence = '데이터 충분' | '보통' | '낮음'
 
 export interface SchoolProfile {
   schoolName: string
@@ -116,6 +121,12 @@ export interface PeakScenario {
   winterIncreasePercent: number
   analysisYear: number
   memo: string
+  mainBuildingEhpGroups?: number
+  annexEhpGroups?: number
+  auditoriumCooling?: boolean
+  cafeteriaHighPowerTime?: string
+  specialRoomTime?: string
+  exemptSpaces?: string
 }
 
 export interface DocumentBundle {
@@ -123,6 +134,8 @@ export interface DocumentBundle {
   kepcoLetterText: string
   applicationPreviewData: Record<string, string>
   checklist: Array<{ label: string; ready: boolean }>
+  calculationSummaryText: string
+  reviewItems: string[]
 }
 
 export interface PlanComparison {
@@ -134,4 +147,44 @@ export interface PlanComparison {
   fiveYearSavingWon: number
   recommendation: Recommendation
   basis: string
+}
+
+export interface PlanCandidateComparison extends PlanComparison {
+  candidatePlanId: string
+  candidatePlanName: string
+  contractType: string
+  voltageType: string
+  sameContractPriority: boolean
+  peakScenarioSavingWon: number
+  calculationMode: CalculationMode
+  reviewReason: string
+}
+
+export interface AutoDiagnosisResult {
+  completed: boolean
+  currentPlan: RatePlan
+  recommendedPlan: RatePlan
+  topCandidates: PlanCandidateComparison[]
+  additionalCandidates: PlanCandidateComparison[]
+  comparison: PlanCandidateComparison
+  calculationMode: CalculationMode
+  dataConfidence: DataConfidence
+  dataRecognitionRate: number
+  recognizedMonths: number
+  lastUploadLabel: string
+  availableDocumentCount: number
+  finalJudgement: Recommendation
+  judgementBasis: string
+  missingDataNotes: string[]
+}
+
+export interface UploadRecognitionSummary {
+  sheetNames: string[]
+  recognizedYears: number[]
+  requiredColumns: string[]
+  optionalColumns: string[]
+  missingRequiredColumns: string[]
+  mappingConfidence: number
+  canAnalyze: boolean
+  guidance: string
 }

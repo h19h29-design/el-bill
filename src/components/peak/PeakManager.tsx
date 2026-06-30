@@ -23,11 +23,13 @@ import {
   getHourlyUsageRecords,
   getPowerPlannerSummary,
 } from '../../lib/powerPlanner'
+import type { PeakOperationPlan } from '../../lib/peakOperations'
 
 interface PeakManagerProps {
   scenario: PeakScenario
   onScenarioChange: (scenario: PeakScenario) => void
   powerPlannerDataSource?: PowerPlannerDataSource | null
+  peakOperationPlan: PeakOperationPlan
 }
 
 const isMaximumLoadHour = (hour: number) =>
@@ -41,6 +43,7 @@ export function PeakManager({
   scenario,
   onScenarioChange,
   powerPlannerDataSource,
+  peakOperationPlan,
 }: PeakManagerProps) {
   const ratio = getPeakRatio(scenario.targetPeakKw, scenario.expectedPeakKw)
   const level = getPeakRiskLevel(scenario.targetPeakKw, scenario.expectedPeakKw)
@@ -75,12 +78,17 @@ export function PeakManager({
     detailedDemandKw,
   )
 
-  const update = (key: keyof PeakScenario, value: string) => {
+  const update = (key: keyof PeakScenario, value: string | boolean) => {
     onScenarioChange({
       ...scenario,
       [key]:
-        key === 'memo'
+        key === 'memo' ||
+        key === 'cafeteriaHighPowerTime' ||
+        key === 'specialRoomTime' ||
+        key === 'exemptSpaces'
           ? value
+          : key === 'auditoriumCooling'
+            ? Boolean(value)
           : Number.isFinite(Number(value))
             ? Number(value)
             : 0,
@@ -187,6 +195,111 @@ export function PeakManager({
             향후 BEMS, 스마트미터, 냉난방 제어기 연계 가능. 본 MVP는 운영 가이드만 제공합니다.
           </p>
         </article>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <h2>피크관리 자동 운영안 입력</h2>
+          <span>학교 설비 운영 조건</span>
+        </div>
+        <div className="peak-operation-form">
+          <label>
+            본관 EHP 그룹 수
+            <input
+              type="number"
+              value={scenario.mainBuildingEhpGroups ?? 5}
+              onChange={(event) => update('mainBuildingEhpGroups', event.target.value)}
+            />
+          </label>
+          <label>
+            별관 EHP 그룹 수
+            <input
+              type="number"
+              value={scenario.annexEhpGroups ?? 2}
+              onChange={(event) => update('annexEhpGroups', event.target.value)}
+            />
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={Boolean(scenario.auditoriumCooling)}
+              onChange={(event) => update('auditoriumCooling', event.target.checked)}
+            />
+            강당 냉난방 사용
+          </label>
+          <label>
+            급식실 고전력 기기 사용 시간
+            <input
+              value={scenario.cafeteriaHighPowerTime ?? '11:00~13:00'}
+              onChange={(event) => update('cafeteriaHighPowerTime', event.target.value)}
+            />
+          </label>
+          <label>
+            특별실 사용 시간
+            <input
+              value={scenario.specialRoomTime ?? '14:00~16:00'}
+              onChange={(event) => update('specialRoomTime', event.target.value)}
+            />
+          </label>
+          <label className="wide-field">
+            제외 공간
+            <input
+              value={scenario.exemptSpaces ?? '보건실, 서버실, 특수학급'}
+              onChange={(event) => update('exemptSpaces', event.target.value)}
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <h2>자동 생성 운영안</h2>
+          <span>수업환경 유지 조건 포함</span>
+        </div>
+        <div className="operation-plan-grid">
+          <article>
+            <span>오늘의 피크관리 운영안</span>
+            <p>{peakOperationPlan.todayPlan}</p>
+          </article>
+          <article>
+            <span>하계 운영안</span>
+            <p>{peakOperationPlan.summerPlan}</p>
+          </article>
+          <article>
+            <span>동계 운영안</span>
+            <p>{peakOperationPlan.winterPlan}</p>
+          </article>
+          <article>
+            <span>예냉/예열 시간</span>
+            <p>{peakOperationPlan.preCoolingHeating}</p>
+          </article>
+        </div>
+        <div className="operation-list-grid">
+          <div>
+            <h3>순차 가동 순서</h3>
+            <ol>
+              {peakOperationPlan.sequentialOrder.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ol>
+          </div>
+          <div>
+            <h3>동시에 켜면 안 되는 설비 조합</h3>
+            <ul>
+              {peakOperationPlan.avoidCombinations.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3>학생 수업환경 예외 조건</h3>
+            <ul>
+              {peakOperationPlan.exceptionConditions.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </section>
 
       <section className="panel">

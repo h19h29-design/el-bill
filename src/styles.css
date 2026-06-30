@@ -47,6 +47,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 178px minmax(0, 1fr);
@@ -1307,14 +1312,338 @@ textarea:focus {
   grid-template-columns: repeat(4, minmax(120px, 1fr));
 }
 
+.auto-cta-panel,
+.diagnosis-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px;
+  background: linear-gradient(135deg, #eef7ff 0%, #ffffff 62%);
+  border: 1px solid #b8d4f0;
+  border-radius: 8px;
+}
+
+.auto-cta-panel span,
+.diagnosis-hero .flow-label {
+  color: var(--blue-700);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.auto-cta-panel h2,
+.diagnosis-hero h2 {
+  margin: 4px 0;
+  color: #08264b;
+  font-size: 26px;
+  line-height: 1.18;
+}
+
+.auto-cta-panel p,
+.diagnosis-hero p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.auto-cta-button,
+.diagnosis-start {
+  min-height: 48px;
+  padding-inline: 18px;
+  font-size: 15px;
+}
+
+.diagnosis-stepper {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.diagnosis-stepper article {
+  display: grid;
+  gap: 6px;
+  min-height: 114px;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.diagnosis-stepper article.complete {
+  border-color: #96c9ef;
+  background: #f5fbff;
+}
+
+.diagnosis-stepper strong {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: #ffffff;
+  background: var(--blue-700);
+  border-radius: 50%;
+}
+
+.diagnosis-stepper span {
+  color: #14365a;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.diagnosis-stepper p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.diagnosis-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.diagnosis-result-card {
+  display: grid;
+  gap: 7px;
+  min-height: 128px;
+  padding: 15px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.diagnosis-result-card.wide {
+  grid-column: span 2;
+}
+
+.result-heading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.diagnosis-result-card span,
+.diagnosis-note-grid strong,
+.operation-plan-grid span,
+.recognition-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.diagnosis-result-card strong {
+  color: #102f52;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.diagnosis-result-card p,
+.diagnosis-note-grid p,
+.operation-plan-grid p {
+  margin: 0;
+  color: #526b85;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.diagnosis-result-card.judgement.good {
+  border-color: #93d2b1;
+  background: #f3fff8;
+}
+
+.diagnosis-result-card.judgement.hold {
+  border-color: #ffc7b0;
+  background: #fff7f3;
+}
+
+.diagnosis-result-card.judgement.review {
+  border-color: #ffd78f;
+  background: #fffaf0;
+}
+
+.diagnosis-actions,
+.recognition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.candidate-table-wrap {
+  overflow-x: auto;
+}
+
+.candidate-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.candidate-table th,
+.candidate-table td {
+  padding: 11px;
+  border-bottom: 1px solid #dbe8f6;
+  text-align: left;
+  vertical-align: top;
+}
+
+.candidate-table th {
+  color: #2b537c;
+  background: #f2f8ff;
+  font-weight: 900;
+}
+
+.candidate-table td span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.judgement-pill {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.judgement-pill.good {
+  color: #0b7a47;
+  background: #dcfce7;
+}
+
+.judgement-pill.hold {
+  color: #a23d22;
+  background: #ffedd5;
+}
+
+.judgement-pill.review {
+  color: #8a5a00;
+  background: #fef3c7;
+}
+
+.diagnosis-note-grid,
+.operation-plan-grid,
+.recognition-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.diagnosis-note-grid article,
+.operation-plan-grid article,
+.recognition-grid article {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.recognition-grid article.danger {
+  border-color: #ffc1b7;
+  background: #fff7f5;
+}
+
+.recognition-grid strong {
+  color: #14365a;
+  line-height: 1.35;
+}
+
+.diagnosis-note-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.diagnosis-note-list li {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  color: #415d78;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.peak-operation-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.checkbox-label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
+.operation-list-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.operation-list-grid > div {
+  padding: 14px;
+  background: #f8fbff;
+  border: 1px solid #dbe8f6;
+  border-radius: 8px;
+}
+
+.operation-list-grid h3 {
+  margin: 0 0 10px;
+  color: #173858;
+  font-size: 14px;
+}
+
+.operation-list-grid ol,
+.operation-list-grid ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  color: #4d667f;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.mini-document-text {
+  margin: 0;
+  color: #405b76;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 1100px) {
   .kpi-grid,
   .dashboard-grid,
-  .document-grid {
+  .document-grid,
+  .diagnosis-result-grid,
+  .diagnosis-note-grid,
+  .operation-plan-grid,
+  .operation-list-grid,
+  .recognition-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .peak-grid {
+  .peak-grid,
+  .diagnosis-stepper,
+  .peak-operation-form {
     grid-template-columns: 1fr;
   }
 
@@ -1361,8 +1690,23 @@ textarea:focus {
   .school-summary,
   .profile-form,
   .rate-setting-main,
-  .season-rate-grid {
+  .season-rate-grid,
+  .diagnosis-result-grid,
+  .diagnosis-note-grid,
+  .operation-plan-grid,
+  .operation-list-grid,
+  .recognition-grid {
     grid-template-columns: 1fr;
+  }
+
+  .auto-cta-panel,
+  .diagnosis-hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .diagnosis-result-card.wide {
+    grid-column: auto;
   }
 
   .main-area {

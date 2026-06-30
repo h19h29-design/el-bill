@@ -3,7 +3,11 @@ import {
   BadgeCheck,
   BarChart3,
   CircleDollarSign,
+  ClipboardCheck,
+  FileText,
+  PlayCircle,
   TrendingDown,
+  UploadCloud,
 } from 'lucide-react'
 import {
   Bar,
@@ -17,7 +21,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { MonthlyBill, PeakScenario, RatePlan } from '../../types'
+import type {
+  AutoDiagnosisResult,
+  MonthlyBill,
+  PeakScenario,
+  RatePlan,
+} from '../../types'
 import {
   formatWon,
   getDashboardSummary,
@@ -30,6 +39,8 @@ interface DashboardProps {
   currentPlan: RatePlan
   candidatePlan: RatePlan
   scenario: PeakScenario
+  diagnosis: AutoDiagnosisResult
+  onStartDiagnosis: () => void
 }
 
 const chartCurrency = (value: number) =>
@@ -40,6 +51,8 @@ export function Dashboard({
   currentPlan,
   candidatePlan,
   scenario,
+  diagnosis,
+  onStartDiagnosis,
 }: DashboardProps) {
   const summary = getDashboardSummary(bills, currentPlan, candidatePlan, scenario)
   const chartData = groupBillsForCharts(bills)
@@ -59,7 +72,37 @@ export function Dashboard({
 
   return (
     <div className="view-stack">
+      <section className="auto-cta-panel">
+        <div>
+          <span>자동진단형 절감 플랫폼</span>
+          <h2>전기요금 자동진단 시작</h2>
+          <p>
+            한전고지서와 파워플래너 자료를 기반으로 추천 요금제, 피크관리 방안, 변경신청 문서까지 자동 생성합니다.
+          </p>
+        </div>
+        <button type="button" className="primary-button auto-cta-button" onClick={onStartDiagnosis}>
+          <PlayCircle size={22} />
+          전기요금 자동진단 시작
+        </button>
+      </section>
+
       <section className="kpi-grid">
+        <article className="kpi-card diagnosis-status-card">
+          <div className="kpi-icon blue">
+            <ClipboardCheck size={22} />
+          </div>
+          <span>자동진단 상태</span>
+          <strong>{diagnosis.completed ? '분석 완료' : '자료 필요'}</strong>
+          <small>{diagnosis.dataConfidence} · 인식률 {diagnosis.dataRecognitionRate}%</small>
+        </article>
+        <article className="kpi-card">
+          <div className="kpi-icon teal">
+            <UploadCloud size={22} />
+          </div>
+          <span>마지막 업로드</span>
+          <strong>{diagnosis.recognizedMonths.toLocaleString('ko-KR')}개월</strong>
+          <small>{diagnosis.lastUploadLabel}</small>
+        </article>
         <article className="kpi-card">
           <div className="kpi-icon blue">
             <CircleDollarSign size={22} />
@@ -100,7 +143,15 @@ export function Dashboard({
           </div>
           <span>추천 요금제</span>
           <strong>{candidatePlan.planName}</strong>
-          <small>{summary.comparison.recommendation}</small>
+          <small>{diagnosis.finalJudgement}</small>
+        </article>
+        <article className="kpi-card">
+          <div className="kpi-icon green">
+            <FileText size={22} />
+          </div>
+          <span>생성 가능 문서</span>
+          <strong>{diagnosis.availableDocumentCount}종</strong>
+          <small>계획안·공문·신청서·근거표</small>
         </article>
       </section>
 

@@ -12,6 +12,7 @@ import {
   type ParsedSheet,
   type WorkbookParseResult,
 } from '../../lib/excel'
+import { summarizeWorkbookRecognition } from '../../lib/diagnosis'
 import { BillTable } from './BillTable'
 
 interface BillUploadProps {
@@ -45,6 +46,7 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
   const [selectedSheetName, setSelectedSheetName] = useState('')
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [message, setMessage] = useState('')
+  const [showManualMapping, setShowManualMapping] = useState(false)
 
   const selectedSheet: ParsedSheet | undefined = useMemo(
     () =>
@@ -60,11 +62,16 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
         .slice(0, 12),
     [bills],
   )
+  const recognition = useMemo(
+    () => summarizeWorkbookRecognition(parseResult, mapping),
+    [parseResult, mapping],
+  )
 
   const handleFile = async (file: File) => {
     const result = await parseWorkbook(file)
     setParseResult(result)
     setSelectedSheetName(result.sheets[0]?.name ?? '')
+    setShowManualMapping(false)
     const headers = result.sheets[0]?.headers ?? []
     setMapping({
       year: guessHeader(headers, '연도'),
@@ -77,20 +84,7 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
       energyChargeWon: guessHeader(headers, '전력량요금'),
     })
 
-    if (result.autoRows.length) {
-      onBillsChange(result.autoRows)
-      const isPowerPlannerExport = result.diagnostics.some((item) =>
-        item.includes('파워플래너'),
-      )
-      setMessage(
-        isPowerPlannerExport
-          ? `파워플래너 월별청구요금 ${result.autoRows.length.toLocaleString('ko-KR')}건을 반영했습니다.`
-          : `연도별 시트 자동 병합으로 ${result.autoRows.length.toLocaleString('ko-KR')}건을 반영했습니다.`,
-      )
-      return
-    }
-
-    setMessage('자동 병합이 어려워 컬럼 매핑을 확인해 주세요.')
+    setMessage('파일을 읽었습니다. 자동 인식 결과를 확인한 뒤 분석을 시작해 주세요.')
   }
 
   const handleDrop = (
@@ -127,6 +121,7 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
       diagnostics: ['CSV는 수동 컬럼 매핑으로 처리합니다.'],
     })
     setSelectedSheetName(file.name)
+    setShowManualMapping(false)
     setMessage('CSV를 읽었습니다. 필수 컬럼 매핑을 확인해 주세요.')
   }
 
@@ -139,6 +134,23 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
     }
     onBillsChange(mapped)
     setMessage(`${mapped.length.toLocaleString('ko-KR')}건을 매핑해 반영했습니다.`)
+  }
+
+  const applyRecognizedMapping = () => {
+    if (!parseResult) return
+    if (parseResult.autoRows.length) {
+      onBillsChange(parseResult.autoRows)
+      const isPowerPlannerExport = parseResult.diagnostics.some((item) =>
+        item.includes('파워플래너'),
+      )
+      setMessage(
+        isPowerPlannerExport
+          ? `파워플래너 월별청구요금 ${parseResult.autoRows.length.toLocaleString('ko-KR')}건으로 자동진단을 시작했습니다.`
+          : `연도별 시트 자동 병합 ${parseResult.autoRows.length.toLocaleString('ko-KR')}건으로 자동진단을 시작했습니다.`,
+      )
+      return
+    }
+    applyMapping()
   }
 
   return (
@@ -228,7 +240,66 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
         {message && <p className="status-line">{message}</p>}
       </section>
 
-      {parseResult && selectedSheet && (
+      {recognition && (
+        <section className="panel recognition-panel">
+          <div className="panel-title">
+            <h2>자동 인식 결과</h2>
+            <span>매핑 신뢰도 {recognition.mappingConfidence}%</span>
+          </div>
+          <div className="recognition-grid">
+            <article>
+              <span>인식된 시트</span>
+              <strong>{recognition.sheetNames.join(', ') || '없음'}</strong>
+            </article>
+            <article>
+              <span>인식된 연도</span>
+              <strong>
+                {recognition.recognizedYears.length
+                  ? recognition.recognizedYears.join(', ')
+                  : '자동 추정'}
+              </strong>
+            </article>
+            <article>
+              <span>필수 컬럼</span>
+              <strong>{recognition.requiredColumns.join(', ') || '없음'}</strong>
+            </article>
+            <article className={recognition.missingRequiredColumns.length ? 'danger' : ''}>
+              <span>누락 컬럼</span>
+              <strong>
+                {recognition.missingRequiredColumns.length
+                  ? recognition.missingRequiredColumns.join(', ')
+                  : '없음'}
+              </strong>
+            </article>
+            <article>
+              <span>선택 컬럼</span>
+              <strong>{recognition.optionalColumns.join(', ') || '없음'}</strong>
+            </article>
+          </div>
+          <p className={recognition.canAnalyze ? 'status-line' : 'empty-state'}>
+            {recognition.guidance}
+          </p>
+          <div className="recognition-actions">
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!recognition.canAnalyze}
+              onClick={applyRecognizedMapping}
+            >
+              이 매핑으로 분석 시작
+            </button>
+            <button
+              type="button"
+              className="outline-action"
+              onClick={() => setShowManualMapping(true)}
+            >
+              수동 매핑 수정
+            </button>
+          </div>
+        </section>
+      )}
+
+      {parseResult && selectedSheet && showManualMapping && (
         <section className="panel">
           <div className="panel-title">
             <h2>컬럼 매핑</h2>

@@ -2,18 +2,22 @@ import { useMemo, useState } from 'react'
 import { CheckCircle2, ClipboardCopy, Download, Eye, FileArchive } from 'lucide-react'
 import JSZip from 'jszip'
 import type {
+  AutoDiagnosisResult,
   MonthlyBill,
   PeakScenario,
   PlanComparison,
   SchoolProfile,
 } from '../../types'
 import { buildDocumentBundle, rateChangeCaution } from '../../lib/documentTemplates'
+import type { PeakOperationPlan } from '../../lib/peakOperations'
 
 interface DocumentGeneratorProps {
   profile: SchoolProfile
   latestBill: MonthlyBill | undefined
   comparison: PlanComparison
   scenario: PeakScenario
+  diagnosis: AutoDiagnosisResult
+  peakOperationPlan: PeakOperationPlan
 }
 
 const copyText = async (text: string) => {
@@ -34,12 +38,22 @@ export function DocumentGenerator({
   latestBill,
   comparison,
   scenario,
+  diagnosis,
+  peakOperationPlan,
 }: DocumentGeneratorProps) {
   const [selectedPreview, setSelectedPreview] = useState<'plan' | 'letter' | 'application'>('plan')
   const [status, setStatus] = useState('')
   const bundle = useMemo(
-    () => buildDocumentBundle(profile, latestBill, comparison, scenario),
-    [profile, latestBill, comparison, scenario],
+    () =>
+      buildDocumentBundle(
+        profile,
+        latestBill,
+        comparison,
+        scenario,
+        diagnosis,
+        peakOperationPlan,
+      ),
+    [profile, latestBill, comparison, scenario, diagnosis, peakOperationPlan],
   )
 
   const downloadPdf = async (targetId: string, filename: string) => {
@@ -68,6 +82,8 @@ export function DocumentGenerator({
     const zip = new JSZip()
     zip.file('전기요금제_변경계획안.txt', bundle.planText)
     zip.file('한전_제출공문.txt', bundle.kepcoLetterText)
+    zip.file('계산근거_요약표.txt', bundle.calculationSummaryText)
+    zip.file('담당자_검토필요항목.txt', bundle.reviewItems.join('\n'))
     zip.file(
       '변경신청서_자동입력항목.json',
       JSON.stringify(bundle.applicationPreviewData, null, 2),
@@ -183,6 +199,23 @@ export function DocumentGenerator({
             <FileArchive size={16} />
             전체 다운로드 (ZIP)
           </button>
+        </article>
+
+        <article className="checklist-card">
+          <h2>계산 근거 요약표</h2>
+          <p className="mini-document-text">{bundle.calculationSummaryText}</p>
+        </article>
+
+        <article className="checklist-card">
+          <h2>담당자 검토 필요 항목</h2>
+          <ul className="check-list">
+            {bundle.reviewItems.map((item) => (
+              <li key={item}>
+                <CheckCircle2 size={18} />
+                {item}
+              </li>
+            ))}
+          </ul>
         </article>
       </section>
 

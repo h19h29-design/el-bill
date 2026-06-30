@@ -131,4 +131,10 @@ export const defaultScenario: PeakScenario = {
   winterIncreasePercent: 8,
   analysisYear: 2025,
   memo: 'EHP 증설 예정. 강당과 급식실 동시 피크 시간 분산 필요',
+  mainBuildingEhpGroups: 5,
+  annexEhpGroups: 2,
+  auditoriumCooling: true,
+  cafeteriaHighPowerTime: '11:00~13:00',
+  specialRoomTime: '14:00~16:00',
+  exemptSpaces: '보건실, 서버실, 특수학급',
 }

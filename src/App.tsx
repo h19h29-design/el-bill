@@ -3,13 +3,14 @@ import { AlertCircle, Building2, CalendarDays, ClipboardCheck } from 'lucide-rea
 import { Sidebar } from './components/layout/Sidebar'
 import { TopNotice } from './components/layout/TopNotice'
 import { Dashboard } from './components/dashboard/Dashboard'
+import { AutoDiagnosis } from './components/diagnosis/AutoDiagnosis'
 import { BillUpload } from './components/bills/BillUpload'
 import { PowerPlannerUpload } from './components/powerPlanner/PowerPlannerUpload'
 import { RateSimulator } from './components/rates/RateSimulator'
 import { PeakManager } from './components/peak/PeakManager'
 import { DocumentGenerator } from './components/docs/DocumentGenerator'
 import { RatePlanSettings } from './components/settings/RatePlanSettings'
-import { defaultRatePlans, currentPlanId, recommendedPlanId } from './data/ratePlans'
+import { defaultRatePlans } from './data/ratePlans'
 import {
   defaultScenario,
   defaultSchoolProfile,
@@ -17,7 +18,9 @@ import {
 } from './data/sampleBills'
 import type { MonthlyBill, PeakScenario, RatePlan, SchoolProfile, ViewKey } from './types'
 import type { PowerPlannerDataSource } from './types'
-import { comparePlans, sortBillsChronologically } from './lib/calculations'
+import { sortBillsChronologically } from './lib/calculations'
+import { buildAutoDiagnosis } from './lib/diagnosis'
+import { buildPeakOperationPlan } from './lib/peakOperations'
 import { createExpiry, loadWithExpiry, purgeExpiredKeys, saveWithExpiry } from './lib/storage'
 
 const billsKey = 'el-bill:bills'
@@ -78,15 +81,25 @@ function App() {
     }
   }, [powerPlannerDataSource])
 
-  const currentPlan =
-    ratePlans.find((plan) => plan.id === currentPlanId) ?? ratePlans[0]
-  const candidatePlan =
-    ratePlans.find((plan) => plan.id === recommendedPlanId) ?? ratePlans[1]
   const sortedBills = useMemo(() => sortBillsChronologically(bills), [bills])
   const latestBill = sortedBills.at(-1)
-  const comparison = useMemo(
-    () => comparePlans(bills, currentPlan, candidatePlan, scenario),
-    [bills, currentPlan, candidatePlan, scenario],
+  const diagnosis = useMemo(
+    () =>
+      buildAutoDiagnosis({
+        bills,
+        profile,
+        ratePlans,
+        scenario,
+        powerPlannerDataSource,
+      }),
+    [bills, profile, ratePlans, scenario, powerPlannerDataSource],
+  )
+  const currentPlan = diagnosis.currentPlan
+  const candidatePlan = diagnosis.recommendedPlan
+  const comparison = diagnosis.comparison
+  const peakOperationPlan = useMemo(
+    () => buildPeakOperationPlan(scenario),
+    [scenario],
   )
 
   const resetSample = () => {
@@ -129,7 +142,12 @@ function App() {
               currentPlan={currentPlan}
               candidatePlan={candidatePlan}
               scenario={scenario}
+              diagnosis={diagnosis}
+              onStartDiagnosis={() => setActiveView('diagnosis')}
             />
+          )}
+          {activeView === 'diagnosis' && (
+            <AutoDiagnosis diagnosis={diagnosis} onNavigate={setActiveView} />
           )}
           {activeView === 'school' && (
             <SchoolProfilePanel profile={profile} onProfileChange={setProfile} />
@@ -148,6 +166,7 @@ function App() {
               bills={bills}
               currentPlan={currentPlan}
               candidatePlan={candidatePlan}
+              candidates={diagnosis.topCandidates}
               scenario={scenario}
               onScenarioChange={setScenario}
             />
@@ -157,6 +176,7 @@ function App() {
               scenario={scenario}
               onScenarioChange={setScenario}
               powerPlannerDataSource={powerPlannerDataSource}
+              peakOperationPlan={peakOperationPlan}
             />
           )}
           {activeView === 'docs' && (
@@ -165,6 +185,8 @@ function App() {
               latestBill={latestBill}
               comparison={comparison}
               scenario={scenario}
+              diagnosis={diagnosis}
+              peakOperationPlan={peakOperationPlan}
             />
           )}
           {activeView === 'settings' && (
@@ -182,38 +204,43 @@ const viewMeta: Record<ViewKey, { step: string; title: string; description: stri
     title: '통합 대시보드',
     description: '전기요금, 사용량, 피크, 추천 요금제를 한 화면에서 점검합니다.',
   },
-  school: {
+  diagnosis: {
     step: '02',
+    title: '자동진단',
+    description: '자료 업로드부터 추천, 피크관리, 변경신청 패키지까지 한 흐름으로 안내합니다.',
+  },
+  school: {
+    step: '03',
     title: '학교정보',
     description: '문서와 계산에 들어가는 학교 프로필을 익명 샘플 기준으로 관리합니다.',
   },
   bills: {
-    step: '03',
+    step: '04',
     title: '월별 한전고지서 입력',
     description: '엑셀·CSV 업로드와 컬럼 매핑으로 월별 고지서 데이터를 반영합니다.',
   },
   rates: {
-    step: '05',
+    step: '06',
     title: '요금제 비교 시뮬레이션',
     description: '최근 12개월, 최근 3년, 피크 시나리오 기준으로 변경 효과를 추정합니다.',
   },
   peak: {
-    step: '06',
+    step: '07',
     title: '전력피크 관리',
     description: '목표 피크 대비 위험도를 판정하고 운영 가이드를 자동 구성합니다.',
   },
   docs: {
-    step: '07',
-    title: '문서 자동 생성',
-    description: '내부 계획안, 한전 공문, 변경신청서 미리보기를 생성합니다.',
+    step: '08',
+    title: '변경신청 패키지 자동 생성',
+    description: '계획안, 한전 공문, 변경신청서, 계산 근거, 검토 항목을 생성합니다.',
   },
   settings: {
-    step: '08',
+    step: '09',
     title: '설정',
     description: '학교용 요금제 단가와 적용일을 수정해 시나리오를 확장합니다.',
   },
   powerPlanner: {
-    step: '04',
+    step: '05',
     title: '파워플래너 자료 가져오기',
     description: '한전 파워플래너에서 내려받거나 정리한 엑셀/CSV를 업로드해 보조 분석합니다.',
   },
