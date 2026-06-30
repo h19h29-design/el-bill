@@ -1,4 +1,9 @@
-import { useMemo, useState } from 'react'
+import {
+  useMemo,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+} from 'react'
 import { FileDown, FileSpreadsheet, UploadCloud } from 'lucide-react'
 import type { MonthlyBill, SchoolProfile } from '../../types'
 import {
@@ -88,6 +93,21 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
     setMessage('자동 병합이 어려워 컬럼 매핑을 확인해 주세요.')
   }
 
+  const handleDrop = (
+    event: DragEvent<HTMLLabelElement>,
+    handler: (file: File) => void,
+  ) => {
+    event.preventDefault()
+    const file = event.dataTransfer.files[0]
+    if (file) handler(file)
+  }
+
+  const openNestedFileInput = (event: KeyboardEvent<HTMLLabelElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    event.currentTarget.querySelector('input')?.click()
+  }
+
   const handleCsv = async (file: File) => {
     const text = await file.text()
     const rows = text
@@ -148,7 +168,15 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
           <p>최근 3년 자료 업로드 가능. 첨부 엑셀처럼 연도별 시트가 나뉜 경우 자동 병합을 시도합니다.</p>
         </div>
         <div className="upload-actions">
-          <label className="upload-drop">
+          <label
+            className="upload-drop"
+            role="button"
+            tabIndex={0}
+            aria-label="엑셀 파일 선택 또는 드롭"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => handleDrop(event, (file) => void handleFile(file))}
+            onKeyDown={openNestedFileInput}
+          >
             <UploadCloud size={24} />
             <span>파일을 선택하거나 드롭</span>
             <input
@@ -160,7 +188,13 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
               }}
             />
           </label>
-          <label className="outline-action">
+          <label
+            className="outline-action"
+            role="button"
+            tabIndex={0}
+            aria-label="엑셀 업로드"
+            onKeyDown={openNestedFileInput}
+          >
             <FileSpreadsheet size={18} />
             엑셀 업로드
             <input
@@ -172,7 +206,13 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
               }}
             />
           </label>
-          <label className="outline-action">
+          <label
+            className="outline-action"
+            role="button"
+            tabIndex={0}
+            aria-label="CSV 불러오기"
+            onKeyDown={openNestedFileInput}
+          >
             <FileDown size={18} />
             CSV 불러오기
             <input

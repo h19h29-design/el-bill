@@ -1,4 +1,9 @@
-import { useMemo, useState } from 'react'
+import {
+  useMemo,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+} from 'react'
 import {
   AlertTriangle,
   DatabaseZap,
@@ -69,6 +74,18 @@ export function PowerPlannerUpload({
     setDataType(guessPowerPlannerDataType(firstSheet?.headers ?? []))
     setMapping(guessPowerPlannerMapping(firstSheet?.headers ?? []))
     setMessage('파일을 읽었습니다. 데이터 유형과 컬럼 매핑을 확인해 주세요.')
+  }
+
+  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault()
+    const file = event.dataTransfer.files[0]
+    if (file) void handleFile(file)
+  }
+
+  const openNestedFileInput = (event: KeyboardEvent<HTMLLabelElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    event.currentTarget.querySelector('input')?.click()
   }
 
   const applyMapping = () => {
@@ -149,7 +166,15 @@ export function PowerPlannerUpload({
               ))}
             </select>
           </label>
-          <label className="upload-drop power-upload">
+          <label
+            className="upload-drop power-upload"
+            role="button"
+            tabIndex={0}
+            aria-label="파워플래너 엑셀 또는 CSV 선택"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleDrop}
+            onKeyDown={openNestedFileInput}
+          >
             <UploadCloud size={24} />
             <span>파워플래너 엑셀/CSV 선택</span>
             <input

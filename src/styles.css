@@ -545,6 +545,19 @@ textarea:focus {
   border: 1px dashed #9dbde0;
   border-radius: 7px;
   font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.upload-drop:hover,
+.upload-drop:focus-visible {
+  background: #f2f8ff;
+  border-color: var(--blue-600);
+  box-shadow: 0 0 0 3px rgba(11, 114, 231, 0.12);
+  outline: none;
 }
 
 .power-info-grid {
@@ -657,6 +670,14 @@ textarea:focus {
   color: #214d7c;
   background: #ffffff;
   border: 1px solid #b7d0eb;
+  cursor: pointer;
+}
+
+.outline-action:hover,
+.outline-action:focus-visible {
+  border-color: var(--blue-600);
+  box-shadow: 0 0 0 3px rgba(11, 114, 231, 0.1);
+  outline: none;
 }
 
 .status-line {
