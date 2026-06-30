@@ -81,6 +81,11 @@ export interface PowerPlannerRecord {
   usageKwh?: number
   maxDemandKw?: number
   estimatedBillWon?: number
+  contractPowerKw?: number
+  appliedPowerKw?: number
+  usageDays?: number
+  laggingPowerFactorPercent?: number
+  leadingPowerFactorPercent?: number
   loadType?: string
   patternLabel?: string
   patternSummary?: string

@@ -17,8 +17,10 @@ import {
 } from '../../lib/excel'
 import {
   createPowerPlannerDataSource,
+  getMissingPowerPlannerMappings,
   getPowerPlannerSheetLabel,
   getPowerPlannerSummary,
+  guessPowerPlannerDataType,
   guessPowerPlannerMapping,
   mapRowsToPowerPlannerRecords,
   powerPlannerDataTypeLabels,
@@ -64,6 +66,7 @@ export function PowerPlannerUpload({
     setParseResult(result)
     setSelectedSheetName(firstSheet?.name ?? '')
     setSourceName(file.name)
+    setDataType(guessPowerPlannerDataType(firstSheet?.headers ?? []))
     setMapping(guessPowerPlannerMapping(firstSheet?.headers ?? []))
     setMessage('파일을 읽었습니다. 데이터 유형과 컬럼 매핑을 확인해 주세요.')
   }
@@ -74,7 +77,7 @@ export function PowerPlannerUpload({
       return
     }
 
-    const missing = required.filter((field) => !mapping[field])
+    const missing = getMissingPowerPlannerMappings(dataType, mapping)
     if (missing.length) {
       setMessage(`필수 매핑이 비어 있습니다: ${missing.join(', ')}`)
       return
@@ -185,6 +188,7 @@ export function PowerPlannerUpload({
                     (sheet) => sheet.name === nextSheetName,
                   )
                   setSelectedSheetName(nextSheetName)
+                  setDataType(guessPowerPlannerDataType(nextSheet?.headers ?? []))
                   setMapping(guessPowerPlannerMapping(nextSheet?.headers ?? []))
                 }}
               >

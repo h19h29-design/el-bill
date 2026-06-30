@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   createPowerPlannerDataSource,
+  getMissingPowerPlannerMappings,
   getHourlyUsageRecords,
   getPowerPlannerSummary,
+  guessPowerPlannerDataType,
+  guessPowerPlannerMapping,
   mapRowsToPowerPlannerRecords,
   powerPlannerMvpGuardrail,
   powerPlannerUploadNotice,
@@ -27,6 +30,39 @@ describe('power planner data source harness', () => {
       hour: 11,
       usageKwh: 186,
       dataType: 'hourlyUsage',
+    })
+  })
+
+  it('maps Power Planner monthly bill rows that use a combined year-month column', () => {
+    const rows = [
+      {
+        연월: '2026년 06월',
+        '계약전력(kW)': '700',
+        '요금적용전력(kW)': '493',
+        '사용전력량(kWh)': '48,365',
+        '사용일수(일)': '31',
+        '지상역률(%)': '97',
+        '진상역률(%)': '89',
+        '청구요금(원)': '7,138,790',
+      },
+    ]
+    const mapping = guessPowerPlannerMapping(Object.keys(rows[0]))
+    const records = mapRowsToPowerPlannerRecords(rows, 'monthlyUsage', mapping)
+
+    expect(guessPowerPlannerDataType(Object.keys(rows[0]))).toBe('monthlyUsage')
+    expect(getMissingPowerPlannerMappings('monthlyUsage', mapping)).toHaveLength(0)
+    expect(records[0]).toMatchObject({
+      dataType: 'monthlyUsage',
+      date: '2026-06',
+      year: 2026,
+      month: 6,
+      usageKwh: 48365,
+      estimatedBillWon: 7138790,
+      contractPowerKw: 700,
+      appliedPowerKw: 493,
+      usageDays: 31,
+      laggingPowerFactorPercent: 97,
+      leadingPowerFactorPercent: 89,
     })
   })
 

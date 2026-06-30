@@ -31,15 +31,56 @@ const asNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+const inferYearMonthDay = (value: unknown) => {
+  if (value instanceof Date) {
+    return {
+      year: value.getFullYear(),
+      month: value.getMonth() + 1,
+      day: value.getDate(),
+    }
+  }
+  const raw = normalize(value)
+  if (!raw) return {}
+  const normalized = raw.replace(/[./]/g, '-')
+  const match = normalized.match(/(\d{4})\D+(\d{1,2})(?:\D+(\d{1,2}))?/)
+  if (!match) return {}
+  const [, year, month, day] = match
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: day ? Number(day) : undefined,
+  }
+}
+
 const asDate = (value: unknown) => {
   if (value instanceof Date) return value.toISOString().slice(0, 10)
   const raw = normalize(value)
   if (!raw) return undefined
-  const normalized = raw.replace(/[./]/g, '-')
-  const match = normalized.match(/(\d{4})-(\d{1,2})-(\d{1,2})/)
-  if (!match) return raw
-  const [, year, month, day] = match
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  const inferred = inferYearMonthDay(raw)
+  if (!inferred.year || !inferred.month) return raw
+  const month = String(inferred.month).padStart(2, '0')
+  if (!inferred.day) return `${inferred.year}-${month}`
+  return `${inferred.year}-${month}-${String(inferred.day).padStart(2, '0')}`
+}
+
+const asYear = (...values: unknown[]) => {
+  for (const value of values) {
+    const direct = asNumber(value)
+    if (direct && direct >= 2000) return direct
+    const inferred = inferYearMonthDay(value).year
+    if (inferred) return inferred
+  }
+  return undefined
+}
+
+const asMonthValue = (...values: unknown[]) => {
+  for (const value of values) {
+    const inferred = inferYearMonthDay(value).month
+    if (inferred) return inferred
+    const direct = asNumber(value)
+    if (direct && direct >= 1 && direct <= 12) return direct
+  }
+  return undefined
 }
 
 const inferHour = (value: unknown) => {
@@ -50,14 +91,19 @@ const inferHour = (value: unknown) => {
 }
 
 export const powerPlannerMappingFields = [
-  ['date', '일자/검침일'],
+  ['date', '연월/일자/검침일'],
   ['year', '연도'],
   ['month', '월'],
   ['day', '일'],
   ['hour', '시간대'],
   ['usageKwh', '사용량(kWh)'],
   ['maxDemandKw', '최대수요전력(kW)'],
-  ['estimatedBillWon', '예상요금(원)'],
+  ['estimatedBillWon', '예상/청구요금(원)'],
+  ['contractPowerKw', '계약전력(kW)'],
+  ['appliedPowerKw', '요금적용전력(kW)'],
+  ['usageDays', '사용일수(일)'],
+  ['laggingPowerFactorPercent', '지상역률(%)'],
+  ['leadingPowerFactorPercent', '진상역률(%)'],
   ['loadType', '부하구분'],
   ['patternLabel', '패턴명'],
   ['patternSummary', '분석결과'],
@@ -66,12 +112,26 @@ export const powerPlannerMappingFields = [
 export const requiredPowerPlannerMapping = (
   dataType: PowerPlannerDataType,
 ): string[] => {
-  if (dataType === 'monthlyUsage') return ['year', 'month', 'usageKwh']
+  if (dataType === 'monthlyUsage') return ['date', 'usageKwh']
   if (dataType === 'dailyUsage') return ['date', 'usageKwh']
   if (dataType === 'hourlyUsage') return ['date', 'hour', 'usageKwh']
   if (dataType === 'maxDemand') return ['maxDemandKw']
   if (dataType === 'estimatedBill') return ['estimatedBillWon']
   return ['patternSummary']
+}
+
+export const getMissingPowerPlannerMappings = (
+  dataType: PowerPlannerDataType,
+  mapping: Record<string, string>,
+) => {
+  const has = (key: string) => Boolean(mapping[key])
+  if (dataType === 'monthlyUsage') {
+    return [
+      ...(!has('date') && (!has('year') || !has('month')) ? ['date'] : []),
+      ...(!has('usageKwh') ? ['usageKwh'] : []),
+    ]
+  }
+  return requiredPowerPlannerMapping(dataType).filter((field) => !has(field))
 }
 
 export const guessPowerPlannerMapping = (
@@ -82,18 +142,64 @@ export const guessPowerPlannerMapping = (
     ''
 
   return {
-    date: find('일자', '날짜', '검침일', '사용일'),
-    year: find('연도', '년'),
-    month: find('월'),
+    date: find('연월', '일자', '날짜', '검침일', '사용일'),
+    year: find('연도', '연월', '년'),
+    month: find('월', '연월'),
     day: find('일'),
     hour: find('시간', '시각', '시간대'),
-    usageKwh: find('사용량', 'kWh', '전력량'),
+    usageKwh: find('사용전력량', '사용량', 'kWh', '전력량'),
     maxDemandKw: find('최대수요', '수요전력', '피크'),
-    estimatedBillWon: find('예상요금', '월예상', '요금'),
+    estimatedBillWon: find('청구요금', '예상요금', '월예상', '총요금', '전기요금'),
+    contractPowerKw: find('계약전력'),
+    appliedPowerKw: find('요금적용전력'),
+    usageDays: find('사용일수'),
+    laggingPowerFactorPercent: find('지상역률'),
+    leadingPowerFactorPercent: find('진상역률'),
     loadType: find('부하', '경부하', '중간부하', '최대부하'),
     patternLabel: find('패턴', '유형'),
     patternSummary: find('분석', '결과', '내용', '메모'),
   }
+}
+
+export const guessPowerPlannerDataType = (
+  headers: string[],
+): PowerPlannerDataType => {
+  const has = (...patterns: string[]) =>
+    headers.some((header) =>
+      patterns.some((pattern) => header.includes(pattern)),
+    )
+
+  if (has('시간', '시간대', '시각') && has('사용전력량', '사용량', 'kWh')) {
+    return 'hourlyUsage'
+  }
+  if (has('연월', '사용월') && has('사용전력량', '사용량', 'kWh')) {
+    return 'monthlyUsage'
+  }
+  if (has('최대수요', '수요전력', '피크')) return 'maxDemand'
+  if (has('청구요금', '예상요금', '월예상', '전기요금')) return 'estimatedBill'
+  if (has('패턴', '분석결과', '소비패턴')) return 'patternAnalysis'
+  return 'hourlyUsage'
+}
+
+const hasPowerPlannerRequiredValues = (
+  record: PowerPlannerRecord,
+  dataType: PowerPlannerDataType,
+) => {
+  if (dataType === 'monthlyUsage') {
+    return (
+      record.usageKwh !== undefined &&
+      (Boolean(record.date) || Boolean(record.year && record.month))
+    )
+  }
+  if (dataType === 'dailyUsage') return Boolean(record.date && record.usageKwh)
+  if (dataType === 'hourlyUsage') {
+    return Boolean(
+      record.date && record.hour !== undefined && record.usageKwh !== undefined,
+    )
+  }
+  if (dataType === 'maxDemand') return record.maxDemandKw !== undefined
+  if (dataType === 'estimatedBill') return record.estimatedBillWon !== undefined
+  return Boolean(record.patternSummary)
 }
 
 export const mapRowsToPowerPlannerRecords = (
@@ -101,33 +207,36 @@ export const mapRowsToPowerPlannerRecords = (
   dataType: PowerPlannerDataType,
   mapping: Record<string, string>,
 ): PowerPlannerRecord[] => {
-  const required = requiredPowerPlannerMapping(dataType)
-
   return rows
     .map((row, index) => {
+      const dateValue = row[mapping.date]
       const record: PowerPlannerRecord = {
         id: `pp-${dataType}-${index}-${Date.now()}`,
         dataType,
-        date: asDate(row[mapping.date]),
-        year: asNumber(row[mapping.year]),
-        month: asNumber(row[mapping.month]),
-        day: asNumber(row[mapping.day]),
+        date: asDate(dateValue),
+        year: asYear(row[mapping.year], dateValue),
+        month: asMonthValue(row[mapping.month], dateValue),
+        day: asNumber(row[mapping.day]) ?? inferYearMonthDay(dateValue).day,
         hour: inferHour(row[mapping.hour]),
         usageKwh: asNumber(row[mapping.usageKwh]),
         maxDemandKw: asNumber(row[mapping.maxDemandKw]),
         estimatedBillWon: asNumber(row[mapping.estimatedBillWon]),
+        contractPowerKw: asNumber(row[mapping.contractPowerKw]),
+        appliedPowerKw: asNumber(row[mapping.appliedPowerKw]),
+        usageDays: asNumber(row[mapping.usageDays]),
+        laggingPowerFactorPercent: asNumber(
+          row[mapping.laggingPowerFactorPercent],
+        ),
+        leadingPowerFactorPercent: asNumber(
+          row[mapping.leadingPowerFactorPercent],
+        ),
         loadType: normalize(row[mapping.loadType]) || undefined,
         patternLabel: normalize(row[mapping.patternLabel]) || undefined,
         patternSummary: normalize(row[mapping.patternSummary]) || undefined,
         sourceRowIndex: index,
       }
 
-      const hasRequired = required.every((field) => {
-        const value = record[field as keyof PowerPlannerRecord]
-        return value !== undefined && value !== ''
-      })
-
-      return hasRequired ? record : null
+      return hasPowerPlannerRequiredValues(record, dataType) ? record : null
     })
     .filter((record): record is PowerPlannerRecord => Boolean(record))
 }

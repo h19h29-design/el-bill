@@ -74,8 +74,13 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
 
     if (result.autoRows.length) {
       onBillsChange(result.autoRows)
+      const isPowerPlannerExport = result.diagnostics.some((item) =>
+        item.includes('파워플래너'),
+      )
       setMessage(
-        `연도별 시트 자동 병합으로 ${result.autoRows.length.toLocaleString('ko-KR')}건을 반영했습니다.`,
+        isPowerPlannerExport
+          ? `파워플래너 월별청구요금 ${result.autoRows.length.toLocaleString('ko-KR')}건을 반영했습니다.`
+          : `연도별 시트 자동 병합으로 ${result.autoRows.length.toLocaleString('ko-KR')}건을 반영했습니다.`,
       )
       return
     }

@@ -28,11 +28,39 @@ const asMonth = (value: unknown) => {
   return month >= 1 && month <= 12 ? month : 0
 }
 
+const asYearMonth = (value: unknown) => {
+  const match = normalize(value).match(/(\d{4})\D+(\d{1,2})/)
+  if (!match) return { year: 0, month: 0 }
+  const year = Number(match[1])
+  const month = Number(match[2])
+  return {
+    year: Number.isFinite(year) ? year : 0,
+    month: month >= 1 && month <= 12 ? month : 0,
+  }
+}
+
 const inferYearFromSheetName = (name: string) => {
   const match = name.match(/(\d{2,4})/)
   if (!match) return 0
   const raw = Number(match[1])
   return raw < 100 ? 2000 + raw : raw
+}
+
+const decodeHtmlEntities = (value: string) =>
+  value
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+
+const stripHtml = (value: string) =>
+  decodeHtmlEntities(value.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim()
+
+const getHtmlAttr = (attrs: string, name: string) => {
+  const match = attrs.match(new RegExp(`${name}=["']([^"']*)["']`, 'i'))
+  return match ? decodeHtmlEntities(match[1]) : ''
 }
 
 const makeImportedBill = (
@@ -111,10 +139,106 @@ export const parseKnownSchoolWorkbook = (
   return { rows, diagnostics }
 }
 
+const getRowValue = (row: Record<string, unknown>, ...patterns: string[]) => {
+  const found = Object.entries(row).find(([key]) =>
+    patterns.some((pattern) => key.includes(pattern)),
+  )
+  return found?.[1]
+}
+
+const parsePowerPlannerMonthlyBills = (sheet: ParsedSheet): MonthlyBill[] =>
+  sheet.rows
+    .map((row, index) => {
+      const { year, month } = asYearMonth(getRowValue(row, '연월', '사용월'))
+      const usageKwh = asNumber(getRowValue(row, '사용전력량', '사용량'))
+      const totalBillWon = asNumber(getRowValue(row, '청구요금', '예상요금'))
+      const appliedPowerKw = asNumber(getRowValue(row, '요금적용전력'))
+      if (!year || !month || !usageKwh || !totalBillWon) return null
+
+      const bill = makeImportedBill(year, month, usageKwh, totalBillWon)
+      const baseChargeWon = appliedPowerKw
+        ? Math.round(appliedPowerKw * 6370)
+        : bill.baseChargeWon
+      return {
+        ...bill,
+        id: `power-planner-${year}-${month}-${index}`,
+        appliedPowerKw: appliedPowerKw || bill.appliedPowerKw,
+        maxDemandKw: appliedPowerKw || bill.maxDemandKw,
+        baseChargeWon,
+        energyChargeWon: Math.max(0, totalBillWon - baseChargeWon),
+        note: '파워플래너 월별청구요금 업로드',
+      }
+    })
+    .filter((bill): bill is MonthlyBill => Boolean(bill))
+
+const parsePowerPlannerHtmlSheet = (text: string): ParsedSheet | null => {
+  if (!text.includes('ui-jqgrid') || !text.includes('aria-describedby="grid_')) {
+    return null
+  }
+
+  const columns: Array<{ id: string; label: string }> = []
+  const headerRegex = /<th\b([^>]*)>([\s\S]*?)<\/th>/gi
+  let headerMatch: RegExpExecArray | null
+  while ((headerMatch = headerRegex.exec(text))) {
+    const id = getHtmlAttr(headerMatch[1], 'id').replace(/^grid_/, '')
+    if (!id) continue
+    const label = stripHtml(headerMatch[2])
+    if (!label) continue
+    columns.push({ id, label })
+  }
+
+  const labelById = new Map(columns.map((column) => [column.id, column.label]))
+  if (!labelById.size) return null
+
+  const rows: Record<string, unknown>[] = []
+  const rowRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
+  let rowMatch: RegExpExecArray | null
+  while ((rowMatch = rowRegex.exec(text))) {
+    const row: Record<string, unknown> = {}
+    const cellRegex = /<td\b([^>]*)>([\s\S]*?)<\/td>/gi
+    let cellMatch: RegExpExecArray | null
+    while ((cellMatch = cellRegex.exec(rowMatch[1]))) {
+      const describedBy = getHtmlAttr(cellMatch[1], 'aria-describedby').replace(
+        /^grid_/,
+        '',
+      )
+      const label = labelById.get(describedBy)
+      if (!label) continue
+      row[label] = getHtmlAttr(cellMatch[1], 'title') || stripHtml(cellMatch[2])
+    }
+    if (Object.keys(row).length) rows.push(row)
+  }
+
+  if (!rows.length) return null
+
+  return {
+    name: '한전 파워플래너 월별청구요금',
+    headers: columns.map((column) => column.label),
+    rows,
+  }
+}
+
 export const parseWorkbook = async (
   file: File | ArrayBuffer,
 ): Promise<WorkbookParseResult> => {
   const buffer = file instanceof File ? await file.arrayBuffer() : file
+  const decodedText = new TextDecoder('utf-8').decode(buffer)
+  const powerPlannerSheet = parsePowerPlannerHtmlSheet(decodedText)
+
+  if (powerPlannerSheet) {
+    const autoRows = parsePowerPlannerMonthlyBills(powerPlannerSheet)
+    return {
+      sheets: [powerPlannerSheet],
+      autoRows,
+      diagnostics: [
+        '한전 파워플래너 HTML xls 내보내기 형식으로 인식했습니다.',
+        autoRows.length
+          ? `월별청구요금 ${autoRows.length.toLocaleString('ko-KR')}건을 자동 변환했습니다.`
+          : '월별청구요금 자동 변환은 어려워 컬럼 매핑을 사용합니다.',
+      ],
+    }
+  }
+
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
   const sheets = workbook.SheetNames.map((name) => {
     const sheet = workbook.Sheets[name]
