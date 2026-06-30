@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { AlertTriangle, CheckCircle2, TrendingDown } from 'lucide-react'
 import type { MonthlyBill, PeakScenario, RatePlan } from '../../types'
 import { comparePlans, formatWon } from '../../lib/calculations'
+import { rateChangeCaution } from '../../lib/documentTemplates'
 
 const scenarioSchema = z.object({
   targetPeakKw: z.coerce.number().min(1),
@@ -156,7 +157,7 @@ export function RateSimulator({
           </button>
         </form>
         <p className="warning-note">
-          요금제 변경 후 1년간 재변경 제한이 있을 수 있습니다. 본 결과는 학교 내부 진단용 추정입니다.
+          {rateChangeCaution} 본 결과는 학교 내부 진단용 추정입니다.
         </p>
       </section>
 

@@ -8,6 +8,9 @@ import type {
 import { formatKwh, formatWon } from './calculations'
 import { getPeakRiskLevel } from './peak'
 
+export const rateChangeCaution =
+  '요금제 변경 신청은 원칙적으로 1년에 한 번만 가능하므로 예상 절감액, 피크 시나리오, 향후 사용량 변동을 신중히 검토한 뒤 진행해야 합니다.'
+
 export const buildDocumentBundle = (
   profile: SchoolProfile,
   latestBill: MonthlyBill | undefined,
@@ -59,7 +62,7 @@ export const buildDocumentBundle = (
     '',
     'Ⅵ. 전기요금제 변경안',
     '- 기존 선택요금Ⅱ에서 선택요금Ⅰ으로 변경하는 방안을 검토한다.',
-    '- 변경 후 1년간 재변경이 제한될 수 있으므로 최종 제출 전 담당자 검토가 필요하다.',
+    `- ${rateChangeCaution}`,
     '',
     'Ⅶ. 추진일정',
     '- 1단계: 요금제 검토 및 학교장 승인',
@@ -88,6 +91,7 @@ export const buildDocumentBundle = (
     '  나. 서울특별시교육청 공인 조례',
     '  다. 서울특별시교육감 행정권한의 위임에 관한 조례 제6조',
     '3. 공립학교의 효율적인 운영을 위하여 붙임과 같이 요금제 변경을 학교장 직인으로 신청하오니 협조하여 주시기 바랍니다.',
+    `4. ${rateChangeCaution}`,
     '',
     '붙임',
     `1. 전기사용계약 변경신청서(${profile.displaySchoolName}) 1부.`,
@@ -112,6 +116,7 @@ export const buildDocumentBundle = (
       선택요금변경: `${profile.currentPlan} -> 선택요금Ⅰ`,
       요금적용희망일: '익월 검침일 이후',
       청구방법: '기존 청구방법 유지',
+      신중검토안내: rateChangeCaution,
       서명직인: '수기 확인 필요',
       개인정보동의: '수기 확인 필요',
     },

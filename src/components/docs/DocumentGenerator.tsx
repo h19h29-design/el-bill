@@ -7,7 +7,7 @@ import type {
   PlanComparison,
   SchoolProfile,
 } from '../../types'
-import { buildDocumentBundle } from '../../lib/documentTemplates'
+import { buildDocumentBundle, rateChangeCaution } from '../../lib/documentTemplates'
 
 interface DocumentGeneratorProps {
   profile: SchoolProfile
@@ -215,7 +215,7 @@ export function DocumentGenerator({
             {bundle.planText.split('\n').map((line, index) =>
               line ? <p key={`${line}-${index}`}>{line}</p> : <br key={index} />,
             )}
-            <footer>변경 후 1년간 재변경 제한 가능. 실제 제출 전 담당자 검토 필요.</footer>
+            <footer>{rateChangeCaution} 실제 제출 전 담당자 검토 필요.</footer>
           </div>
           <div
             id="letter-preview"
@@ -240,7 +240,7 @@ export function DocumentGenerator({
                 ))}
               </tbody>
             </table>
-            <footer>서명, 직인, 개인정보동의는 수기 확인 필요</footer>
+            <footer>{rateChangeCaution} 서명, 직인, 개인정보동의는 수기 확인 필요.</footer>
           </div>
         </div>
         {status && <p className="status-line">{status}</p>}
