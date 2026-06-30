@@ -2,6 +2,7 @@ export type ViewKey =
   | 'dashboard'
   | 'school'
   | 'bills'
+  | 'powerPlanner'
   | 'rates'
   | 'peak'
   | 'docs'
@@ -45,6 +46,48 @@ export interface MonthlyBill {
   fundWon: number
   note: string
 }
+
+export type DataSourceProvider =
+  | 'kepco-bill'
+  | 'kepco-power-planner'
+  | 'manual'
+
+export type PowerPlannerDataType =
+  | 'monthlyUsage'
+  | 'dailyUsage'
+  | 'hourlyUsage'
+  | 'maxDemand'
+  | 'estimatedBill'
+  | 'patternAnalysis'
+
+export interface DataSource<TRecord> {
+  id: string
+  provider: DataSourceProvider
+  sourceName: string
+  sourceLabel: string
+  importedAt: string
+  records: TRecord[]
+  memo: string
+}
+
+export interface PowerPlannerRecord {
+  id: string
+  dataType: PowerPlannerDataType
+  date?: string
+  year?: number
+  month?: number
+  day?: number
+  hour?: number
+  usageKwh?: number
+  maxDemandKw?: number
+  estimatedBillWon?: number
+  loadType?: string
+  patternLabel?: string
+  patternSummary?: string
+  sourceRowIndex: number
+}
+
+export type PowerPlannerDataSource = DataSource<PowerPlannerRecord>
 
 export interface RatePlan {
   id: string

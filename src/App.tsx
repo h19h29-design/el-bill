@@ -4,6 +4,7 @@ import { Sidebar } from './components/layout/Sidebar'
 import { TopNotice } from './components/layout/TopNotice'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { BillUpload } from './components/bills/BillUpload'
+import { PowerPlannerUpload } from './components/powerPlanner/PowerPlannerUpload'
 import { RateSimulator } from './components/rates/RateSimulator'
 import { PeakManager } from './components/peak/PeakManager'
 import { DocumentGenerator } from './components/docs/DocumentGenerator'
@@ -15,6 +16,7 @@ import {
   sampleBills,
 } from './data/sampleBills'
 import type { MonthlyBill, PeakScenario, RatePlan, SchoolProfile, ViewKey } from './types'
+import type { PowerPlannerDataSource } from './types'
 import { comparePlans, sortBillsChronologically } from './lib/calculations'
 import { createExpiry, loadWithExpiry, purgeExpiredKeys, saveWithExpiry } from './lib/storage'
 
@@ -22,7 +24,8 @@ const billsKey = 'el-bill:bills'
 const profileKey = 'el-bill:profile'
 const scenarioKey = 'el-bill:scenario'
 const ratePlansKey = 'el-bill:rate-plans'
-const storageKeys = [billsKey, profileKey, scenarioKey, ratePlansKey]
+const powerPlannerKey = 'el-bill:power-planner'
+const storageKeys = [billsKey, profileKey, scenarioKey, ratePlansKey, powerPlannerKey]
 
 function App() {
   purgeExpiredKeys(storageKeys)
@@ -31,6 +34,7 @@ function App() {
   const loadedProfile = loadWithExpiry<SchoolProfile>(profileKey)
   const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
   const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
+  const loadedPowerPlanner = loadWithExpiry<PowerPlannerDataSource>(powerPlannerKey)
 
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [bills, setBills] = useState<MonthlyBill[]>(loadedBills?.data ?? sampleBills)
@@ -43,6 +47,8 @@ function App() {
   const [ratePlans, setRatePlans] = useState<RatePlan[]>(
     loadedPlans?.data ?? defaultRatePlans,
   )
+  const [powerPlannerDataSource, setPowerPlannerDataSource] =
+    useState<PowerPlannerDataSource | null>(loadedPowerPlanner?.data ?? null)
   const [expiresAt, setExpiresAt] = useState(
     loadedBills?.expiresAt ?? createExpiry().expiresAt,
   )
@@ -64,6 +70,14 @@ function App() {
     saveWithExpiry(ratePlansKey, ratePlans)
   }, [ratePlans])
 
+  useEffect(() => {
+    if (powerPlannerDataSource) {
+      saveWithExpiry(powerPlannerKey, powerPlannerDataSource)
+    } else {
+      localStorage.removeItem(powerPlannerKey)
+    }
+  }, [powerPlannerDataSource])
+
   const currentPlan =
     ratePlans.find((plan) => plan.id === currentPlanId) ?? ratePlans[0]
   const candidatePlan =
@@ -80,10 +94,12 @@ function App() {
     localStorage.removeItem(profileKey)
     localStorage.removeItem(scenarioKey)
     localStorage.removeItem(ratePlansKey)
+    localStorage.removeItem(powerPlannerKey)
     setBills(sampleBills)
     setProfile(defaultSchoolProfile)
     setScenario(defaultScenario)
     setRatePlans(defaultRatePlans)
+    setPowerPlannerDataSource(null)
   }
 
   return (
@@ -121,6 +137,12 @@ function App() {
           {activeView === 'bills' && (
             <BillUpload bills={bills} profile={profile} onBillsChange={setBills} />
           )}
+          {activeView === 'powerPlanner' && (
+            <PowerPlannerUpload
+              dataSource={powerPlannerDataSource}
+              onDataSourceChange={setPowerPlannerDataSource}
+            />
+          )}
           {activeView === 'rates' && (
             <RateSimulator
               bills={bills}
@@ -131,7 +153,11 @@ function App() {
             />
           )}
           {activeView === 'peak' && (
-            <PeakManager scenario={scenario} onScenarioChange={setScenario} />
+            <PeakManager
+              scenario={scenario}
+              onScenarioChange={setScenario}
+              powerPlannerDataSource={powerPlannerDataSource}
+            />
           )}
           {activeView === 'docs' && (
             <DocumentGenerator
@@ -167,24 +193,29 @@ const viewMeta: Record<ViewKey, { step: string; title: string; description: stri
     description: '엑셀·CSV 업로드와 컬럼 매핑으로 월별 고지서 데이터를 반영합니다.',
   },
   rates: {
-    step: '04',
+    step: '05',
     title: '요금제 비교 시뮬레이션',
     description: '최근 12개월, 최근 3년, 피크 시나리오 기준으로 변경 효과를 추정합니다.',
   },
   peak: {
-    step: '05',
+    step: '06',
     title: '전력피크 관리',
     description: '목표 피크 대비 위험도를 판정하고 운영 가이드를 자동 구성합니다.',
   },
   docs: {
-    step: '06',
+    step: '07',
     title: '문서 자동 생성',
     description: '내부 계획안, 한전 공문, 변경신청서 미리보기를 생성합니다.',
   },
   settings: {
-    step: '07',
+    step: '08',
     title: '설정',
     description: '학교용 요금제 단가와 적용일을 수정해 시나리오를 확장합니다.',
+  },
+  powerPlanner: {
+    step: '04',
+    title: '파워플래너 자료 가져오기',
+    description: '한전 파워플래너에서 내려받거나 정리한 엑셀/CSV를 업로드해 보조 분석합니다.',
   },
 }
 

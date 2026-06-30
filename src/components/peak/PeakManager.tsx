@@ -1,6 +1,16 @@
 import { useMemo } from 'react'
 import { AlertTriangle, CheckCircle2, Gauge, Target } from 'lucide-react'
-import type { PeakScenario } from '../../types'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import type { PeakScenario, PowerPlannerDataSource } from '../../types'
 import {
   getPeakRatio,
   getPeakRiskLevel,
@@ -9,18 +19,61 @@ import {
   summerPeakBlocks,
   winterPeakBlocks,
 } from '../../lib/peak'
+import {
+  getHourlyUsageRecords,
+  getPowerPlannerSummary,
+} from '../../lib/powerPlanner'
 
 interface PeakManagerProps {
   scenario: PeakScenario
   onScenarioChange: (scenario: PeakScenario) => void
+  powerPlannerDataSource?: PowerPlannerDataSource | null
 }
 
-export function PeakManager({ scenario, onScenarioChange }: PeakManagerProps) {
+const isMaximumLoadHour = (hour: number) =>
+  hour === 11 ||
+  (hour >= 13 && hour < 17) ||
+  (hour >= 10 && hour < 12) ||
+  (hour >= 17 && hour < 20) ||
+  hour === 22
+
+export function PeakManager({
+  scenario,
+  onScenarioChange,
+  powerPlannerDataSource,
+}: PeakManagerProps) {
   const ratio = getPeakRatio(scenario.targetPeakKw, scenario.expectedPeakKw)
   const level = getPeakRiskLevel(scenario.targetPeakKw, scenario.expectedPeakKw)
   const tone = getPeakRiskTone(level)
   const percent = Math.round(ratio * 100)
   const guideItems = useMemo(() => peakGuideItems, [])
+  const hourlyRecords = useMemo(
+    () => getHourlyUsageRecords(powerPlannerDataSource),
+    [powerPlannerDataSource],
+  )
+  const powerPlannerSummary = useMemo(
+    () => getPowerPlannerSummary(powerPlannerDataSource),
+    [powerPlannerDataSource],
+  )
+  const hourlyChartData = hourlyRecords.map((record) => ({
+    hour: `${record.hour}시`,
+    rawHour: record.hour ?? 0,
+    usageKwh: record.usageKwh ?? 0,
+    isPeakLoad: isMaximumLoadHour(record.hour ?? -1),
+  }))
+  const maxLoadRecord = hourlyChartData.reduce<
+    (typeof hourlyChartData)[number] | undefined
+  >(
+    (max, record) =>
+      !max || record.usageKwh > max.usageKwh ? record : max,
+    undefined,
+  )
+  const detailedDemandKw =
+    powerPlannerSummary.maxDemand?.maxDemandKw ?? scenario.expectedPeakKw
+  const detailedRiskLevel = getPeakRiskLevel(
+    scenario.targetPeakKw,
+    detailedDemandKw,
+  )
 
   const update = (key: keyof PeakScenario, value: string) => {
     onScenarioChange({
@@ -134,6 +187,69 @@ export function PeakManager({ scenario, onScenarioChange }: PeakManagerProps) {
             향후 BEMS, 스마트미터, 냉난방 제어기 연계 가능. 본 MVP는 운영 가이드만 제공합니다.
           </p>
         </article>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <h2>파워플래너 시간대별 사용량 상세</h2>
+          <span>
+            {hourlyChartData.length
+              ? `${hourlyChartData.length.toLocaleString('ko-KR')}개 시간대 분석`
+              : '자료 없음'}
+          </span>
+        </div>
+        {hourlyChartData.length ? (
+          <div className="power-peak-grid">
+            <div className="chart-box power-hourly-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={hourlyChartData}>
+                  <CartesianGrid stroke="#edf2f7" vertical={false} />
+                  <XAxis dataKey="hour" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} />
+                  <Tooltip
+                    formatter={(value) => [
+                      `${Number(value).toLocaleString('ko-KR')}kWh`,
+                      '사용량',
+                    ]}
+                  />
+                  <Bar dataKey="usageKwh" name="시간대별 사용량" radius={[5, 5, 0, 0]}>
+                    {hourlyChartData.map((entry) => (
+                      <Cell
+                        key={entry.hour}
+                        fill={entry.isPeakLoad ? '#f26b3a' : '#12b6cb'}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="power-risk-stack">
+              <article className="power-risk-card">
+                <span>최대 사용 시간대</span>
+                <strong>
+                  {maxLoadRecord
+                    ? `${maxLoadRecord.hour} · ${maxLoadRecord.usageKwh.toLocaleString('ko-KR')}kWh`
+                    : '자료 없음'}
+                </strong>
+                <p>
+                  주황색 막대는 하계/동계 최대부하 관리 시간대입니다.
+                </p>
+              </article>
+              <article className="power-risk-card danger">
+                <span>최대부하 시간대 위험도</span>
+                <strong>{detailedRiskLevel}</strong>
+                <p>
+                  파워플래너 최대수요전력 자료가 있으면 해당 값을 우선 사용하고, 없으면 입력된 예상 피크를 사용합니다.
+                </p>
+              </article>
+            </div>
+          </div>
+        ) : (
+          <p className="empty-state">
+            파워플래너 자료가 없으므로 기존 한전 고지서 월별 데이터와 예상 피크 입력값으로 진단합니다.
+            시간대별 사용량 또는 최대수요전력 CSV/엑셀을 업로드하면 이 영역에 상세 그래프와 최대부하 시간대 위험도가 표시됩니다.
+          </p>
+        )}
       </section>
     </div>
   )

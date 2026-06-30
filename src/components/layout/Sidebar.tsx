@@ -5,6 +5,7 @@ import {
   FileSpreadsheet,
   FileText,
   LayoutDashboard,
+  PlugZap,
   Settings,
   ShieldCheck,
 } from 'lucide-react'
@@ -18,6 +19,7 @@ const navItems: Array<{
   { key: 'dashboard', label: '대시보드', icon: LayoutDashboard },
   { key: 'school', label: '학교정보', icon: Building2 },
   { key: 'bills', label: '고지서 입력', icon: FileSpreadsheet },
+  { key: 'powerPlanner', label: '파워플래너', icon: PlugZap },
   { key: 'rates', label: '요금제 비교', icon: Calculator },
   { key: 'peak', label: '피크관리', icon: Activity },
   { key: 'docs', label: '문서생성', icon: FileText },
