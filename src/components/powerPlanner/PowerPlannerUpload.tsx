@@ -147,7 +147,7 @@ export function PowerPlannerUpload({
 
       <section className="panel">
         <div className="panel-title">
-          <h2>파워플래너 자료 가져오기</h2>
+          <h2>자료 업로드 및 컬럼 매핑</h2>
           <span>엑셀/CSV 업로드 후 컬럼 매핑</span>
         </div>
         <div className="power-upload-layout">

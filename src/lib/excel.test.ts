@@ -90,6 +90,30 @@ describe('attached workbook parser harness', () => {
     })
   })
 
+  it('keeps Korean headers intact when reading a UTF-8 Power Planner CSV', async () => {
+    const csv = [
+      '연월,사용전력량(kWh),청구요금(원),요금적용전력(kW)',
+      '2026년 06월,48365,7138790,493',
+      '2026년 07월,50120,7421000,498',
+    ].join('\n')
+    const result = await parseWorkbook(
+      new File([csv], 'power-planner-monthly.csv', { type: 'text/csv' }),
+    )
+
+    expect(result.sheets[0].headers).toEqual([
+      '연월',
+      '사용전력량(kWh)',
+      '청구요금(원)',
+      '요금적용전력(kW)',
+    ])
+    expect(result.sheets[0].rows[0]).toMatchObject({
+      연월: '2026년 06월',
+      '사용전력량(kWh)': '48365',
+      '청구요금(원)': '7138790',
+      '요금적용전력(kW)': '493',
+    })
+  })
+
   it.runIf(existsSync(attachedPowerPlannerWorkbook))(
     'reads the provided Power Planner monthly bill export',
     async () => {

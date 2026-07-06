@@ -104,6 +104,7 @@ export function PeakManager({
           <label>
             <input
               type="number"
+              aria-label="목표 피크(kW)"
               value={scenario.targetPeakKw}
               onChange={(event) => update('targetPeakKw', event.target.value)}
             />
@@ -116,6 +117,7 @@ export function PeakManager({
           <label>
             <input
               type="number"
+              aria-label="예상 피크(kW)"
               value={scenario.expectedPeakKw}
               onChange={(event) => update('expectedPeakKw', event.target.value)}
             />

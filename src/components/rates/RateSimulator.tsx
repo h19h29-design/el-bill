@@ -132,7 +132,10 @@ export function RateSimulator({
         <form
           className="scenario-form"
           onSubmit={form.handleSubmit((values) =>
-            onScenarioChange(scenarioSchema.parse(values)),
+            onScenarioChange({
+              ...scenario,
+              ...scenarioSchema.parse(values),
+            }),
           )}
         >
           <label>

@@ -63,6 +63,79 @@ const getHtmlAttr = (attrs: string, name: string) => {
   return match ? decodeHtmlEntities(match[1]) : ''
 }
 
+const decodeSpreadsheetText = (buffer: ArrayBuffer) => {
+  const utf8 = new TextDecoder('utf-8').decode(buffer)
+  if (!utf8.includes('\uFFFD')) return utf8
+
+  try {
+    return new TextDecoder('euc-kr').decode(buffer)
+  } catch {
+    return utf8
+  }
+}
+
+const parseCsvMatrix = (text: string) => {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
+  let quoted = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    const next = text[index + 1]
+
+    if (char === '"') {
+      if (quoted && next === '"') {
+        cell += '"'
+        index += 1
+      } else {
+        quoted = !quoted
+      }
+      continue
+    }
+
+    if (char === ',' && !quoted) {
+      row.push(cell.trim())
+      cell = ''
+      continue
+    }
+
+    if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && next === '\n') index += 1
+      row.push(cell.trim())
+      if (row.some(Boolean)) rows.push(row)
+      row = []
+      cell = ''
+      continue
+    }
+
+    cell += char
+  }
+
+  row.push(cell.trim())
+  if (row.some(Boolean)) rows.push(row)
+  return rows
+}
+
+const parseCsvSheet = (text: string, name: string): ParsedSheet => {
+  const matrix = parseCsvMatrix(text)
+  const headers = (matrix[0] ?? []).map((header, index) =>
+    (index === 0 ? header.replace(/^\uFEFF/, '') : header).trim(),
+  )
+  const rows = matrix.slice(1).map((values) =>
+    headers.reduce<Record<string, unknown>>((acc, header, index) => {
+      acc[header] = values[index] ?? ''
+      return acc
+    }, {}),
+  )
+
+  return {
+    name,
+    headers,
+    rows,
+  }
+}
+
 const makeImportedBill = (
   year: number,
   month: number,
@@ -222,7 +295,15 @@ export const parseWorkbook = async (
   file: File | ArrayBuffer,
 ): Promise<WorkbookParseResult> => {
   const buffer = file instanceof File ? await file.arrayBuffer() : file
-  const decodedText = new TextDecoder('utf-8').decode(buffer)
+  const decodedText = decodeSpreadsheetText(buffer)
+  if (file instanceof File && file.name.toLowerCase().endsWith('.csv')) {
+    return {
+      sheets: [parseCsvSheet(decodedText, file.name)],
+      autoRows: [],
+      diagnostics: ['CSV 파일을 브라우저 로컬 파서로 읽었습니다.'],
+    }
+  }
+
   const powerPlannerSheet = parsePowerPlannerHtmlSheet(decodedText)
 
   if (powerPlannerSheet) {
