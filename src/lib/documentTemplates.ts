@@ -35,6 +35,7 @@ export const buildDocumentBundle = (
   const latestUsage = latestBill ? formatKwh(latestBill.usageKwh) : '자료 없음'
   const latestBillWon = latestBill ? formatWon(latestBill.totalBillWon) : '자료 없음'
   const riskLevel = getPeakRiskLevel(scenario.targetPeakKw, scenario.expectedPeakKw)
+  const calculationBreakdown = diagnosis?.comparison.calculationBreakdown ?? []
 
   const planText = [
     '예산절감을 위한 전기요금제 변경 계획(안)',
@@ -133,6 +134,10 @@ export const buildDocumentBundle = (
     `- 최근 12개월 절감액: ${formatWon(activeComparison.savingWon)}`,
     `- 최근 3년 절감액: ${formatWon(activeComparison.threeYearSavingWon)}`,
     `- 예상 피크값 반영 후 절감액: ${formatWon(peakScenarioSavingWon)}`,
+    ...calculationBreakdown.flatMap((row) => [
+      `- ${row.label}: 현재 ${formatWon(row.currentWon)} / 추천 ${formatWon(row.candidateWon)} / 차액 ${formatWon(row.differenceWon)}`,
+      `  · ${row.note}`,
+    ]),
   ].join('\n')
   const reviewItems = [
     '한전 담당자와 실제 적용 가능 요금제 및 적용일 확인',
@@ -167,6 +172,7 @@ export const buildDocumentBundle = (
       { label: '담당자 검토 필요 항목', ready: true },
     ],
     calculationSummaryText,
+    calculationBreakdown,
     reviewItems,
   }
 }

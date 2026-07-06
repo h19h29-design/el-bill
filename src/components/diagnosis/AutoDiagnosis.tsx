@@ -126,6 +126,34 @@ export function AutoDiagnosis({ diagnosis, onNavigate }: AutoDiagnosisProps) {
         <PlanCandidateTable candidates={diagnosis.topCandidates} />
       </section>
 
+      <section className="panel">
+        <div className="panel-title">
+          <h2>계산 근거 분해</h2>
+          <span>최근 12개월 기준</span>
+        </div>
+        <div className="breakdown-grid">
+          {comparison.calculationBreakdown.map((row) => (
+            <article key={row.label}>
+              <span>{row.label}</span>
+              <strong className={row.differenceWon >= 0 ? 'positive' : 'danger-text'}>
+                {formatWon(row.differenceWon)}
+              </strong>
+              <dl>
+                <div>
+                  <dt>현재</dt>
+                  <dd>{formatWon(row.currentWon)}</dd>
+                </div>
+                <div>
+                  <dt>추천</dt>
+                  <dd>{formatWon(row.candidateWon)}</dd>
+                </div>
+              </dl>
+              <p>{row.note}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className="diagnosis-note-grid">
         <article>
           <UploadCloud size={22} />

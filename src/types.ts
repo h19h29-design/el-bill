@@ -135,6 +135,7 @@ export interface DocumentBundle {
   applicationPreviewData: Record<string, string>
   checklist: Array<{ label: string; ready: boolean }>
   calculationSummaryText: string
+  calculationBreakdown: CalculationBreakdownRow[]
   reviewItems: string[]
 }
 
@@ -149,6 +150,14 @@ export interface PlanComparison {
   basis: string
 }
 
+export interface CalculationBreakdownRow {
+  label: string
+  currentWon: number
+  candidateWon: number
+  differenceWon: number
+  note: string
+}
+
 export interface PlanCandidateComparison extends PlanComparison {
   candidatePlanId: string
   candidatePlanName: string
@@ -157,6 +166,7 @@ export interface PlanCandidateComparison extends PlanComparison {
   sameContractPriority: boolean
   peakScenarioSavingWon: number
   calculationMode: CalculationMode
+  calculationBreakdown: CalculationBreakdownRow[]
   reviewReason: string
 }
 

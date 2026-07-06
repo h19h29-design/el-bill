@@ -33,6 +33,25 @@ const saveBlob = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url)
 }
 
+const renderTextDocument = (title: string, body: string) => {
+  const [, ...rest] = body.split('\n')
+  return (
+    <>
+      <div className="doc-masthead">
+        <span>서울특별시교육청 전기요금 진단 자료</span>
+        <strong>A고등학교</strong>
+      </div>
+      <h3>{title}</h3>
+      <div className="doc-alert">
+        공식 청구액 계산기가 아닌 학교 내부 진단용 추정입니다.
+      </div>
+      {rest.map((line, index) =>
+        line ? <p key={`${line}-${index}`}>{line}</p> : <br key={index} />,
+      )}
+    </>
+  )
+}
+
 export function DocumentGenerator({
   profile,
   latestBill,
@@ -83,6 +102,10 @@ export function DocumentGenerator({
     zip.file('전기요금제_변경계획안.txt', bundle.planText)
     zip.file('한전_제출공문.txt', bundle.kepcoLetterText)
     zip.file('계산근거_요약표.txt', bundle.calculationSummaryText)
+    zip.file(
+      '계산근거_분해표.json',
+      JSON.stringify(bundle.calculationBreakdown, null, 2),
+    )
     zip.file('담당자_검토필요항목.txt', bundle.reviewItems.join('\n'))
     zip.file(
       '변경신청서_자동입력항목.json',
@@ -207,6 +230,18 @@ export function DocumentGenerator({
         </article>
 
         <article className="checklist-card">
+          <h2>계산 근거 분해표</h2>
+          <div className="document-breakdown-mini">
+            {bundle.calculationBreakdown.map((row) => (
+              <div key={row.label}>
+                <span>{row.label}</span>
+                <strong>{row.differenceWon.toLocaleString('ko-KR')}원</strong>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="checklist-card">
           <h2>담당자 검토 필요 항목</h2>
           <ul className="check-list">
             {bundle.reviewItems.map((item) => (
@@ -243,32 +278,58 @@ export function DocumentGenerator({
         <div className="document-preview-stage">
           <div
             id="plan-preview"
-            className={selectedId === 'plan-preview' ? 'document-preview visible' : 'document-preview'}
+            className={selectedId === 'plan-preview' ? 'document-preview official-document visible' : 'document-preview official-document'}
           >
-            {bundle.planText.split('\n').map((line, index) =>
-              line ? <p key={`${line}-${index}`}>{line}</p> : <br key={index} />,
-            )}
+            {renderTextDocument('예산절감을 위한 전기요금제 변경 계획(안)', bundle.planText)}
+            <table className="document-summary-table">
+              <tbody>
+                {bundle.calculationBreakdown.map((row) => (
+                  <tr key={row.label}>
+                    <th>{row.label}</th>
+                    <td>현재 {row.currentWon.toLocaleString('ko-KR')}원</td>
+                    <td>추천 {row.candidateWon.toLocaleString('ko-KR')}원</td>
+                    <td>차액 {row.differenceWon.toLocaleString('ko-KR')}원</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
             <footer>{rateChangeCaution} 실제 제출 전 담당자 검토 필요.</footer>
           </div>
           <div
             id="letter-preview"
-            className={selectedId === 'letter-preview' ? 'document-preview visible' : 'document-preview'}
+            className={selectedId === 'letter-preview' ? 'document-preview official-document visible' : 'document-preview official-document'}
           >
-            {bundle.kepcoLetterText.split('\n').map((line, index) =>
-              line ? <p key={`${line}-${index}`}>{line}</p> : <br key={index} />,
-            )}
+            {renderTextDocument(`${profile.displaySchoolName} 전기요금 변경 신청`, bundle.kepcoLetterText)}
+            <footer>{rateChangeCaution} 붙임 서류와 원본 청구서 대조 후 제출.</footer>
           </div>
           <div
             id="application-preview"
-            className={selectedId === 'application-preview' ? 'document-preview visible' : 'document-preview'}
+            className={selectedId === 'application-preview' ? 'document-preview application-document visible' : 'document-preview application-document'}
           >
             <h3>전기사용계약 변경신청서 PDF 미리보기</h3>
+            <div className="doc-alert">
+              자동 입력 가능 항목과 수기 확인 필요 항목을 구분했습니다.
+            </div>
             <table>
               <tbody>
                 {Object.entries(bundle.applicationPreviewData).map(([key, value]) => (
-                  <tr key={key}>
+                  <tr
+                    key={key}
+                    className={
+                      value.includes('수기') || key.includes('서명') || key.includes('동의')
+                        ? 'manual-check-row'
+                        : ''
+                    }
+                  >
                     <th>{key}</th>
-                    <td>{value}</td>
+                    <td>
+                      <span>{value}</span>
+                      {(value.includes('수기') ||
+                        key.includes('서명') ||
+                        key.includes('동의')) && (
+                        <em>수기 확인</em>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

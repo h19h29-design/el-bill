@@ -2,6 +2,7 @@ import type { WorkbookParseResult } from './excel'
 import type {
   AutoDiagnosisResult,
   CalculationMode,
+  CalculationBreakdownRow,
   DataConfidence,
   MonthlyBill,
   PeakScenario,
@@ -174,6 +175,83 @@ const estimateCandidateBillByMode = (
   return estimateBillDeltaForPlan(bill, currentPlan, candidatePlan, scenario)
 }
 
+const buildCalculationBreakdown = (
+  bills: MonthlyBill[],
+  currentPlan: RatePlan,
+  candidatePlan: RatePlan,
+  scenario: PeakScenario | undefined,
+  mode: CalculationMode,
+  currentAnnualWon: number,
+  candidateAnnualWon: number,
+): CalculationBreakdownRow[] => {
+  const recent12 = getRecentBills(bills, 12)
+  const breakdown = recent12.reduce(
+    (acc, bill) => {
+      const season = getSeason(bill.month)
+      const adjustedUsage = getAdjustedUsage(bill, scenario)
+      const billingPowerKw = scenario?.expectedPeakKw
+        ? Math.max(bill.appliedPowerKw, scenario.expectedPeakKw)
+        : bill.appliedPowerKw
+
+      acc.currentBaseWon += billingPowerKw * currentPlan.baseRateWonPerKw
+      acc.candidateBaseWon += billingPowerKw * candidatePlan.baseRateWonPerKw
+      acc.currentEnergyWon += adjustedUsage * currentPlan.seasonRates[season]
+      acc.candidateEnergyWon += adjustedUsage * candidatePlan.seasonRates[season]
+      return acc
+    },
+    {
+      currentBaseWon: 0,
+      candidateBaseWon: 0,
+      currentEnergyWon: 0,
+      candidateEnergyWon: 0,
+    },
+  )
+  const currentBaseWon = Math.round(breakdown.currentBaseWon)
+  const candidateBaseWon = Math.round(breakdown.candidateBaseWon)
+  const currentEnergyWon = Math.round(breakdown.currentEnergyWon)
+  const candidateEnergyWon = Math.round(breakdown.candidateEnergyWon)
+  const currentAdjustmentWon = Math.round(
+    currentAnnualWon - currentBaseWon - currentEnergyWon,
+  )
+  const candidateAdjustmentWon = Math.round(
+    candidateAnnualWon - candidateBaseWon - candidateEnergyWon,
+  )
+  const rows = [
+    {
+      label: '기본요금 차액',
+      currentWon: currentBaseWon,
+      candidateWon: candidateBaseWon,
+      note: '요금적용전력과 예상 피크값 중 큰 값을 기준으로 kW 단가를 비교합니다.',
+    },
+    {
+      label: '전력량요금 차액',
+      currentWon: currentEnergyWon,
+      candidateWon: candidateEnergyWon,
+      note: '월별 사용량과 계절별 전력량 단가를 반영합니다.',
+    },
+    {
+      label: '부가요금/보정',
+      currentWon: currentAdjustmentWon,
+      candidateWon: candidateAdjustmentWon,
+      note:
+        mode === 'billDelta'
+          ? '기존 고지서의 부가세, 기금, 기후환경요금, 연료비조정 비율로 보정합니다.'
+          : '요금표 기반 추정식의 부가요금 계수를 반영합니다.',
+    },
+    {
+      label: '최근 12개월 합계',
+      currentWon: currentAnnualWon,
+      candidateWon: candidateAnnualWon,
+      note: '공식 청구액이 아닌 학교 내부 진단용 추정 합계입니다.',
+    },
+  ]
+
+  return rows.map((row) => ({
+    ...row,
+    differenceWon: row.currentWon - row.candidateWon,
+  }))
+}
+
 export const comparePlansForDiagnosis = (
   bills: MonthlyBill[],
   currentPlan: RatePlan,
@@ -204,6 +282,15 @@ export const comparePlansForDiagnosis = (
   )
 
   const peakScenarioSavingWon = scenario ? savingWon : 0
+  const calculationBreakdown = buildCalculationBreakdown(
+    bills,
+    currentPlan,
+    candidatePlan,
+    scenario,
+    mode,
+    currentAnnualWon,
+    candidateAnnualWon,
+  )
 
   let recommendation: Recommendation = '추가 검토 필요'
   if (recent12.length < 12) recommendation = '추가 검토 필요'
@@ -235,6 +322,7 @@ export const comparePlansForDiagnosis = (
     sameContractPriority: false,
     peakScenarioSavingWon,
     calculationMode: mode,
+    calculationBreakdown,
     reviewReason: '',
   }
 }

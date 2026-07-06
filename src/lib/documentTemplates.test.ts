@@ -53,6 +53,15 @@ const candidateComparison: PlanCandidateComparison = {
   sameContractPriority: true,
   peakScenarioSavingWon: 340_000,
   calculationMode: 'billDelta',
+  calculationBreakdown: [
+    {
+      label: '기본요금 차액',
+      currentWon: 38_220_000,
+      candidateWon: 33_300_000,
+      differenceWon: 4_920_000,
+      note: '요금적용전력과 예상 피크값 중 큰 값을 기준으로 kW 단가를 비교합니다.',
+    },
+  ],
   reviewReason: '현재 계약종별과 수전전압이 일치하는 우선 후보입니다.',
 }
 
@@ -104,5 +113,7 @@ describe('document template harness', () => {
       '선택요금Ⅱ -> 테스트 추천요금',
     )
     expect(bundle.calculationSummaryText).toContain('고지서 기반 차액 추정')
+    expect(bundle.calculationSummaryText).toContain('기본요금 차액')
+    expect(bundle.calculationBreakdown[0].differenceWon).toBe(4_920_000)
   })
 })

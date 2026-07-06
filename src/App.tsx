@@ -115,6 +115,18 @@ function App() {
     setPowerPlannerDataSource(null)
   }
 
+  const applyBillsAndOpenDiagnosis = (nextBills: MonthlyBill[]) => {
+    setBills(nextBills)
+    setActiveView('diagnosis')
+  }
+
+  const applyPowerPlannerAndOpenDiagnosis = (
+    nextDataSource: PowerPlannerDataSource | null,
+  ) => {
+    setPowerPlannerDataSource(nextDataSource)
+    if (nextDataSource) setActiveView('diagnosis')
+  }
+
   return (
     <div className="app-shell">
       <Sidebar activeView={activeView} onChange={setActiveView} />
@@ -153,12 +165,16 @@ function App() {
             <SchoolProfilePanel profile={profile} onProfileChange={setProfile} />
           )}
           {activeView === 'bills' && (
-            <BillUpload bills={bills} profile={profile} onBillsChange={setBills} />
+            <BillUpload
+              bills={bills}
+              profile={profile}
+              onBillsChange={applyBillsAndOpenDiagnosis}
+            />
           )}
           {activeView === 'powerPlanner' && (
             <PowerPlannerUpload
               dataSource={powerPlannerDataSource}
-              onDataSourceChange={setPowerPlannerDataSource}
+              onDataSourceChange={applyPowerPlannerAndOpenDiagnosis}
             />
           )}
           {activeView === 'rates' && (

@@ -13,8 +13,10 @@ npm run dev
 
 ```bash
 npm run typecheck
+npm run lint
 npm run test
 npm run build
+npm run test:e2e
 ```
 
 ## 구현 범위
@@ -33,6 +35,8 @@ npm run build
 - 목표/예상 피크 위험도 판정과 하계/동계/오늘 운영안 자동 생성
 - 파워플래너 자료가 있으면 피크관리 화면에서 시간대별 사용량 그래프와 최대부하 시간대 위험도 표시
 - 변경계획서, 한전 제출 공문, 변경신청서, 붙임 체크리스트, 계산 근거 요약표, 담당자 검토 필요 항목 패키지 생성
+- Playwright E2E smoke: 자동진단, 업로드, 피크관리, 문서 ZIP/PDF 다운로드 흐름 검증
+- Vercel 정적 배포 설정: `vercel.json`
 - localStorage 24시간 TTL 저장 및 만료 데이터 자동 삭제
 
 ## 자동진단 흐름
@@ -63,9 +67,11 @@ npm run build
 
 한전 파워플래너 자료는 사용자가 직접 내려받거나 정리한 파일만 업로드합니다. MVP에서는 한전 계정 자동 로그인, 크롤링, 비공식 API 호출을 하지 않습니다. 파워플래너 사용 가능 여부는 한전 파워플래너에서 고객번호로 확인해야 하며, 고객번호는 한전 전기요금 청구서의 10자리 숫자입니다.
 
-`xlsx` 패키지는 요구 스택에 따라 사용했지만 npm audit 기준 고위험 취약점 2건이 보고되며 현재 fix가 없습니다. 이 MVP에서는 서버 업로드 없이 사용자의 브라우저 안에서만 파일을 읽도록 제한했습니다.
+`xlsx` 패키지는 요구 스택에 따라 사용했지만 npm audit 기준 고위험 취약점이 보고됩니다. 이 MVP에서는 서버 업로드 없이 사용자의 브라우저 안에서만 파일을 읽도록 제한했고, 운영 전 보완 계획은 `docs/upload-security-plan.md`에 정리했습니다.
 
 ## 문서
 
 - 오픈소스 조사: `docs/oss-research.md`
 - 계산 근거: `docs/calculation-notes.md`
+- 배포: `docs/deployment.md`
+- 업로드 보안 계획: `docs/upload-security-plan.md`
