@@ -8,13 +8,14 @@ import {
   TrendingDown,
   UploadCloud,
 } from 'lucide-react'
-import type { AutoDiagnosisResult, ViewKey } from '../../types'
+import type { AutoDiagnosisResult, DataMode, ViewKey } from '../../types'
 import { formatWon } from '../../lib/calculations'
 import { rateChangeCaution } from '../../lib/documentTemplates'
 import { PlanCandidateTable } from './PlanCandidateTable'
 
 interface AutoDiagnosisProps {
   diagnosis: AutoDiagnosisResult
+  dataMode: DataMode
   onNavigate: (view: ViewKey) => void
 }
 
@@ -26,7 +27,11 @@ const steps = [
   ['변경신청 패키지 생성', '계획안·공문·신청서'],
 ] as const
 
-export function AutoDiagnosis({ diagnosis, onNavigate }: AutoDiagnosisProps) {
+export function AutoDiagnosis({
+  diagnosis,
+  dataMode,
+  onNavigate,
+}: AutoDiagnosisProps) {
   const comparison = diagnosis.comparison
   const judgementClass =
     diagnosis.finalJudgement === '변경 추천'
@@ -39,7 +44,9 @@ export function AutoDiagnosis({ diagnosis, onNavigate }: AutoDiagnosisProps) {
     <div className="view-stack">
       <section className="diagnosis-hero">
         <div>
-          <span className="flow-label">자동진단 흐름</span>
+          <span className="flow-label">
+            {dataMode === 'sample' ? '시연 샘플 분석' : '사용자 업로드 분석'}
+          </span>
           <h2>전기요금 자동진단 시작</h2>
           <p>
             자료 업로드부터 추천 요금제, 피크관리 운영안, 변경신청 패키지까지 한 흐름으로 점검합니다.

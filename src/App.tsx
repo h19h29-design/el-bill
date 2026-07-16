@@ -16,7 +16,14 @@ import {
   defaultSchoolProfile,
   sampleBills,
 } from './data/sampleBills'
-import type { MonthlyBill, PeakScenario, RatePlan, SchoolProfile, ViewKey } from './types'
+import type {
+  DataMode,
+  MonthlyBill,
+  PeakScenario,
+  RatePlan,
+  SchoolProfile,
+  ViewKey,
+} from './types'
 import type { PowerPlannerDataSource } from './types'
 import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
@@ -28,7 +35,15 @@ const profileKey = 'el-bill:profile'
 const scenarioKey = 'el-bill:scenario'
 const ratePlansKey = 'el-bill:rate-plans'
 const powerPlannerKey = 'el-bill:power-planner'
-const storageKeys = [billsKey, profileKey, scenarioKey, ratePlansKey, powerPlannerKey]
+const dataModeKey = 'el-bill:data-mode'
+const storageKeys = [
+  billsKey,
+  profileKey,
+  scenarioKey,
+  ratePlansKey,
+  powerPlannerKey,
+  dataModeKey,
+]
 
 function App() {
   purgeExpiredKeys(storageKeys)
@@ -38,6 +53,7 @@ function App() {
   const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
   const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
   const loadedPowerPlanner = loadWithExpiry<PowerPlannerDataSource>(powerPlannerKey)
+  const loadedDataMode = loadWithExpiry<DataMode>(dataModeKey)
 
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [bills, setBills] = useState<MonthlyBill[]>(loadedBills?.data ?? sampleBills)
@@ -52,6 +68,9 @@ function App() {
   )
   const [powerPlannerDataSource, setPowerPlannerDataSource] =
     useState<PowerPlannerDataSource | null>(loadedPowerPlanner?.data ?? null)
+  const [dataMode, setDataMode] = useState<DataMode>(
+    loadedDataMode?.data ?? 'sample',
+  )
   const [expiresAt, setExpiresAt] = useState(
     loadedBills?.expiresAt ?? createExpiry().expiresAt,
   )
@@ -81,6 +100,10 @@ function App() {
     }
   }, [powerPlannerDataSource])
 
+  useEffect(() => {
+    saveWithExpiry(dataModeKey, dataMode)
+  }, [dataMode])
+
   const sortedBills = useMemo(() => sortBillsChronologically(bills), [bills])
   const latestBill = sortedBills.at(-1)
   const diagnosis = useMemo(
@@ -108,15 +131,18 @@ function App() {
     localStorage.removeItem(scenarioKey)
     localStorage.removeItem(ratePlansKey)
     localStorage.removeItem(powerPlannerKey)
+    localStorage.removeItem(dataModeKey)
     setBills(sampleBills)
     setProfile(defaultSchoolProfile)
     setScenario(defaultScenario)
     setRatePlans(defaultRatePlans)
     setPowerPlannerDataSource(null)
+    setDataMode('sample')
   }
 
   const applyBillsAndOpenDiagnosis = (nextBills: MonthlyBill[]) => {
     setBills(nextBills)
+    setDataMode('uploaded')
     setActiveView('diagnosis')
   }
 
@@ -124,7 +150,10 @@ function App() {
     nextDataSource: PowerPlannerDataSource | null,
   ) => {
     setPowerPlannerDataSource(nextDataSource)
-    if (nextDataSource) setActiveView('diagnosis')
+    if (nextDataSource) {
+      setDataMode('uploaded')
+      setActiveView('diagnosis')
+    }
   }
 
   return (
@@ -136,7 +165,7 @@ function App() {
             <h1>서울교육 전기요금 절감 진단·피크관리 플랫폼</h1>
             <p>학교별 한전고지서 분석 · 요금제 비교 · 피크관리 · 한전 변경신청서 PDF 생성</p>
           </div>
-          <TopNotice expiresAt={expiresAt} onReset={resetSample} />
+          <TopNotice expiresAt={expiresAt} dataMode={dataMode} onReset={resetSample} />
         </header>
 
         <section className="view-frame">
@@ -155,11 +184,16 @@ function App() {
               candidatePlan={candidatePlan}
               scenario={scenario}
               diagnosis={diagnosis}
+              dataMode={dataMode}
               onStartDiagnosis={() => setActiveView('diagnosis')}
             />
           )}
           {activeView === 'diagnosis' && (
-            <AutoDiagnosis diagnosis={diagnosis} onNavigate={setActiveView} />
+            <AutoDiagnosis
+              diagnosis={diagnosis}
+              dataMode={dataMode}
+              onNavigate={setActiveView}
+            />
           )}
           {activeView === 'school' && (
             <SchoolProfilePanel profile={profile} onProfileChange={setProfile} />

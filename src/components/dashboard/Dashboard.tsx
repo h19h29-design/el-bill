@@ -23,6 +23,7 @@ import {
 } from 'recharts'
 import type {
   AutoDiagnosisResult,
+  DataMode,
   MonthlyBill,
   PeakScenario,
   RatePlan,
@@ -40,6 +41,7 @@ interface DashboardProps {
   candidatePlan: RatePlan
   scenario: PeakScenario
   diagnosis: AutoDiagnosisResult
+  dataMode: DataMode
   onStartDiagnosis: () => void
 }
 
@@ -52,6 +54,7 @@ export function Dashboard({
   candidatePlan,
   scenario,
   diagnosis,
+  dataMode,
   onStartDiagnosis,
 }: DashboardProps) {
   const summary = getDashboardSummary(bills, currentPlan, candidatePlan, scenario)
@@ -92,8 +95,17 @@ export function Dashboard({
             <ClipboardCheck size={22} />
           </div>
           <span>자동진단 상태</span>
-          <strong>{diagnosis.completed ? '분석 완료' : '자료 필요'}</strong>
-          <small>{diagnosis.dataConfidence} · 인식률 {diagnosis.dataRecognitionRate}%</small>
+          <strong>
+            {dataMode === 'sample'
+              ? '시연 샘플'
+              : diagnosis.completed
+                ? '분석 완료'
+                : '자료 필요'}
+          </strong>
+          <small>
+            {dataMode === 'sample' ? '실제 자료 업로드 전 예시 결과' : diagnosis.dataConfidence}
+            {' · '}인식률 {diagnosis.dataRecognitionRate}%
+          </small>
         </article>
         <article className="kpi-card">
           <div className="kpi-icon teal">

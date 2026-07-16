@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import { CheckCircle2, ClipboardCopy, Download, Eye, FileArchive } from 'lucide-react'
-import JSZip from 'jszip'
 import type {
   AutoDiagnosisResult,
   MonthlyBill,
@@ -9,6 +8,10 @@ import type {
   SchoolProfile,
 } from '../../types'
 import { buildDocumentBundle, rateChangeCaution } from '../../lib/documentTemplates'
+import {
+  createDocumentPackage,
+  createPdfBlob,
+} from '../../lib/documentExport'
 import type { PeakOperationPlan } from '../../lib/peakOperations'
 
 interface DocumentGeneratorProps {
@@ -78,42 +81,37 @@ export function DocumentGenerator({
   const downloadPdf = async (targetId: string, filename: string) => {
     const element = document.getElementById(targetId)
     if (!element) return
-    const wasVisible = element.classList.contains('visible')
-    element.classList.add('visible')
-    const html2pdf = (await import('html2pdf.js')).default
+    setStatus(`${filename} 생성 중입니다.`)
     try {
-      await html2pdf()
-        .set({
-          margin: 10,
-          filename,
-          html2canvas: { scale: 2 },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        })
-        .from(element)
-        .save(filename)
-    } finally {
-      if (!wasVisible) element.classList.remove('visible')
+      const blob = await createPdfBlob(element)
+      saveBlob(blob, filename)
+      setStatus(`${filename} 다운로드를 시작했습니다.`)
+    } catch {
+      setStatus(`${filename} 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.`)
     }
-    setStatus(`${filename} 다운로드를 시작했습니다.`)
   }
 
   const downloadZip = async () => {
-    const zip = new JSZip()
-    zip.file('전기요금제_변경계획안.txt', bundle.planText)
-    zip.file('한전_제출공문.txt', bundle.kepcoLetterText)
-    zip.file('계산근거_요약표.txt', bundle.calculationSummaryText)
-    zip.file(
-      '계산근거_분해표.json',
-      JSON.stringify(bundle.calculationBreakdown, null, 2),
-    )
-    zip.file('담당자_검토필요항목.txt', bundle.reviewItems.join('\n'))
-    zip.file(
-      '변경신청서_자동입력항목.json',
-      JSON.stringify(bundle.applicationPreviewData, null, 2),
-    )
-    const blob = await zip.generateAsync({ type: 'blob' })
-    saveBlob(blob, 'A고등학교_전기요금_변경_문서묶음.zip')
-    setStatus('문서 묶음 ZIP 다운로드를 시작했습니다.')
+    const plan = document.getElementById('plan-preview')
+    const letter = document.getElementById('letter-preview')
+    const application = document.getElementById('application-preview')
+    if (!plan || !letter || !application) return
+
+    setStatus('PDF 3종과 검토 자료를 묶는 중입니다.')
+    try {
+      const planPdf = await createPdfBlob(plan)
+      const letterPdf = await createPdfBlob(letter)
+      const applicationPdf = await createPdfBlob(application)
+      const blob = await createDocumentPackage(bundle, {
+        plan: planPdf,
+        letter: letterPdf,
+        application: applicationPdf,
+      })
+      saveBlob(blob, 'A고등학교_전기요금_변경_문서묶음.zip')
+      setStatus('PDF 3종이 포함된 문서 묶음 ZIP 다운로드를 시작했습니다.')
+    } catch {
+      setStatus('문서 묶음 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.')
+    }
   }
 
   const selectedId =
@@ -275,6 +273,9 @@ export function DocumentGenerator({
             </button>
           ))}
         </div>
+        <p className="mobile-scroll-hint">
+          문서를 좌우로 밀어 원본 크기로 확인하세요.
+        </p>
         <div className="document-preview-stage">
           <div
             id="plan-preview"

@@ -33,6 +33,18 @@ const optionalBillColumns = [
   '전력산업기반기금',
 ]
 
+const normalizedOptionalBillColumns = [
+  ['요금적용전력', 'appliedPowerKw'],
+  ['최대수요전력', 'maxDemandKw'],
+  ['기본요금', 'baseChargeWon'],
+  ['전력량요금', 'energyChargeWon'],
+  ['역률요금', 'powerFactorChargeWon'],
+  ['기후환경요금', 'climateChargeWon'],
+  ['연료비조정액', 'fuelAdjustmentWon'],
+  ['부가세', 'vatWon'],
+  ['전력산업기반기금', 'fundWon'],
+] as const
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
@@ -418,7 +430,7 @@ export const summarizeWorkbookRecognition = (
   if (!result) return null
   const rows = result.sheets.flatMap((sheet) => sheet.rows)
   const headers = Array.from(new Set(result.sheets.flatMap((sheet) => sheet.headers)))
-  const recognizedYears = Array.from(
+  const mappedYears = Array.from(
     new Set(
       rows
         .map((row) => Number(row[mapping.year]))
@@ -434,10 +446,26 @@ export const summarizeWorkbookRecognition = (
   const missingRequiredColumns = requiredMap
     .filter(([, key]) => !key)
     .map(([label]) => label)
-  const optionalColumns = optionalBillColumns.filter((label) =>
+  const mappedOptionalColumns = optionalBillColumns.filter((label) =>
     headers.some((header) => header.includes(label) || label.includes(header)),
   )
   const hasAutoRows = result.autoRows.length > 0
+  const optionalColumns = hasAutoRows
+    ? normalizedOptionalBillColumns
+        .filter(([, key]) =>
+          result.autoRows.some((bill) => Number.isFinite(bill[key]) && bill[key] !== 0),
+        )
+        .map(([label]) => label)
+    : mappedOptionalColumns
+  const recognizedYears = hasAutoRows
+    ? Array.from(new Set(result.autoRows.map((bill) => bill.year))).sort((a, b) => a - b)
+    : mappedYears
+  const normalizedRequiredColumns = hasAutoRows
+    ? requiredMap.map(([label]) => label)
+    : requiredMap
+        .filter(([, key]) => Boolean(key))
+        .map(([label]) => label)
+  const normalizedMissingRequiredColumns = hasAutoRows ? [] : missingRequiredColumns
   const mappingConfidence = hasAutoRows
     ? 100
     : Math.round(
@@ -447,13 +475,12 @@ export const summarizeWorkbookRecognition = (
   return {
     sheetNames: result.sheets.map((sheet) => sheet.name),
     recognizedYears,
-    requiredColumns: requiredMap
-      .filter(([, key]) => Boolean(key))
-      .map(([label]) => label),
+    recognizedRecordCount: hasAutoRows ? result.autoRows.length : rows.length,
+    requiredColumns: normalizedRequiredColumns,
     optionalColumns,
-    missingRequiredColumns,
+    missingRequiredColumns: normalizedMissingRequiredColumns,
     mappingConfidence,
-    canAnalyze: missingRequiredColumns.length === 0 || hasAutoRows,
+    canAnalyze: normalizedMissingRequiredColumns.length === 0,
     guidance:
       hasAutoRows
         ? '파일 구조가 자동 인식되었습니다. 이 매핑으로 자동진단을 시작할 수 있습니다.'

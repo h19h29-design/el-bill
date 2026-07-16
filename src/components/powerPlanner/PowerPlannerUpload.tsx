@@ -49,7 +49,9 @@ export function PowerPlannerUpload({
   dataSource,
   onDataSourceChange,
 }: PowerPlannerUploadProps) {
-  const [dataType, setDataType] = useState<PowerPlannerDataType>('hourlyUsage')
+  const [dataType, setDataType] = useState<PowerPlannerDataType>(
+    dataSource?.records[0]?.dataType ?? 'hourlyUsage',
+  )
   const [parseResult, setParseResult] = useState<WorkbookParseResult | null>(null)
   const [selectedSheetName, setSelectedSheetName] = useState('')
   const [mapping, setMapping] = useState<Record<string, string>>({})

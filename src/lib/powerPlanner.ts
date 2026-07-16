@@ -140,12 +140,14 @@ export const guessPowerPlannerMapping = (
   const find = (...patterns: string[]) =>
     headers.find((header) => patterns.some((pattern) => header.includes(pattern))) ??
     ''
+  const findExact = (...patterns: string[]) =>
+    headers.find((header) => patterns.some((pattern) => header === pattern)) ?? ''
 
   return {
     date: find('연월', '일자', '날짜', '검침일', '사용일'),
-    year: find('연도', '연월', '년'),
-    month: find('월', '연월'),
-    day: find('일'),
+    year: findExact('연도', '년도', '년'),
+    month: findExact('월', '사용월'),
+    day: findExact('일'),
     hour: find('시간', '시각', '시간대'),
     usageKwh: find('사용전력량', '사용량', 'kWh', '전력량'),
     maxDemandKw: find('최대수요', '수요전력', '피크'),

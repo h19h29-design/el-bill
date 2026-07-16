@@ -66,6 +66,21 @@ describe('power planner data source harness', () => {
     })
   })
 
+  it('does not reuse combined month or usage-day columns as separate date fields', () => {
+    const mapping = guessPowerPlannerMapping([
+      '연월',
+      '사용일수(일)',
+      '사용전력량(kWh)',
+      '청구요금(원)',
+    ])
+
+    expect(mapping.date).toBe('연월')
+    expect(mapping.year).toBe('')
+    expect(mapping.month).toBe('')
+    expect(mapping.day).toBe('')
+    expect(mapping.usageDays).toBe('사용일수(일)')
+  })
+
   it('summarizes hourly and max-demand records through the data source interface', () => {
     const hourlyRecords = mapRowsToPowerPlannerRecords(
       [

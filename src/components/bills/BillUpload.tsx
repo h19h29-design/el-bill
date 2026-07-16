@@ -260,6 +260,10 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
               </strong>
             </article>
             <article>
+              <span>정규화 레코드</span>
+              <strong>{recognition.recognizedRecordCount.toLocaleString('ko-KR')}건</strong>
+            </article>
+            <article>
               <span>필수 컬럼</span>
               <strong>{recognition.requiredColumns.join(', ') || '없음'}</strong>
             </article>

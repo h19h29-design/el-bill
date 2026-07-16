@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
+import JSZip from 'jszip'
 
 const powerPlannerHtmlFixture = `
 <html>
@@ -57,6 +58,7 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await page.reload()
 
   await expectViewHeading('통합 대시보드')
+  await expect(page.getByText('시연 샘플', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '전기요금 자동진단 시작' }).click()
   await expectViewHeading('자동진단')
 
@@ -64,8 +66,15 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await expectViewHeading('월별 한전고지서 입력')
   await page.locator('input[type="file"][accept=".xlsx,.xls"]').first().setInputFiles(billXls)
   await expect(page.getByRole('heading', { name: '자동 인식 결과' })).toBeVisible()
+  await expect(
+    page.locator('.recognition-grid article').filter({ hasText: '필수 컬럼' }),
+  ).toContainText('연도, 월, 사용량, 총 전기요금')
+  await expect(
+    page.locator('.recognition-grid article').filter({ hasText: '누락 컬럼' }),
+  ).toContainText('없음')
   await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
   await expectViewHeading('자동진단')
+  await expect(page.getByText('사용자 업로드 분석', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '계산 근거 분해' })).toBeVisible()
 
   await clickSidebar('파워플래너')
@@ -75,6 +84,8 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   ).toBeVisible()
   await page.getByRole('button', { name: '매핑 적용' }).click()
   await expectViewHeading('자동진단')
+  await clickSidebar('파워플래너')
+  await expect(page.getByLabel('업로드 데이터 유형')).toHaveValue('monthlyUsage')
 
   await clickSidebar('피크관리')
   await page.getByLabel('본관 EHP 그룹 수').fill('8')
@@ -95,9 +106,63 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
 
   const zipDownload = page.waitForEvent('download')
   await page.getByRole('button', { name: '전체 다운로드 (ZIP)' }).click()
-  await expect((await zipDownload).suggestedFilename()).toContain('.zip')
+  const downloadedZip = await zipDownload
+  await expect(downloadedZip.suggestedFilename()).toContain('.zip')
+  const zipPath = testInfo.outputPath('document-package.zip')
+  await downloadedZip.saveAs(zipPath)
+  const zip = await JSZip.loadAsync(await readFile(zipPath))
+  expect(Object.keys(zip.files)).toEqual(
+    expect.arrayContaining([
+      '전기요금제_변경계획안.pdf',
+      '한전_제출공문.pdf',
+      '전기사용계약_변경신청서_미리보기.pdf',
+    ]),
+  )
+  const zippedPlanPdf = await zip.file('전기요금제_변경계획안.pdf')?.async('uint8array')
+  expect(new TextDecoder().decode(zippedPlanPdf?.slice(0, 4))).toBe('%PDF')
+  expect(zippedPlanPdf?.byteLength).toBeGreaterThan(100_000)
 
   const pdfDownload = page.waitForEvent('download')
   await page.getByRole('button', { name: '다운로드' }).first().click()
-  await expect((await pdfDownload).suggestedFilename()).toContain('.pdf')
+  const downloadedPdf = await pdfDownload
+  await expect(downloadedPdf.suggestedFilename()).toContain('.pdf')
+  const pdfPath = testInfo.outputPath('plan.pdf')
+  await downloadedPdf.saveAs(pdfPath)
+  const planPdfBytes = await readFile(pdfPath)
+  expect(planPdfBytes.subarray(0, 4).toString()).toBe('%PDF')
+  expect(planPdfBytes.byteLength).toBeGreaterThan(100_000)
+})
+
+test('mobile core workflow keeps navigation and wide content usable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+
+  const menuButton = page.getByRole('button', { name: '주요 메뉴 열기' })
+  await expect(menuButton).toBeVisible()
+  await expect(menuButton).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('.sidebar-nav')).not.toBeVisible()
+
+  await menuButton.click()
+  await expect(page.getByRole('button', { name: '주요 메뉴 닫기' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+  await page.locator('.sidebar-nav').getByRole('button', { name: '자동진단' }).click()
+  await expect(page.locator('.sidebar-nav')).not.toBeVisible()
+
+  await expect(page.getByText('표를 좌우로 밀어 전체 후보를 확인하세요.')).toBeVisible()
+
+  await page.getByRole('button', { name: '주요 메뉴 열기' }).click()
+  await page.locator('.sidebar-nav').getByRole('button', { name: '문서생성' }).click()
+  await page.getByRole('button', { name: '변경신청서' }).click()
+  await expect(page.getByText('문서를 좌우로 밀어 원본 크기로 확인하세요.')).toBeVisible()
+
+  const previewSize = await page.locator('.document-preview-stage').evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(previewSize.scrollWidth).toBeGreaterThan(previewSize.clientWidth)
+  expect(previewSize.scrollWidth).toBeGreaterThanOrEqual(680)
 })

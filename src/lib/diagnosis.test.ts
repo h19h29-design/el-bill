@@ -136,4 +136,50 @@ describe('automatic diagnosis harness', () => {
     expect(recognition?.guidance).toContain('컬럼을 직접 지정')
     expect(recognition?.missingRequiredColumns).toContain('총 전기요금')
   })
+
+  it('summarizes normalized auto rows as complete recognized data', () => {
+    const recognition = summarizeWorkbookRecognition(
+      {
+        sheets: [
+          {
+            name: '25전기요금',
+            headers: ['구분', '값'],
+            rows: [{ 구분: '5월', 값: 1 }],
+          },
+        ],
+        autoRows: [makeBill(5), { ...makeBill(6), year: 2025 }],
+        diagnostics: ['연도별 시트를 자동 병합했습니다.'],
+      },
+      {
+        year: '',
+        month: '',
+        usageKwh: '',
+        totalBillWon: '',
+      },
+    )
+
+    expect(recognition?.recognizedYears).toEqual([2025, 2026])
+    expect(recognition?.requiredColumns).toEqual([
+      '연도',
+      '월',
+      '사용량',
+      '총 전기요금',
+    ])
+    expect(recognition?.missingRequiredColumns).toEqual([])
+    expect(recognition?.optionalColumns).toEqual(
+      expect.arrayContaining([
+        '요금적용전력',
+        '최대수요전력',
+        '기본요금',
+        '전력량요금',
+        '기후환경요금',
+        '연료비조정액',
+        '부가세',
+        '전력산업기반기금',
+      ]),
+    )
+    expect(recognition?.recognizedRecordCount).toBe(2)
+    expect(recognition?.mappingConfidence).toBe(100)
+    expect(recognition?.canAnalyze).toBe(true)
+  })
 })

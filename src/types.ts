@@ -17,6 +17,8 @@ export type CalculationMode = 'billDelta' | 'tariffFull'
 
 export type DataConfidence = '데이터 충분' | '보통' | '낮음'
 
+export type DataMode = 'sample' | 'uploaded'
+
 export interface SchoolProfile {
   schoolName: string
   displaySchoolName: string
@@ -191,6 +193,7 @@ export interface AutoDiagnosisResult {
 export interface UploadRecognitionSummary {
   sheetNames: string[]
   recognizedYears: number[]
+  recognizedRecordCount: number
   requiredColumns: string[]
   optionalColumns: string[]
   missingRequiredColumns: string[]
