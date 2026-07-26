@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import type {
   BillImportContext,
   MonthlyBill,
@@ -19,6 +19,8 @@ export interface WorkbookParseResult {
 
 const maxUploadFileBytes = 10 * 1024 * 1024
 const maxWorkbookRows = 10_000
+const legacyXlsMessage =
+  '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.'
 
 export const validateUploadFile = (
   file: Pick<File, 'name' | 'size'>,
@@ -27,7 +29,7 @@ export const validateUploadFile = (
     return '파일 크기는 10MB 이하만 분석할 수 있습니다.'
   }
   if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
-    return '엑셀(.xlsx, .xls) 또는 CSV(.csv) 파일만 업로드할 수 있습니다.'
+    return 'XLSX(.xlsx), CSV(.csv), 또는 파워플래너 HTML .xls 파일만 업로드할 수 있습니다.'
   }
   return null
 }
@@ -176,6 +178,48 @@ const parseCsvSheet = (text: string, name: string): ParsedSheet => {
   }
 }
 
+const getDisplayedCellValue = (cell: ExcelJS.Cell): string => cell.text
+
+const workbookSheetToMatrix = (sheet: ExcelJS.Worksheet): string[][] => {
+  const matrix: string[][] = []
+  const columnCount = sheet.actualColumnCount
+
+  sheet.eachRow({ includeEmpty: false }, (row) => {
+    const values = Array.from({ length: columnCount }, (_, index) =>
+      getDisplayedCellValue(row.getCell(index + 1)),
+    )
+    if (values.some((value) => normalize(value))) matrix.push(values)
+  })
+
+  return matrix
+}
+
+const matrixToParsedSheet = (name: string, matrix: string[][]): ParsedSheet => {
+  const headerCounts = new Map<string, number>()
+  const headers = (matrix[0] ?? []).map((header, index) => {
+    const base = normalize(header) || `열 ${index + 1}`
+    const count = (headerCounts.get(base) ?? 0) + 1
+    headerCounts.set(base, count)
+    return count === 1 ? base : `${base} ${count}`
+  })
+  const rows = matrix.slice(1).map((values) =>
+    headers.reduce<Record<string, unknown>>((acc, header, index) => {
+      acc[header] = values[index] ?? ''
+      return acc
+    }, {}),
+  )
+
+  return { name, headers, rows }
+}
+
+const getRowLimitMessageForSheets = (sheets: ParsedSheet[]) =>
+  getWorkbookLimitMessage({ sheets, autoRows: [], diagnostics: [] })
+
+const assertWorkbookRowsWithinLimit = (sheets: ParsedSheet[]) => {
+  const message = getRowLimitMessageForSheets(sheets)
+  if (message) throw new Error(message)
+}
+
 const makeImportedBill = (
   year: number,
   month: number,
@@ -217,22 +261,18 @@ const makeImportedBill = (
 }
 
 const parseYearlyBillWorkbook = (
-  workbook: XLSX.WorkBook,
+  workbook: ExcelJS.Workbook,
   context?: BillImportContext,
 ): { rows: MonthlyBill[]; diagnostics: string[] } => {
   const rows: MonthlyBill[] = []
   const diagnostics: string[] = []
 
-  workbook.SheetNames.forEach((sheetName) => {
+  workbook.worksheets.forEach((sheet) => {
+    const sheetName = sheet.name
     const year = inferYearFromSheetName(sheetName)
     if (!year) return
 
-    const sheet = workbook.Sheets[sheetName]
-    const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-      header: 1,
-      blankrows: false,
-      defval: null,
-    })
+    const matrix = workbookSheetToMatrix(sheet)
     const headerIndex = matrix.findIndex((row) =>
       row.some((cell) => normalize(cell).includes('월분')),
     )
@@ -356,6 +396,9 @@ const parseWorkbookContents = async (
   context?: BillImportContext,
 ): Promise<WorkbookParseResult> => {
   const buffer = file instanceof File ? await file.arrayBuffer() : file
+  if (buffer.byteLength > maxUploadFileBytes) {
+    throw new Error('파일 크기는 10MB 이하만 분석할 수 있습니다.')
+  }
   const decodedText = decodeSpreadsheetText(buffer)
   if (file instanceof File && file.name.toLowerCase().endsWith('.csv')) {
     return {
@@ -368,6 +411,7 @@ const parseWorkbookContents = async (
   const powerPlannerSheet = parsePowerPlannerHtmlSheet(decodedText)
 
   if (powerPlannerSheet) {
+    assertWorkbookRowsWithinLimit([powerPlannerSheet])
     const autoRows = parsePowerPlannerMonthlyBills(powerPlannerSheet, context)
     return {
       sheets: [powerPlannerSheet],
@@ -381,15 +425,16 @@ const parseWorkbookContents = async (
     }
   }
 
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
-  const sheets = workbook.SheetNames.map((name) => {
-    const sheet = workbook.Sheets[name]
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-      defval: '',
-    })
-    const headers = rows[0] ? Object.keys(rows[0]) : []
-    return { name, headers, rows }
-  })
+  if (file instanceof File && file.name.toLowerCase().endsWith('.xls')) {
+    throw new Error(legacyXlsMessage)
+  }
+
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer)
+  const sheets = workbook.worksheets.map((sheet) =>
+    matrixToParsedSheet(sheet.name, workbookSheetToMatrix(sheet)),
+  )
+  assertWorkbookRowsWithinLimit(sheets)
   const known = parseYearlyBillWorkbook(workbook, context)
 
   return {

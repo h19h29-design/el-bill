@@ -1,5 +1,6 @@
+import { readFile } from 'node:fs/promises'
+import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
-import * as XLSX from 'xlsx'
 import {
   getWorkbookLimitMessage,
   mapRowsToBills,
@@ -22,22 +23,38 @@ const currentPlan = {
   memo: '테스트 요금제',
 }
 
-const createSyntheticWorkbook = () => {
-  const workbook = XLSX.utils.book_new()
+const toArrayBuffer = (buffer: ArrayBuffer | Uint8Array) =>
+  buffer instanceof ArrayBuffer
+    ? buffer
+    : buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength,
+      ) as ArrayBuffer
+
+const createSyntheticWorkbook = async () => {
+  const workbook = new ExcelJS.Workbook()
   const yearlyRows: Array<{ year: number; rows: number[][] }> = [
     { year: 2025, rows: [[11, 31_200, 5_180_000], [12, 47_600, 7_890_000]] },
     { year: 2026, rows: [[1, 49_200, 8_160_000], [2, 45_400, 7_530_000]] },
   ]
 
   for (const { year, rows } of yearlyRows) {
-    const sheet = XLSX.utils.aoa_to_sheet([
+    const sheet = workbook.addWorksheet(`${year} 시연`)
+    sheet.addRows([
       ['월분', '사용량(kWh)', `${year}학년도`],
       ...rows,
     ])
-    XLSX.utils.book_append_sheet(workbook, sheet, `${year} 시연`)
   }
 
-  return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+  return toArrayBuffer(await workbook.xlsx.writeBuffer())
+}
+
+const createFormulaWorkbook = async () => {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('2026 시연')
+  sheet.addRow(['월분', '사용량(kWh)', '2026학년도'])
+  sheet.addRow([6, 42_000, { formula: '4200000+2220000', result: 6_420_000 }])
+  return toArrayBuffer(await workbook.xlsx.writeBuffer())
 }
 
 const powerPlannerHtmlFixture = `
@@ -76,6 +93,30 @@ const powerPlannerHtmlFixture = `
 </html>`
 
 describe('synthetic workbook parser harness', () => {
+  it('parses the checked-in synthetic XLSX fixture', async () => {
+    const buffer = await readFile('e2e/fixtures/monthly-bills.xlsx')
+    const arrayBuffer = buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength,
+    ) as ArrayBuffer
+
+    const result = await parseWorkbook(arrayBuffer, {
+      appliedPowerKw: 620,
+      currentPlan,
+    })
+
+    expect(result.autoRows).toHaveLength(12)
+    expect(result.autoRows[0]?.observedFields).toContain('totalBillWon')
+  })
+
+  it('rejects legacy binary XLS files with a conversion instruction', async () => {
+    const file = new File([new Uint8Array([0xd0, 0xcf, 0x11, 0xe0])], 'legacy.xls')
+
+    await expect(parseWorkbook(file)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
   it('rejects an oversized browser upload before parsing', () => {
     const message = validateUploadFile({
       name: 'oversized.xlsx',
@@ -83,6 +124,12 @@ describe('synthetic workbook parser harness', () => {
     })
 
     expect(message).toContain('10MB')
+  })
+
+  it('rejects an oversized ArrayBuffer before parsing', async () => {
+    await expect(
+      parseWorkbook(new ArrayBuffer(10 * 1024 * 1024 + 1)),
+    ).rejects.toThrow('파일 크기는 10MB 이하만 분석할 수 있습니다.')
   })
 
   it('rejects a workbook whose total rows exceed the analysis limit', () => {
@@ -102,7 +149,7 @@ describe('synthetic workbook parser harness', () => {
   })
 
   it('auto-merges a deterministic in-memory yearly workbook', async () => {
-    const result = await parseWorkbook(createSyntheticWorkbook())
+    const result = await parseWorkbook(await createSyntheticWorkbook())
 
     expect(result.autoRows).toHaveLength(4)
     expect(result.autoRows).toEqual(
@@ -125,7 +172,7 @@ describe('synthetic workbook parser harness', () => {
 
   it('keeps yearly and Power Planner charge fallbacks distinct from observed fields', async () => {
     const context = { appliedPowerKw: 620, currentPlan }
-    const yearly = await parseWorkbook(createSyntheticWorkbook(), context)
+    const yearly = await parseWorkbook(await createSyntheticWorkbook(), context)
     const yearlyBill = yearly.autoRows[0]
 
     expect(yearlyBill).toMatchObject({
@@ -157,6 +204,17 @@ describe('synthetic workbook parser harness', () => {
     expect(powerPlannerBill?.observedFields).not.toContain('maxDemandKw')
   })
 
+  it('uses a formula cached result without evaluating the formula', async () => {
+    const result = await parseWorkbook(await createFormulaWorkbook())
+
+    expect(result.autoRows[0]).toMatchObject({
+      year: 2026,
+      month: 6,
+      usageKwh: 42_000,
+      totalBillWon: 6_420_000,
+    })
+  })
+
   it('treats blank Power Planner applied power as an inferred profile fallback', async () => {
     const blankAppliedPowerFixture = powerPlannerHtmlFixture.replace(
       'title="450" aria-describedby="grid_JOJ_KW">450',
@@ -177,7 +235,9 @@ describe('synthetic workbook parser harness', () => {
 
   it('normalizes a KEPCO Power Planner HTML xls export', async () => {
     const result = await parseWorkbook(
-      new TextEncoder().encode(powerPlannerHtmlFixture).buffer,
+      new File([powerPlannerHtmlFixture], 'power-planner-monthly.xls', {
+        type: 'application/vnd.ms-excel',
+      }),
     )
 
     expect(result.sheets[0].headers).toEqual([
