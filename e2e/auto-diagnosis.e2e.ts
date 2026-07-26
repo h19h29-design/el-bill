@@ -143,6 +143,7 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
   await expectViewHeading('자동진단')
   await expect(page.getByText('사용자 고지서 분석', { exact: false })).toBeVisible()
+  await expect(page.getByText('고지서: 사용자 업로드', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '계산 근거 분해' })).toBeVisible()
 
   await clickSidebar('파워플래너')

@@ -1,5 +1,4 @@
 import type { DataProvenance, MonthlyBill } from '../types'
-import { validateBillPeriods } from './billPeriods'
 
 const dayMs = 24 * 60 * 60 * 1000
 
@@ -55,12 +54,6 @@ const isStoredMonthlyBill = (value: unknown): value is MonthlyBill => {
 export const isStoredMonthlyBillCollection = (
   value: unknown,
 ): value is MonthlyBill[] => Array.isArray(value) && value.every(isStoredMonthlyBill)
-
-const hasSafeLegacyUploadBills = (value: unknown) => {
-  if (!isStoredMonthlyBillCollection(value) || !value.length) return false
-  const validation = validateBillPeriods(value, 12)
-  return validation.hasRequiredConsecutiveMonths && validation.issues.length === 0
-}
 
 export const createExpiry = () => {
   const createdAt = new Date()
@@ -133,10 +126,7 @@ export const loadDataProvenance = (storedBills?: unknown): DataProvenance => {
   }
 
   const migrated: DataProvenance = {
-    bills:
-      legacyMode.data === 'uploaded' && hasSafeLegacyUploadBills(storedBills)
-        ? 'uploaded'
-        : 'sample',
+    bills: 'sample',
     powerPlanner: 'none',
   }
   localStorage.setItem(

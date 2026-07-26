@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import App from './App'
 import { sampleBills } from './data/sampleBills'
 import { samplePowerPlannerDataSource } from './data/samplePowerPlanner'
@@ -38,20 +38,22 @@ describe('data provenance persistence', () => {
     expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 시연 샘플')
   })
 
-  it('migrates a legacy uploaded mode only with valid unexpired consecutive bills', async () => {
+  it('keeps legacy uploaded mode with stored bills and PowerPlanner data locked to the sample', async () => {
     localStorage.setItem('el-bill:data-mode', stored('uploaded'))
     localStorage.setItem('el-bill:bills', stored(sampleBills))
     localStorage.setItem('el-bill:power-planner', stored(samplePowerPlannerDataSource))
 
     render(<App />)
 
-    expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 사용자 업로드')
+    expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 시연 샘플')
     await waitFor(() => {
       expect(JSON.parse(localStorage.getItem('el-bill:data-provenance') ?? '{}').data).toEqual({
-        bills: 'uploaded',
+        bills: 'sample',
         powerPlanner: 'none',
       })
     })
+    fireEvent.click(screen.getByRole('button', { name: /^문서생성$/ }))
+    expect(screen.getByText('사용자 고지서 업로드 후 생성 가능')).toBeTruthy()
   })
 
   it('migrates a legacy sample session without granting upload eligibility', async () => {
