@@ -31,4 +31,4 @@
 
 ## 의존성 감사 상태
 
-`npm ls xlsx`에서 취약한 `xlsx` 패키지가 없는 것을 확인했다. 초기 `npm audit --omit=dev` 재시도는 npm 10.9.8의 retired quick endpoint에서 HTTP 400 `Invalid package tree`를 반환했다. 2026-07-26 최신 재시도는 정상 완료됐지만 운영 의존성 기준 high 10, moderate 1, low 1, 총 12건을 보고했다. ExcelJS의 `archiver`·`uuid` 전이 의존성이 포함되므로, 이 문서는 깨끗한 audit 결과를 주장하지 않는다.
+`npm ls xlsx`에서 취약한 `xlsx` 패키지가 없는 것을 확인했다. 초기 `npm audit --omit=dev` 재시도는 npm 10.9.8의 retired quick endpoint에서 HTTP 400 `Invalid package tree`를 반환했지만, 2026-07-26 후속 전체 감사는 정상 완료됐다. 보정 전 운영 의존성 결과는 high 10, moderate 1, low 1, 총 12건이었다. `npm audit fix --omit=dev`를 `--force` 없이 실행해 DOMPurify 3.4.12, PostCSS 8.5.23, Nanoid 3.3.16으로 lockfile을 갱신했고 ExcelJS 4.4.0은 유지했다. 재감사 결과는 high 9, moderate 1, low 0, 총 10건이다. 남은 항목은 ExcelJS의 Node용 stream/archive 경로가 가져오는 `archiver`, `archiver-utils`, `zip-stream`, `readdir-glob`, `glob`, `minimatch`, `brace-expansion`, `rimraf`, `uuid` 체인이다. 이 MVP의 브라우저 번들은 ExcelJS browser build와 `Workbook.xlsx.load`만 사용하며 Node stream reader/writer API를 호출하지 않지만, 이는 깨끗한 감사 또는 운영 위험 부재를 뜻하지 않는다. ExcelJS를 강제로 3.x로 내리는 변경은 적용하지 않았으며 실제 운영 전에는 대체 또는 격리 파서를 재검토해야 한다.

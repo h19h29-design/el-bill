@@ -246,6 +246,7 @@ const getZipEntryPayload = (
 
   const localFlags = view.getUint16(localHeaderOffset + 6, true)
   const localMethod = view.getUint16(localHeaderOffset + 8, true)
+  const localCrc32 = view.getUint32(localHeaderOffset + 14, true)
   const localCompressedSize = view.getUint32(localHeaderOffset + 18, true)
   const localUncompressedSize = view.getUint32(localHeaderOffset + 22, true)
   const fileNameLength = view.getUint16(localHeaderOffset + 26, true)
@@ -255,6 +256,7 @@ const getZipEntryPayload = (
     localMethod !== method ||
     flags & 0x0001 ||
     flags & 0x0040 ||
+    (!(flags & 0x0008) && localCrc32 !== entry.crc32) ||
     (flags & 0x0008
       ? (localCompressedSize !== 0 && localCompressedSize !== compressedSize) ||
         (localUncompressedSize !== 0 && localUncompressedSize !== uncompressedSize)

@@ -29,6 +29,6 @@
 ## 보안/유지보수 메모
 
 - 취약한 SheetJS/xlsx는 제거했고 `npm ls xlsx`가 빈 트리를 반환한다.
-- 초기 `npm audit --omit=dev` 재시도는 npm 10.9.8에서 retired quick endpoint의 HTTP 400 `Invalid package tree`로 완료되지 않았다. 2026-07-26 최신 재시도는 완료됐고 운영 의존성 기준 high 10, moderate 1, low 1, 총 12건을 보고했다. ExcelJS의 `archiver`·`uuid` 전이 의존성을 포함하므로 깨끗한 audit 결과를 주장하지 않는다.
+- 초기 `npm audit --omit=dev` 재시도는 npm 10.9.8에서 retired quick endpoint의 HTTP 400 `Invalid package tree`로 완료되지 않았다. 2026-07-26 후속 감사는 완료됐으며, 비강제 `npm audit fix --omit=dev` 전에는 high 10, moderate 1, low 1, 총 12건을 보고했다. DOMPurify 3.4.12, PostCSS 8.5.23, Nanoid 3.3.16으로 호환 범위 내 lockfile을 갱신한 뒤 재감사 결과는 high 9, moderate 1, low 0, 총 10건이다. 남은 항목은 ExcelJS의 Node용 stream/archive 전이 의존성 체인에 속한다. 브라우저 MVP는 ExcelJS browser build와 `Workbook.xlsx.load`만 사용하지만 깨끗한 audit 결과나 운영 위험 부재를 주장하지 않으며, ExcelJS 강제 다운그레이드나 전이 의존성 major override는 적용하지 않는다.
 - 원격 서버 파싱을 만들지 않고 브라우저 로컬 파일 처리로 범위를 제한한다. 실제 운영 전에는 ExcelJS 파싱을 Web Worker 또는 샌드박스 파서로 격리하는 방안을 검토한다.
 - 라이선스 불명 또는 저활성 GitHub 예제 코드는 포함하지 않음.

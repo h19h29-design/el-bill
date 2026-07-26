@@ -96,6 +96,19 @@ const corruptCentralDirectoryCrc = (buffer: ArrayBuffer, method: number) => {
   return copy
 }
 
+const corruptLocalHeaderCrc = (buffer: ArrayBuffer, method: number) => {
+  const copy = buffer.slice(0)
+  const view = new DataView(copy)
+  const centralEntryOffset = findCentralDirectoryEntry(copy, method)
+  const localHeaderOffset = view.getUint32(centralEntryOffset + 42, true)
+  view.setUint32(
+    localHeaderOffset + 14,
+    view.getUint32(localHeaderOffset + 14, true) ^ 0xffffffff,
+    true,
+  )
+  return copy
+}
+
 const createStoredSyntheticWorkbook = async () => {
   const zip = await JSZip.loadAsync(await createSyntheticWorkbook())
   return toArrayBuffer(await zip.generateAsync({ type: 'uint8array', compression: 'STORE' }))
@@ -283,6 +296,14 @@ describe('synthetic workbook parser harness', () => {
 
   it('rejects a corrupt central CRC for a stored XLSX entry before ExcelJS load', async () => {
     const corrupted = corruptCentralDirectoryCrc(await createStoredSyntheticWorkbook(), 0)
+
+    await expect(parseWorkbook(corrupted)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
+  it('rejects a local CRC that differs from central metadata without a data descriptor', async () => {
+    const corrupted = corruptLocalHeaderCrc(await createSyntheticWorkbook(), 8)
 
     await expect(parseWorkbook(corrupted)).rejects.toThrow(
       '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
