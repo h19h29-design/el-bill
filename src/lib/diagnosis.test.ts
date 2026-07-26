@@ -6,6 +6,7 @@ import {
   assessDataConfidence,
   buildAutoDiagnosis,
   comparePlansForDiagnosis,
+  findExactRatePlan,
   getDataRecognitionRate,
   summarizeWorkbookRecognition,
 } from './diagnosis'
@@ -121,6 +122,28 @@ describe('automatic diagnosis harness', () => {
 
     expect(assessDataConfidence(inferredDemandBills)).toBe('보통')
     expect(getDataRecognitionRate(inferredDemandBills)).toBe(67)
+  })
+
+  it('safely diagnoses persisted rows from before observed-field provenance', () => {
+    const legacyBills = sampleBills.map(({ observedFields: _observedFields, ...bill }) => bill) as unknown as MonthlyBill[]
+    const diagnosis = buildAutoDiagnosis({
+      bills: legacyBills,
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+    })
+
+    expect(diagnosis.dataConfidence).toBe('보통')
+    expect(diagnosis.dataRecognitionRate).toBe(67)
+  })
+
+  it('does not choose a different plan when the active profile has no exact rate-plan match', () => {
+    expect(
+      findExactRatePlan(
+        { ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' },
+        defaultRatePlans,
+      ),
+    ).toBeNull()
   })
 
   it('does not calculate a three-year estimate from gapped calendar periods', () => {

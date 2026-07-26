@@ -70,6 +70,37 @@ export type MonthlyBillObservedField =
   | 'vatWon'
   | 'fundWon'
 
+const observedBillFields = new Set<MonthlyBillObservedField>([
+  'year',
+  'month',
+  'usageKwh',
+  'totalBillWon',
+  'appliedPowerKw',
+  'maxDemandKw',
+  'baseChargeWon',
+  'energyChargeWon',
+  'powerFactorChargeWon',
+  'climateChargeWon',
+  'fuelAdjustmentWon',
+  'vatWon',
+  'fundWon',
+])
+
+export const getObservedBillFields = (
+  bill: { observedFields?: unknown },
+): MonthlyBillObservedField[] =>
+  Array.isArray(bill.observedFields)
+    ? bill.observedFields.filter(
+        (field): field is MonthlyBillObservedField =>
+          typeof field === 'string' && observedBillFields.has(field as MonthlyBillObservedField),
+      )
+    : []
+
+export const hasObservedBillField = (
+  bill: { observedFields?: unknown },
+  field: MonthlyBillObservedField,
+) => getObservedBillFields(bill).includes(field)
+
 export interface BillImportContext {
   appliedPowerKw: number
   currentPlan: RatePlan

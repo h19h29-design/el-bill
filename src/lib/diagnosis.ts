@@ -13,6 +13,7 @@ import type {
   SchoolProfile,
   UploadRecognitionSummary,
 } from '../types'
+import { hasObservedBillField } from '../types'
 import {
   estimateBillForPlan,
   getSeason,
@@ -64,12 +65,7 @@ export const findCurrentPlan = (
   if (!ratePlans.length) {
     throw new Error('요금제 설정이 비어 있어 자동진단을 실행할 수 없습니다.')
   }
-  const exact = ratePlans.find(
-    (plan) =>
-      matches(plan.contractType, profile.contractType) &&
-      matches(plan.voltageType, profile.voltageType) &&
-      matches(plan.planName, profile.currentPlan),
-  )
+  const exact = findExactRatePlan(profile, ratePlans)
   if (exact) return exact
 
   return (
@@ -81,12 +77,23 @@ export const findCurrentPlan = (
   )
 }
 
+export const findExactRatePlan = (
+  profile: SchoolProfile,
+  ratePlans: RatePlan[],
+) =>
+  ratePlans.find(
+    (plan) =>
+      matches(plan.contractType, profile.contractType) &&
+      matches(plan.voltageType, profile.voltageType) &&
+      matches(plan.planName, profile.currentPlan),
+  ) ?? null
+
 export const assessDataConfidence = (bills: MonthlyBill[]): DataConfidence => {
   const validation = validateBillPeriods(bills, 36)
   const recent36 = validation.recentConsecutiveBills.slice(-36)
   const hasDemand = recent36.length > 0 && recent36.every(
     (bill) =>
-      bill.maxDemandKw > 0 && bill.observedFields.includes('maxDemandKw'),
+      bill.maxDemandKw > 0 && hasObservedBillField(bill, 'maxDemandKw'),
   )
   if (validation.hasRequiredConsecutiveMonths && hasDemand) return '데이터 충분'
   if (recent36.length >= 12) return '보통'
@@ -104,10 +111,10 @@ export const getDataRecognitionRate = (bills: MonthlyBill[]) => {
       Number(bill.totalBillWon > 0)
     const optionalScore =
       Number(
-        bill.appliedPowerKw > 0 && bill.observedFields.includes('appliedPowerKw'),
+        bill.appliedPowerKw > 0 && hasObservedBillField(bill, 'appliedPowerKw'),
       ) +
       Number(
-        bill.maxDemandKw > 0 && bill.observedFields.includes('maxDemandKw'),
+        bill.maxDemandKw > 0 && hasObservedBillField(bill, 'maxDemandKw'),
       )
     return sum + requiredScore + optionalScore
   }, 0)
@@ -495,7 +502,7 @@ export const summarizeWorkbookRecognition = (
   const optionalColumns = hasAutoRows
     ? normalizedOptionalBillColumns
         .filter(([, key]) =>
-          result.autoRows.some((bill) => bill.observedFields.includes(key)),
+          result.autoRows.some((bill) => hasObservedBillField(bill, key)),
         )
         .map(([label]) => label)
     : mappedOptionalColumns

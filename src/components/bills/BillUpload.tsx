@@ -13,7 +13,7 @@ import {
   type ParsedSheet,
   type WorkbookParseResult,
 } from '../../lib/excel'
-import { findCurrentPlan, summarizeWorkbookRecognition } from '../../lib/diagnosis'
+import { findExactRatePlan, summarizeWorkbookRecognition } from '../../lib/diagnosis'
 import { BillTable } from './BillTable'
 
 interface BillUploadProps {
@@ -90,12 +90,18 @@ export function BillUpload({
     () => summarizeWorkbookRecognition(parseResult, mapping),
     [parseResult, mapping],
   )
-  const importContext = useMemo(
-    () => ({
-      appliedPowerKw: profile.appliedPowerKw,
-      currentPlan: findCurrentPlan(profile, ratePlans),
-    }),
+  const exactCurrentPlan = useMemo(
+    () => findExactRatePlan(profile, ratePlans),
     [profile, ratePlans],
+  )
+  const importContext = useMemo(
+    () => exactCurrentPlan
+      ? {
+          appliedPowerKw: profile.appliedPowerKw,
+          currentPlan: exactCurrentPlan,
+        }
+      : undefined,
+    [exactCurrentPlan, profile.appliedPowerKw],
   )
   const pendingBills = useMemo(() => {
     if (!parseResult) return []
@@ -120,7 +126,9 @@ export function BillUpload({
       setShowManualMapping(false)
       setMapping(buildMapping(result.sheets[0]?.headers ?? []))
       setMessage(
-        '파일을 읽었습니다. 새 파일 미리보기와 자동 인식 결과를 확인한 뒤 분석을 시작해 주세요.',
+        importContext
+          ? '파일을 읽었습니다. 새 파일 미리보기와 자동 인식 결과를 확인한 뒤 분석을 시작해 주세요.'
+          : '현재 요금제가 설정과 정확히 일치하지 않습니다. 설정에서 계약종별, 수전전압, 현재 요금제를 확인한 뒤 요금 추정을 진행하세요. 원본 필수 컬럼은 확인할 수 있습니다.',
       )
     } catch (error) {
       setParseResult(null)
@@ -264,6 +272,11 @@ export function BillUpload({
           </label>
         </div>
         {message && <p className="status-line">{message}</p>}
+        {!importContext && (
+          <p className="empty-state">
+            현재 프로필과 정확히 일치하는 요금제가 없습니다. 설정에서 계약종별, 수전전압, 현재 요금제를 일치시켜야 보정 요금과 추정 요금을 계산합니다.
+          </p>
+        )}
       </section>
 
       {recognition && (

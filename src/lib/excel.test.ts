@@ -123,6 +123,40 @@ describe('synthetic workbook parser harness', () => {
     )
   })
 
+  it('keeps yearly and Power Planner charge fallbacks distinct from observed fields', async () => {
+    const context = { appliedPowerKw: 620, currentPlan }
+    const yearly = await parseWorkbook(createSyntheticWorkbook(), context)
+    const yearlyBill = yearly.autoRows[0]
+
+    expect(yearlyBill).toMatchObject({
+      appliedPowerKw: 620,
+      maxDemandKw: 0,
+      baseChargeWon: 620 * currentPlan.baseRateWonPerKw,
+      energyChargeWon: Math.round(31_200 * currentPlan.seasonRates.springAutumn),
+    })
+    expect(yearlyBill?.observedFields).not.toContain('appliedPowerKw')
+    expect(yearlyBill?.observedFields).not.toContain('baseChargeWon')
+    expect(yearlyBill?.observedFields).not.toContain('energyChargeWon')
+    expect(yearlyBill?.observedFields).not.toContain('maxDemandKw')
+
+    const powerPlanner = await parseWorkbook(
+      new TextEncoder().encode(powerPlannerHtmlFixture).buffer,
+      context,
+    )
+    const powerPlannerBill = powerPlanner.autoRows[0]
+
+    expect(powerPlannerBill).toMatchObject({
+      appliedPowerKw: 450,
+      maxDemandKw: 0,
+      baseChargeWon: 450 * currentPlan.baseRateWonPerKw,
+      energyChargeWon: Math.round(42_000 * currentPlan.seasonRates.summer),
+    })
+    expect(powerPlannerBill?.observedFields).toContain('appliedPowerKw')
+    expect(powerPlannerBill?.observedFields).not.toContain('baseChargeWon')
+    expect(powerPlannerBill?.observedFields).not.toContain('energyChargeWon')
+    expect(powerPlannerBill?.observedFields).not.toContain('maxDemandKw')
+  })
+
   it('normalizes a KEPCO Power Planner HTML xls export', async () => {
     const result = await parseWorkbook(
       new TextEncoder().encode(powerPlannerHtmlFixture).buffer,
