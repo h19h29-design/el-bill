@@ -19,6 +19,7 @@ import {
   sampleBills,
 } from './data/sampleBills'
 import { samplePowerPlannerDataSource } from './data/samplePowerPlanner'
+import { defaultCalculationSettings } from './lib/calculationSettings'
 import {
   readStorageSnapshot,
   removeStorageSnapshot,
@@ -38,6 +39,7 @@ const makeData = (
   profile: defaultSchoolProfile,
   scenario: defaultScenario,
   ratePlans: defaultRatePlans,
+  calculationSettings: defaultCalculationSettings,
   powerPlanner: null,
   provenance: { bills: 'sample', powerPlanner: 'none' },
   ...overrides,

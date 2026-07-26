@@ -12,6 +12,7 @@ import {
   sampleBills,
 } from './data/sampleBills'
 import type {
+  CalculationSettings,
   DataProvenance,
   MonthlyBill,
   PeakScenario,
@@ -23,6 +24,7 @@ import type { PowerPlannerDataSource } from './types'
 import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
+import { defaultCalculationSettings } from './lib/calculationSettings'
 import {
   cleanupExpiredStorageSnapshots,
   getNextStorageSnapshotExpiry,
@@ -60,6 +62,7 @@ const defaultStorageData = (): StorageSnapshotData => ({
   profile: defaultSchoolProfile,
   scenario: defaultScenario,
   ratePlans: defaultRatePlans,
+  calculationSettings: defaultCalculationSettings,
   powerPlanner: null,
   provenance: { bills: 'sample', powerPlanner: 'none' },
 })
@@ -124,6 +127,8 @@ function App() {
   const [ratePlans, setRatePlans] = useState<RatePlan[]>(
     initialStorage.data.ratePlans,
   )
+  const [calculationSettings, setCalculationSettings] =
+    useState<CalculationSettings>(initialStorage.data.calculationSettings)
   const [powerPlannerDataSource, setPowerPlannerDataSource] =
     useState<PowerPlannerDataSource | null>(initialStorage.data.powerPlanner)
   const [dataProvenance, setDataProvenance] = useState<DataProvenance>(
@@ -143,6 +148,7 @@ function App() {
     setProfile(snapshot.data.profile)
     setScenario(snapshot.data.scenario)
     setRatePlans(snapshot.data.ratePlans)
+    setCalculationSettings(snapshot.data.calculationSettings)
     setPowerPlannerDataSource(snapshot.data.powerPlanner)
     setDataProvenance(snapshot.data.provenance)
     setExpiryMessage('')
@@ -155,6 +161,7 @@ function App() {
     setProfile(defaults.profile)
     setScenario(defaults.scenario)
     setRatePlans(defaults.ratePlans)
+    setCalculationSettings(defaults.calculationSettings)
     setPowerPlannerDataSource(defaults.powerPlanner)
     setDataProvenance(defaults.provenance)
     setActiveView('dashboard')
@@ -367,8 +374,17 @@ function App() {
         scenario,
         powerPlannerDataSource,
         billsAreUserUploaded: dataProvenance.bills === 'uploaded',
+        calculationSettings,
       }),
-    [bills, profile, ratePlans, scenario, powerPlannerDataSource, dataProvenance.bills],
+    [
+      bills,
+      profile,
+      ratePlans,
+      scenario,
+      powerPlannerDataSource,
+      dataProvenance.bills,
+      calculationSettings,
+    ],
   )
   const currentPlan = diagnosis.currentPlan
   const candidatePlan = diagnosis.recommendedPlan
@@ -480,6 +496,18 @@ function App() {
     return persistControlledPatch({ ratePlans: nextRatePlans })
   }
 
+  const changeCalculationSettings = async (
+    nextCalculationSettings: CalculationSettings,
+  ) => {
+    if (!storageSession) {
+      setCalculationSettings(nextCalculationSettings)
+      return true
+    }
+    return persistControlledPatch({
+      calculationSettings: nextCalculationSettings,
+    })
+  }
+
   const startUploadSession = async (
     nextBills: MonthlyBill[],
     nextPowerPlannerDataSource: PowerPlannerDataSource | null,
@@ -490,6 +518,7 @@ function App() {
       profile,
       scenario,
       ratePlans,
+      calculationSettings,
       powerPlanner: nextPowerPlannerDataSource,
       provenance: nextProvenance,
     })
@@ -630,10 +659,11 @@ function App() {
               {activeView === 'rates' && (
                 currentPlan && candidatePlan ? (
                   <RateSimulator
-                    bills={bills}
                     currentPlan={currentPlan}
                     candidatePlan={candidatePlan}
                     candidates={diagnosis.topCandidates}
+                    comparison={comparison}
+                    calculationSettings={calculationSettings}
                     scenario={scenario}
                     onScenarioChange={changeScenario}
                   />
@@ -668,7 +698,12 @@ function App() {
             </Suspense>
           </ViewErrorBoundary>
           {activeView === 'settings' && (
-            <RatePlanSettings plans={ratePlans} onPlansChange={changeRatePlans} />
+            <RatePlanSettings
+              plans={ratePlans}
+              onPlansChange={changeRatePlans}
+              calculationSettings={calculationSettings}
+              onCalculationSettingsChange={changeCalculationSettings}
+            />
           )}
         </section>
       </main>

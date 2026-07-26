@@ -4,11 +4,17 @@ import { defaultScenario, sampleBills } from '../data/sampleBills'
 import {
   calculateUsageHours,
   comparePlans,
+  estimateBillForPlan,
+  getDashboardSummary,
   getRecentBills,
   getSeason,
 } from './calculations'
 import { getPeakRiskLevel, getPeakRatio } from './peak'
 import type { MonthlyBill } from '../types'
+import {
+  defaultCalculationSettings,
+  validateCalculationSettings,
+} from './calculationSettings'
 
 const currentPlan = defaultRatePlans.find((plan) => plan.id === currentPlanId)!
 const candidatePlan = defaultRatePlans.find((plan) => plan.id === recommendedPlanId)!
@@ -31,6 +37,77 @@ const consecutiveBills = (year: number, month: number, count: number) =>
   })
 
 describe('electricity calculation harness', () => {
+  it('builds dashboard usage and peak summaries without a second tariff comparison', () => {
+    const summary = getDashboardSummary(
+      twelveConsecutiveBills,
+      defaultScenario,
+    )
+
+    expect(summary.latest).toBeTruthy()
+    expect(summary.currentYearTotal).toBeGreaterThan(0)
+    expect(summary).not.toHaveProperty('comparison')
+  })
+
+  it('preserves the prior tariff-full estimate with default correction settings', () => {
+    expect(
+      estimateBillForPlan(
+        sampleBills[0],
+        currentPlan,
+        undefined,
+        defaultCalculationSettings,
+      ),
+    ).toBe(9_345_913)
+  })
+
+  it.each([
+    ['climateEnvironmentWonPerKwh', 10, 46_617],
+    ['fuelAdjustmentWonPerKwh', -4, 46_617],
+    ['vatPercent', 11, 82_198],
+    ['fundPercent', 4.7, 82_198],
+  ] as const)(
+    'applies %s only to its tariff-full correction portion',
+    (field, value, expectedIncreaseWon) => {
+      const baseline = estimateBillForPlan(
+        sampleBills[0],
+        currentPlan,
+        undefined,
+        defaultCalculationSettings,
+      )
+      const changed = estimateBillForPlan(
+        sampleBills[0],
+        currentPlan,
+        undefined,
+        { ...defaultCalculationSettings, mode: 'tariffFull', [field]: value },
+      )
+
+      expect(changed - baseline).toBe(expectedIncreaseWon)
+    },
+  )
+
+  it('validates finite and sensible calculation correction bounds', () => {
+    expect(validateCalculationSettings(defaultCalculationSettings)).toEqual({
+      valid: true,
+      errors: {},
+    })
+    expect(
+      validateCalculationSettings({
+        ...defaultCalculationSettings,
+        climateEnvironmentWonPerKwh: Number.NaN,
+        fuelAdjustmentWonPerKwh: -101,
+        vatPercent: 101,
+        fundPercent: -1,
+      }),
+    ).toEqual({
+      valid: false,
+      errors: {
+        climateEnvironmentWonPerKwh: expect.any(String),
+        fuelAdjustmentWonPerKwh: expect.any(String),
+        vatPercent: expect.any(String),
+        fundPercent: expect.any(String),
+      },
+    })
+  })
+
   it('calendar rollover selects the true recent 12 months', () => {
     const recent = getRecentBills([...sampleBills].reverse(), 12)
     expect(recent).toHaveLength(12)

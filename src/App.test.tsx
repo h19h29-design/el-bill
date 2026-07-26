@@ -11,6 +11,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { defaultRatePlans } from './data/ratePlans'
+import { defaultCalculationSettings } from './lib/calculationSettings'
 import {
   defaultScenario,
   defaultSchoolProfile,
@@ -21,6 +22,7 @@ import {
   startNewStorageSnapshot,
   storageActivePointerKey,
   storageSnapshotKeyFor,
+  updateStorageSnapshot,
   type StorageSnapshotData,
 } from './lib/storage'
 
@@ -38,6 +40,7 @@ const makeData = (
   profile: defaultSchoolProfile,
   scenario: defaultScenario,
   ratePlans: defaultRatePlans,
+  calculationSettings: defaultCalculationSettings,
   powerPlanner: null,
   provenance: { bills: 'sample', powerPlanner: 'none' },
   ...overrides,
@@ -59,6 +62,126 @@ afterEach(() => {
 })
 
 describe('data provenance persistence', () => {
+  it('restores calculation mode and factors from the active snapshot', async () => {
+    const calculationSettings = {
+      ...defaultCalculationSettings,
+      mode: 'tariffFull' as const,
+      vatPercent: 12,
+    }
+    expect(
+      (
+        await startNewStorageSnapshot(
+          makeData({ calculationSettings }),
+          Date.now(),
+          'calculation-restore',
+        )
+      ).ok,
+    ).toBe(true)
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '설정' }))
+
+    expect(
+      (
+        screen.getByRole('radio', {
+          name: '요금표 기반 전체 추정',
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true)
+    expect(
+      (screen.getByLabelText('부가세율') as HTMLInputElement).value,
+    ).toBe('12')
+  })
+
+  it('adopts calculation settings changed by another tab', async () => {
+    expect(
+      (
+        await startNewStorageSnapshot(
+          makeData(),
+          Date.now(),
+          'calculation-cross-tab',
+        )
+      ).ok,
+    ).toBe(true)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '설정' }))
+    expect(
+      (
+        screen.getByRole('radio', {
+          name: '고지서 기반 차액 추정',
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true)
+
+    const result = await updateStorageSnapshot('calculation-cross-tab', {
+      calculationSettings: {
+        ...defaultCalculationSettings,
+        mode: 'tariffFull',
+      },
+    })
+    expect(result.ok).toBe(true)
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: storageSnapshotKeyFor('calculation-cross-tab'),
+        storageArea: localStorage,
+      }),
+    )
+
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole('radio', {
+            name: '요금표 기반 전체 추정',
+          }) as HTMLInputElement
+        ).checked,
+      ).toBe(true),
+    )
+  })
+
+  it('keeps prior calculation settings when atomic persistence fails', async () => {
+    expect(
+      (
+        await startNewStorageSnapshot(
+          makeData(),
+          Date.now(),
+          'calculation-quota',
+        )
+      ).ok,
+    ).toBe(true)
+    const nativeSetItem = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      if (key === storageSnapshotKeyFor('calculation-quota')) {
+        throw new DOMException('quota', 'QuotaExceededError')
+      }
+      return nativeSetItem.call(this, key, value)
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '설정' }))
+    fireEvent.click(
+      screen.getByRole('radio', { name: '요금표 기반 전체 추정' }),
+    )
+
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole('radio', {
+            name: '고지서 기반 차액 추정',
+          }) as HTMLInputElement
+        ).checked,
+      ).toBe(true),
+    )
+    expect(
+      screen.getByText(
+        '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+      ),
+    ).toBeTruthy()
+  })
+
   it('warns users to keep one tab open when Web Locks are unavailable', () => {
     render(<App />)
 

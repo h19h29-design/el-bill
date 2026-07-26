@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { AlertTriangle, CheckCircle2, TrendingDown } from 'lucide-react'
 import type {
-  MonthlyBill,
+  CalculationSettings,
   PeakScenario,
   PlanCandidateComparison,
   RatePlan,
 } from '../../types'
-import { comparePlans, formatWon } from '../../lib/calculations'
+import { formatWon } from '../../lib/calculations'
+import { getCalculationModeLabel } from '../../lib/calculationSettings'
 import { rateChangeCaution } from '../../lib/documentTemplates'
 import { PlanCandidateTable } from '../diagnosis/PlanCandidateTable'
 
@@ -23,27 +24,25 @@ const scenarioSchema = z.object({
 })
 
 interface RateSimulatorProps {
-  bills: MonthlyBill[]
   currentPlan: RatePlan
   candidatePlan: RatePlan
   candidates: PlanCandidateComparison[]
+  comparison: PlanCandidateComparison
+  calculationSettings: CalculationSettings
   scenario: PeakScenario
   onScenarioChange: (scenario: PeakScenario) => Promise<boolean>
 }
 
 export function RateSimulator({
-  bills,
   currentPlan,
   candidatePlan,
   candidates,
+  comparison,
+  calculationSettings,
   scenario,
   onScenarioChange,
 }: RateSimulatorProps) {
   const [tab, setTab] = useState<'12' | '36' | 'peak'>('12')
-  const comparison = useMemo(
-    () => comparePlans(bills, currentPlan, candidatePlan, scenario),
-    [bills, currentPlan, candidatePlan, scenario],
-  )
   const form = useForm<PeakScenario>({
     defaultValues: scenario,
   })
@@ -81,6 +80,9 @@ export function RateSimulator({
           </button>
         ))}
       </section>
+      <p className="mode-badge">
+        계산 모드: {getCalculationModeLabel(calculationSettings.mode)}
+      </p>
 
       <section className="comparison-grid">
         <article className="comparison-card blue">

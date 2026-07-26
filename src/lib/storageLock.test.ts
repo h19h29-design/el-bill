@@ -7,6 +7,7 @@ import {
   defaultSchoolProfile,
   sampleBills,
 } from '../data/sampleBills'
+import { defaultCalculationSettings } from './calculationSettings'
 import {
   cleanupExpiredStorageSnapshots,
   getNextStorageSnapshotExpiry,
@@ -31,6 +32,7 @@ const makeData = (): StorageSnapshotData => ({
   profile: defaultSchoolProfile,
   scenario: defaultScenario,
   ratePlans: defaultRatePlans,
+  calculationSettings: defaultCalculationSettings,
   powerPlanner: null,
   provenance: { bills: 'uploaded', powerPlanner: 'none' },
 })
@@ -168,12 +170,17 @@ describe('storage mutation lock and patch protocol', () => {
       ...defaultScenario,
       targetPeakKw: 612,
     }
+    const staleCalculationSettings = {
+      ...defaultCalculationSettings,
+      mode: 'tariffFull' as const,
+    }
 
     const profileWrite = updateStorageSnapshot('patch-session', {
       profile: staleProfile,
     })
     const scenarioWrite = updateStorageSnapshot('patch-session', {
       scenario: staleScenario,
+      calculationSettings: staleCalculationSettings,
     })
     const [profileResult, scenarioResult] = await Promise.all([
       profileWrite,
@@ -188,6 +195,7 @@ describe('storage mutation lock and patch protocol', () => {
         data: expect.objectContaining({
           profile: staleProfile,
           scenario: staleScenario,
+          calculationSettings: staleCalculationSettings,
         }),
       }),
     )

@@ -8,6 +8,7 @@ import type {
 } from '../types'
 import { formatKwh, formatWon } from './calculations'
 import { getPeakRiskLevel } from './peak'
+import { getCalculationModeLabel } from './calculationSettings'
 import type { PeakOperationPlan } from './peakOperations'
 
 export const rateChangeCaution =
@@ -25,10 +26,18 @@ export const buildDocumentBundle = (
   const recommendedPlanName = diagnosis?.recommendedPlan?.planName ?? '추천 요금제'
   const currentPlanName = diagnosis?.currentPlan?.planName ?? profile.currentPlan
   const peakScenarioSavingWon = diagnosis?.comparison.peakScenarioSavingWon ?? 0
-  const calculationModeLabel =
+  const calculationModeLabel = getCalculationModeLabel(
+    diagnosis?.calculationMode ?? 'billDelta',
+  )
+  const correctionFactorLines =
     diagnosis?.calculationMode === 'tariffFull'
-      ? '요금표 기반 전체 추정'
-      : '고지서 기반 차액 추정'
+      ? [
+          `- 기후환경요금 단가: ${diagnosis.calculationSettings.climateEnvironmentWonPerKwh}원/kWh`,
+          `- 연료비조정 단가: ${diagnosis.calculationSettings.fuelAdjustmentWonPerKwh}원/kWh`,
+          `- 부가세율: ${diagnosis.calculationSettings.vatPercent}%`,
+          `- 전력산업기반기금 비율: ${diagnosis.calculationSettings.fundPercent}%`,
+        ]
+      : []
   const latestMonthLabel = latestBill
     ? `${latestBill.year}년 ${latestBill.month}월분`
     : '최근 월분'
@@ -131,6 +140,7 @@ export const buildDocumentBundle = (
   const calculationSummaryText = [
     '계산 근거 요약표',
     `- 계산 모드: ${calculationModeLabel}`,
+    ...correctionFactorLines,
     `- 데이터 인식률: ${diagnosis?.dataRecognitionRate ?? 0}%`,
     `- 인식 월수: ${diagnosis?.recognizedMonths ?? 0}개월`,
     `- 최근 12개월 절감액: ${formatWon(activeComparison.savingWon)}`,

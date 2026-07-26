@@ -1,6 +1,7 @@
 import type { WorkbookParseResult } from './excel'
 import type {
   AutoDiagnosisResult,
+  CalculationSettings,
   CalculationMode,
   CalculationBreakdownRow,
   DataConfidence,
@@ -20,6 +21,7 @@ import {
 } from './calculations'
 import { validateBillPeriods } from './billPeriods'
 import { rateChangeCaution } from './documentTemplates'
+import { defaultCalculationSettings } from './calculationSettings'
 
 const optionalBillColumns = [
   '요금적용전력',
@@ -217,9 +219,11 @@ const estimateCurrentBillByMode = (
   bill: MonthlyBill,
   currentPlan: RatePlan,
   scenario: PeakScenario | undefined,
-  mode: CalculationMode,
+  settings: CalculationSettings,
 ) => {
-  if (mode === 'tariffFull') return estimateBillForPlan(bill, currentPlan, scenario)
+  if (settings.mode === 'tariffFull') {
+    return estimateBillForPlan(bill, currentPlan, scenario, settings)
+  }
 
   const season = getSeason(bill.month)
   const ratio = getBillAdjustmentRatio(bill)
@@ -238,9 +242,11 @@ const estimateCandidateBillByMode = (
   currentPlan: RatePlan,
   candidatePlan: RatePlan,
   scenario: PeakScenario | undefined,
-  mode: CalculationMode,
+  settings: CalculationSettings,
 ) => {
-  if (mode === 'tariffFull') return estimateBillForPlan(bill, candidatePlan, scenario)
+  if (settings.mode === 'tariffFull') {
+    return estimateBillForPlan(bill, candidatePlan, scenario, settings)
+  }
   return estimateBillDeltaForPlan(bill, currentPlan, candidatePlan, scenario)
 }
 
@@ -249,7 +255,7 @@ const buildCalculationBreakdown = (
   currentPlan: RatePlan,
   candidatePlan: RatePlan,
   scenario: PeakScenario | undefined,
-  mode: CalculationMode,
+  settings: CalculationSettings,
   currentAnnualWon: number,
   candidateAnnualWon: number,
 ): CalculationBreakdownRow[] => {
@@ -302,7 +308,7 @@ const buildCalculationBreakdown = (
       currentWon: currentAdjustmentWon,
       candidateWon: candidateAdjustmentWon,
       note:
-        mode === 'billDelta'
+        settings.mode === 'billDelta'
           ? '기존 고지서의 부가세, 기금, 기후환경요금, 연료비조정 비율로 보정합니다.'
           : '요금표 기반 추정식의 부가요금 계수를 반영합니다.',
     },
@@ -325,8 +331,14 @@ export const comparePlansForDiagnosis = (
   currentPlan: RatePlan,
   candidatePlan: RatePlan,
   scenario?: PeakScenario,
-  mode: CalculationMode = 'billDelta',
+  settingsOrMode: CalculationSettings | CalculationMode =
+    defaultCalculationSettings,
 ): PlanCandidateComparison => {
+  const settings =
+    typeof settingsOrMode === 'string'
+      ? { ...defaultCalculationSettings, mode: settingsOrMode }
+      : settingsOrMode
+  const mode = settings.mode
   const validation = validateBillPeriods(bills, 36)
   const recent12 = validation.recentConsecutiveBills.slice(-12)
   const hasTwelveConsecutiveMonths = recent12.length >= 12
@@ -335,12 +347,20 @@ export const comparePlansForDiagnosis = (
     : []
 
   const currentAnnualWon = recent12.reduce(
-    (sum, bill) => sum + estimateCurrentBillByMode(bill, currentPlan, scenario, mode),
+    (sum, bill) =>
+      sum + estimateCurrentBillByMode(bill, currentPlan, scenario, settings),
     0,
   )
   const candidateAnnualWon = recent12.reduce(
     (sum, bill) =>
-      sum + estimateCandidateBillByMode(bill, currentPlan, candidatePlan, scenario, mode),
+      sum +
+      estimateCandidateBillByMode(
+        bill,
+        currentPlan,
+        candidatePlan,
+        scenario,
+        settings,
+      ),
     0,
   )
   const savingWon = currentAnnualWon - candidateAnnualWon
@@ -348,8 +368,14 @@ export const comparePlansForDiagnosis = (
   const threeYearSavingWon = threeYearBills.reduce(
     (sum, bill) =>
       sum +
-      estimateCurrentBillByMode(bill, currentPlan, scenario, mode) -
-      estimateCandidateBillByMode(bill, currentPlan, candidatePlan, scenario, mode),
+      estimateCurrentBillByMode(bill, currentPlan, scenario, settings) -
+      estimateCandidateBillByMode(
+        bill,
+        currentPlan,
+        candidatePlan,
+        scenario,
+        settings,
+      ),
     0,
   )
 
@@ -359,7 +385,7 @@ export const comparePlansForDiagnosis = (
     currentPlan,
     candidatePlan,
     scenario,
-    mode,
+    settings,
     currentAnnualWon,
     candidateAnnualWon,
   )
@@ -406,7 +432,7 @@ export const buildAutoDiagnosis = ({
   scenario,
   powerPlannerDataSource,
   billsAreUserUploaded = false,
-  mode = 'billDelta',
+  calculationSettings = defaultCalculationSettings,
 }: {
   bills: MonthlyBill[]
   profile: SchoolProfile
@@ -414,8 +440,9 @@ export const buildAutoDiagnosis = ({
   scenario: PeakScenario
   powerPlannerDataSource?: PowerPlannerDataSource | null
   billsAreUserUploaded?: boolean
-  mode?: CalculationMode
+  calculationSettings?: CalculationSettings
 }): AutoDiagnosisResult => {
+  const mode = calculationSettings.mode
   const periodValidation = validateBillPeriods(bills, 12)
   const normalizedBills = periodValidation.normalizedBills
   const currentPlanResolution = resolveCurrentPlan(profile, ratePlans)
@@ -435,6 +462,7 @@ export const buildAutoDiagnosis = ({
       additionalCandidates: [],
       comparison,
       calculationMode: mode,
+      calculationSettings,
       dataConfidence: confidence,
       dataRecognitionRate: getDataRecognitionRate(normalizedBills),
       recognizedMonths: periodValidation.distinctMonthCount,
@@ -474,7 +502,7 @@ export const buildAutoDiagnosis = ({
         currentPlan,
         candidate,
         scenario,
-        mode,
+        calculationSettings,
       )
       const eligibleComparison = sameContractPriority
         ? comparison
@@ -510,7 +538,13 @@ export const buildAutoDiagnosis = ({
   const ranked = rankedBeforePeriodReview.map(applyPeriodReview)
   const topCandidates = ranked.slice(0, 3)
   const fallbackComparison = applyPeriodReview(
-    comparePlansForDiagnosis(normalizedBills, currentPlan, currentPlan, scenario, mode),
+    comparePlansForDiagnosis(
+      normalizedBills,
+      currentPlan,
+      currentPlan,
+      scenario,
+      calculationSettings,
+    ),
   )
   const comparison = topCandidates[0] ?? fallbackComparison
   const recommendedPlan = hasPeriodIssues
@@ -552,6 +586,7 @@ export const buildAutoDiagnosis = ({
     additionalCandidates: ranked.filter((candidate) => !candidate.sameContractPriority),
     comparison,
     calculationMode: mode,
+    calculationSettings,
     dataConfidence: confidence,
     dataRecognitionRate: getDataRecognitionRate(normalizedBills),
     recognizedMonths: periodValidation.distinctMonthCount,

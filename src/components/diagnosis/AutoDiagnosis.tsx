@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import type { AutoDiagnosisResult, DataProvenance, ViewKey } from '../../types'
 import { formatWon } from '../../lib/calculations'
+import { getCalculationModeLabel } from '../../lib/calculationSettings'
 import { rateChangeCaution } from '../../lib/documentTemplates'
 import { PlanCandidateTable } from './PlanCandidateTable'
 
@@ -170,7 +171,7 @@ export function AutoDiagnosis({
         <article className="diagnosis-result-card">
           <span>최근 12개월 절감액</span>
           <strong>{formatWon(comparison.savingWon)}</strong>
-          <p>고지서 기반 차액 추정</p>
+          <p>{getCalculationModeLabel(diagnosis.calculationMode)}</p>
         </article>
         <article className="diagnosis-result-card">
           <span>최근 3년 절감액</span>
@@ -192,7 +193,7 @@ export function AutoDiagnosis({
       <section className="panel">
         <div className="panel-title">
           <h2>요금제 자동 비교 TOP 3</h2>
-          <span>{diagnosis.calculationMode === 'billDelta' ? '고지서 기반 차액 추정' : '요금표 기반 전체 추정'}</span>
+          <span>{getCalculationModeLabel(diagnosis.calculationMode)}</span>
         </div>
         <PlanCandidateTable candidates={diagnosis.topCandidates} />
       </section>

@@ -70,7 +70,7 @@ export function Dashboard({
     )
   }
 
-  const summary = getDashboardSummary(bills, currentPlan, candidatePlan, scenario)
+  const summary = getDashboardSummary(bills, scenario)
   const chartData = groupBillsForCharts(bills)
   const latest = summary.latest
   const peakLevel = getPeakRiskLevel(

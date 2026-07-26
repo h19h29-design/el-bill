@@ -11,6 +11,7 @@ import {
   resolveCurrentPlan,
   summarizeWorkbookRecognition,
 } from './diagnosis'
+import { defaultCalculationSettings } from './calculationSettings'
 
 const makePlan = (
   id: string,
@@ -84,6 +85,64 @@ const cheaperPlan = makePlan('cheap', '선택요금Ⅰ', 500, 80)
 const expensivePlan = makePlan('expensive', '고비용요금', 2000, 160)
 
 describe('automatic diagnosis harness', () => {
+  it('ignores tariff-full correction factors in bill-delta mode', () => {
+    const baseline = comparePlansForDiagnosis(
+      thirtySixConsecutiveBills,
+      currentPlan,
+      cheaperPlan,
+      defaultScenario,
+      { ...defaultCalculationSettings, mode: 'billDelta' },
+    )
+    const changed = comparePlansForDiagnosis(
+      thirtySixConsecutiveBills,
+      currentPlan,
+      cheaperPlan,
+      defaultScenario,
+      {
+        mode: 'billDelta',
+        climateEnvironmentWonPerKwh: 50,
+        fuelAdjustmentWonPerKwh: 50,
+        vatPercent: 50,
+        fundPercent: 50,
+      },
+    )
+
+    expect(changed).toEqual(baseline)
+  })
+
+  it('uses one selected calculation settings instance for every diagnosis result', () => {
+    const calculationSettings = {
+      ...defaultCalculationSettings,
+      mode: 'tariffFull' as const,
+      climateEnvironmentWonPerKwh: 10,
+      fuelAdjustmentWonPerKwh: -4,
+      vatPercent: 11,
+      fundPercent: 4,
+    }
+    const diagnosis = buildAutoDiagnosis({
+      bills: thirtySixConsecutiveBills,
+      profile: {
+        ...defaultSchoolProfile,
+        contractType: currentPlan.contractType,
+        voltageType: currentPlan.voltageType,
+        currentPlan: currentPlan.planName,
+      },
+      ratePlans: [currentPlan, cheaperPlan, expensivePlan],
+      scenario: defaultScenario,
+      calculationSettings,
+    })
+
+    expect(diagnosis.calculationSettings).toBe(calculationSettings)
+    expect(diagnosis.calculationMode).toBe('tariffFull')
+    expect(
+      diagnosis.topCandidates.every(
+        (candidate) => candidate.calculationMode === 'tariffFull',
+      ),
+    ).toBe(true)
+    expect(diagnosis.comparison.calculationMode).toBe('tariffFull')
+  })
+
+
   it('marks under-12-month data as additional review', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills.slice(0, 6),

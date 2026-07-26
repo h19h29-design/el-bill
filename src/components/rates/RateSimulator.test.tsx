@@ -5,10 +5,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { defaultScenario, sampleBills } from '../../data/sampleBills'
 import type { PeakScenario, PlanCandidateComparison } from '../../types'
+import { defaultCalculationSettings } from '../../lib/calculationSettings'
+import { buildAutoDiagnosis } from '../../lib/diagnosis'
+import { defaultSchoolProfile } from '../../data/sampleBills'
 import { RateSimulator } from './RateSimulator'
 
 const currentPlan = defaultRatePlans.find((plan) => plan.id === 'edu-a-high-a-2')!
 const candidatePlan = defaultRatePlans.find((plan) => plan.id === 'edu-a-high-a-1')!
+const diagnosis = buildAutoDiagnosis({
+  bills: sampleBills,
+  profile: defaultSchoolProfile,
+  ratePlans: defaultRatePlans,
+  scenario: defaultScenario,
+})
 
 afterEach(cleanup)
 
@@ -27,10 +36,11 @@ describe('rate simulator usability harness', () => {
 
     render(
       <RateSimulator
-        bills={sampleBills}
         currentPlan={currentPlan}
         candidatePlan={candidatePlan}
         candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
         scenario={scenario}
         onScenarioChange={onScenarioChange}
       />,
@@ -79,10 +89,11 @@ describe('rate simulator usability harness', () => {
 
     render(
       <RateSimulator
-        bills={sampleBills}
         currentPlan={currentPlan}
         candidatePlan={candidatePlan}
         candidates={[reviewOnlyCandidate]}
+        comparison={reviewOnlyCandidate}
+        calculationSettings={defaultCalculationSettings}
         scenario={defaultScenario}
         onScenarioChange={async () => true}
       />,
@@ -90,5 +101,27 @@ describe('rate simulator usability harness', () => {
 
     expect(screen.getByText(reviewOnlyCandidate.basis)).toBeTruthy()
     expect(screen.queryByText(`추천안 (${candidatePlan.planName})`)).toBeNull()
+  })
+
+  it('shows the calculation mode used by the diagnosis comparison', () => {
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={{
+          ...diagnosis.comparison,
+          calculationMode: 'tariffFull',
+        }}
+        calculationSettings={{
+          ...defaultCalculationSettings,
+          mode: 'tariffFull',
+        }}
+        scenario={defaultScenario}
+        onScenarioChange={async () => true}
+      />,
+    )
+
+    expect(screen.getByText('계산 모드: 요금표 기반 전체 추정')).toBeTruthy()
   })
 })

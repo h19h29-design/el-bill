@@ -1,9 +1,22 @@
 import { useState } from 'react'
-import type { RatePlan, Season } from '../../types'
+import type {
+  CalculationSettings,
+  CalculationMode,
+  RatePlan,
+  Season,
+} from '../../types'
+import {
+  defaultCalculationSettings,
+  validateCalculationSettings,
+} from '../../lib/calculationSettings'
 
 interface RatePlanSettingsProps {
   plans: RatePlan[]
   onPlansChange: (plans: RatePlan[]) => Promise<boolean>
+  calculationSettings: CalculationSettings
+  onCalculationSettingsChange: (
+    settings: CalculationSettings,
+  ) => Promise<boolean>
 }
 
 const seasonLabels: Record<Season, string> = {
@@ -29,8 +42,12 @@ const hasDuplicateTuple = (plans: RatePlan[]) => {
 export function RatePlanSettings({
   plans,
   onPlansChange,
+  calculationSettings,
+  onCalculationSettingsChange,
 }: RatePlanSettingsProps) {
   const [validationMessage, setValidationMessage] = useState('')
+  const [savingCalculationSettings, setSavingCalculationSettings] =
+    useState(false)
   const updatePlan = (
     planId: string,
     updater: (plan: RatePlan) => RatePlan,
@@ -73,12 +90,165 @@ export function RatePlanSettings({
     ]).catch(() => undefined)
   }
 
+  const changeCalculationSettings = async (
+    nextSettings: CalculationSettings,
+  ) => {
+    if (savingCalculationSettings) return
+    const validation = validateCalculationSettings(nextSettings)
+    if (!validation.valid) {
+      setValidationMessage(Object.values(validation.errors)[0] ?? '')
+      return
+    }
+    setValidationMessage('')
+    setSavingCalculationSettings(true)
+    const saved = await onCalculationSettingsChange(nextSettings)
+      .catch(() => false)
+      .finally(() => setSavingCalculationSettings(false))
+    if (!saved) {
+      setValidationMessage(
+        '계산 설정을 저장하지 못해 이전 값으로 유지했습니다.',
+      )
+    }
+  }
+
+  const updateCalculationNumber = (
+    field: Exclude<keyof CalculationSettings, 'mode'>,
+    value: string,
+  ) => {
+    void changeCalculationSettings({
+      ...calculationSettings,
+      [field]: Number(value),
+    })
+  }
+
+  const updateCalculationMode = (mode: CalculationMode) => {
+    void changeCalculationSettings({ ...calculationSettings, mode })
+  }
+
   return (
     <div className="view-stack">
       <section className="panel muted-panel">
-        <strong>요금표 관리</strong>
+        <strong>계산 및 요금표 관리</strong>
         <p>
           단가는 코드 고정값이 아니라 설정 데이터로 관리합니다. 실제 계약·제출 전에는 최신 한전 고시 단가를 확인해야 합니다.
+        </p>
+      </section>
+      <section className="panel calculation-settings-panel">
+        <div className="panel-title">
+          <h2>계산 모드</h2>
+          <button
+            type="button"
+            className="secondary-button small"
+            disabled={savingCalculationSettings}
+            onClick={() =>
+              void changeCalculationSettings(defaultCalculationSettings)
+            }
+          >
+            계산 설정 초기화
+          </button>
+        </div>
+        <fieldset className="calculation-mode-options">
+          <legend>진단 계산 방식</legend>
+          {[
+            ['billDelta', '고지서 기반 차액 추정'],
+            ['tariffFull', '요금표 기반 전체 추정'],
+          ].map(([mode, label]) => (
+            <label key={mode}>
+              <input
+                aria-label={label}
+                type="radio"
+                name="calculation-mode"
+                value={mode}
+                checked={calculationSettings.mode === mode}
+                disabled={savingCalculationSettings}
+                onChange={() => updateCalculationMode(mode as CalculationMode)}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </fieldset>
+        <div className="calculation-factor-grid">
+          <label>
+            기후환경요금 단가
+            <span className="input-with-unit">
+              <input
+                aria-label="기후환경요금 단가"
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                disabled={savingCalculationSettings}
+                value={calculationSettings.climateEnvironmentWonPerKwh}
+                onChange={(event) =>
+                  updateCalculationNumber(
+                    'climateEnvironmentWonPerKwh',
+                    event.target.value,
+                  )
+                }
+              />
+              <span>원/kWh</span>
+            </span>
+          </label>
+          <label>
+            연료비조정 단가
+            <span className="input-with-unit">
+              <input
+                aria-label="연료비조정 단가"
+                type="number"
+                step="0.1"
+                min="-100"
+                max="100"
+                disabled={savingCalculationSettings}
+                value={calculationSettings.fuelAdjustmentWonPerKwh}
+                onChange={(event) =>
+                  updateCalculationNumber(
+                    'fuelAdjustmentWonPerKwh',
+                    event.target.value,
+                  )
+                }
+              />
+              <span>원/kWh</span>
+            </span>
+          </label>
+          <label>
+            부가세율
+            <span className="input-with-unit">
+              <input
+                aria-label="부가세율"
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                disabled={savingCalculationSettings}
+                value={calculationSettings.vatPercent}
+                onChange={(event) =>
+                  updateCalculationNumber('vatPercent', event.target.value)
+                }
+              />
+              <span>%</span>
+            </span>
+          </label>
+          <label>
+            전력산업기반기금 비율
+            <span className="input-with-unit">
+              <input
+                aria-label="전력산업기반기금 비율"
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                disabled={savingCalculationSettings}
+                value={calculationSettings.fundPercent}
+                onChange={(event) =>
+                  updateCalculationNumber('fundPercent', event.target.value)
+                }
+              />
+              <span>%</span>
+            </span>
+          </label>
+        </div>
+        <p className="helper-text">
+          보정계수는 요금표 기반 전체 추정에만 적용됩니다.
         </p>
       </section>
       <section className="panel">
@@ -183,8 +353,12 @@ export function RatePlanSettings({
             </article>
           ))}
         </div>
-        {validationMessage && <p className="status-line" role="status">{validationMessage}</p>}
       </section>
+      {validationMessage && (
+        <p className="status-line" role="status">
+          {validationMessage}
+        </p>
+      )}
     </div>
   )
 }

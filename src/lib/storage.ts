@@ -1,4 +1,5 @@
 import type {
+  CalculationSettings,
   DataProvenance,
   MonthlyBill,
   PeakScenario,
@@ -8,6 +9,10 @@ import type {
   RatePlan,
   SchoolProfile,
 } from '../types'
+import {
+  defaultCalculationSettings,
+  isCalculationSettings,
+} from './calculationSettings'
 
 const dayMs = 24 * 60 * 60 * 1000
 
@@ -35,6 +40,7 @@ export interface StorageSnapshotData {
   profile: SchoolProfile
   scenario: PeakScenario
   ratePlans: RatePlan[]
+  calculationSettings: CalculationSettings
   powerPlanner: PowerPlannerDataSource | null
   provenance: DataProvenance
 }
@@ -402,7 +408,10 @@ const isValidPowerPlannerDataSource = (
   )
 }
 
-const isStorageSnapshotData = (value: unknown): value is StorageSnapshotData => {
+const isStorageSnapshotData = (
+  value: unknown,
+  allowMissingCalculationSettings = false,
+): value is StorageSnapshotData => {
   if (!value || typeof value !== 'object') return false
   const data = value as Record<string, unknown>
   const provenance = data.provenance
@@ -416,6 +425,9 @@ const isStorageSnapshotData = (value: unknown): value is StorageSnapshotData => 
     Array.isArray(data.ratePlans) &&
     data.ratePlans.length > 0 &&
     data.ratePlans.every(isRatePlan) &&
+    (isCalculationSettings(data.calculationSettings) ||
+      (allowMissingCalculationSettings &&
+        data.calculationSettings === undefined)) &&
     (data.powerPlanner === null || hasPowerPlanner) &&
     isDataProvenance(provenance) &&
     (provenance.powerPlanner === 'none'
@@ -436,7 +448,7 @@ const parseStorageSnapshot = (
     if (
       candidate.schemaVersion !== 1 ||
       !isStorageSession(candidate.session) ||
-      !isStorageSnapshotData(candidate.data) ||
+      !isStorageSnapshotData(candidate.data, true) ||
       (candidate.revision !== undefined &&
         (!Number.isInteger(candidate.revision) ||
           Number(candidate.revision) < 0))
@@ -446,6 +458,15 @@ const parseStorageSnapshot = (
     const parsed = {
       ...candidate,
       revision: candidate.revision ?? 0,
+      data: {
+        ...(candidate.data as StorageSnapshotData),
+        calculationSettings: isCalculationSettings(
+          (candidate.data as unknown as Record<string, unknown>)
+            .calculationSettings,
+        )
+          ? (candidate.data as StorageSnapshotData).calculationSettings
+          : defaultCalculationSettings,
+      },
     } as unknown as StorageSnapshot
     if (
       expectedSessionId &&
@@ -1077,6 +1098,7 @@ const migrateLegacyPerKeyStorage = (
         Array.isArray(ratePlans) && ratePlans.every(isRatePlan)
           ? ratePlans
           : fallbackData.ratePlans,
+      calculationSettings: fallbackData.calculationSettings,
       powerPlanner,
       provenance: safeProvenance,
     },

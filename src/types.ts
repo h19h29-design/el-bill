@@ -15,6 +15,14 @@ export type Season = 'springAutumn' | 'summer' | 'winter'
 
 export type CalculationMode = 'billDelta' | 'tariffFull'
 
+export interface CalculationSettings {
+  mode: CalculationMode
+  climateEnvironmentWonPerKwh: number
+  fuelAdjustmentWonPerKwh: number
+  vatPercent: number
+  fundPercent: number
+}
+
 export type DataConfidence = '데이터 충분' | '보통' | '낮음'
 
 export type BillDataOrigin = 'sample' | 'uploaded'
@@ -259,6 +267,7 @@ export interface AutoDiagnosisResult {
   additionalCandidates: PlanCandidateComparison[]
   comparison: PlanCandidateComparison
   calculationMode: CalculationMode
+  calculationSettings: CalculationSettings
   dataConfidence: DataConfidence
   dataRecognitionRate: number
   recognizedMonths: number

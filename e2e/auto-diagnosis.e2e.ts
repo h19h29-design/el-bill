@@ -90,6 +90,87 @@ test('checked-in synthetic XLSX reaches recognized mapping and analysis state', 
   await expect(page.getByText('사용자 고지서 분석', { exact: false })).toBeVisible()
 })
 
+test('tariff-full calculation mode persists into diagnosis and documents after reload', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '고지서 입력',
+    exact: true,
+  }).click()
+  await page
+    .locator('input[type="file"][accept=".xlsx,.xls"]')
+    .first()
+    .setInputFiles(resolve('e2e/fixtures/monthly-bills.xlsx'))
+  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '설정',
+    exact: true,
+  }).click()
+  await page.getByText('요금표 기반 전체 추정', { exact: true }).click()
+  await page.getByLabel('기후환경요금 단가').fill('10')
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const pointerRaw = localStorage.getItem('el-bill:storage-active')
+        if (!pointerRaw) return null
+        const { sessionId } = JSON.parse(pointerRaw) as { sessionId: string }
+        const raw = localStorage.getItem(
+          `el-bill:storage-snapshot:${encodeURIComponent(sessionId)}`,
+        )
+        if (!raw) return null
+        return (
+          JSON.parse(raw) as {
+            data: {
+              calculationSettings: {
+                mode: string
+                climateEnvironmentWonPerKwh: number
+              }
+            }
+          }
+        ).data.calculationSettings
+      }),
+    )
+    .toEqual({
+      mode: 'tariffFull',
+      climateEnvironmentWonPerKwh: 10,
+      fuelAdjustmentWonPerKwh: -5,
+      vatPercent: 10,
+      fundPercent: 3.7,
+    })
+
+  await page.reload()
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '설정',
+    exact: true,
+  }).click()
+  await expect(
+    page.getByRole('radio', { name: '요금표 기반 전체 추정' }),
+  ).toBeChecked()
+  await expect(page.getByLabel('기후환경요금 단가')).toHaveValue('10')
+
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '자동진단',
+    exact: true,
+  }).click()
+  await expect(
+    page.getByText('요금표 기반 전체 추정', { exact: true }).first(),
+  ).toBeVisible()
+
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '문서생성',
+    exact: true,
+  }).click()
+  await expect(
+    page.getByText(/계산 모드: 요금표 기반 전체 추정/),
+  ).toBeVisible()
+  await expect(page.getByText(/기후환경요금 단가: 10원\/kWh/)).toBeVisible()
+})
+
 test('two tabs merge different active-session edits under Web Locks', async ({ page }) => {
   await page.goto('/')
   await page.evaluate(() => localStorage.clear())

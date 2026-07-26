@@ -1,4 +1,5 @@
 import type {
+  CalculationSettings,
   MonthlyBill,
   PeakScenario,
   PlanComparison,
@@ -7,6 +8,7 @@ import type {
   Season,
 } from '../types'
 import { validateBillPeriods } from './billPeriods'
+import { defaultCalculationSettings } from './calculationSettings'
 
 const fiscalMonthOrder = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2]
 
@@ -48,6 +50,7 @@ export const estimateBillForPlan = (
   bill: MonthlyBill,
   plan: RatePlan,
   scenario?: PeakScenario,
+  settings: CalculationSettings = defaultCalculationSettings,
 ) => {
   const season = getSeason(bill.month)
   const generalIncrease = scenario?.usageIncreasePercent ?? 0
@@ -63,12 +66,13 @@ export const estimateBillForPlan = (
     : bill.appliedPowerKw
   const baseChargeWon = billingPowerKw * plan.baseRateWonPerKw
   const energyChargeWon = usageKwh * plan.seasonRates[season]
-  const climateChargeWon = usageKwh * 9
-  const fuelAdjustmentWon = usageKwh * -5
+  const climateChargeWon =
+    usageKwh * settings.climateEnvironmentWonPerKwh
+  const fuelAdjustmentWon = usageKwh * settings.fuelAdjustmentWonPerKwh
   const subtotal =
     baseChargeWon + energyChargeWon + climateChargeWon + fuelAdjustmentWon
-  const vatWon = subtotal * 0.1
-  const fundWon = subtotal * 0.037
+  const vatWon = subtotal * (settings.vatPercent / 100)
+  const fundWon = subtotal * (settings.fundPercent / 100)
 
   return Math.max(0, Math.round(subtotal + vatWon + fundWon))
 }
@@ -147,8 +151,6 @@ export const comparePlans = (
 
 export const getDashboardSummary = (
   bills: MonthlyBill[],
-  currentPlan: RatePlan,
-  candidatePlan: RatePlan,
   scenario?: PeakScenario,
 ) => {
   const sorted = sortBillsChronologically(bills)
@@ -166,7 +168,6 @@ export const getDashboardSummary = (
   const yoyRate = previousComparable
     ? (currentYearTotal - previousComparable) / previousComparable
     : 0
-  const comparison = comparePlans(bills, currentPlan, candidatePlan, scenario)
   const peakRisk =
     scenario && scenario.targetPeakKw
       ? scenario.expectedPeakKw / scenario.targetPeakKw
@@ -180,7 +181,6 @@ export const getDashboardSummary = (
     currentYearTotal,
     previousComparable,
     yoyRate,
-    comparison,
     peakRisk,
   }
 }

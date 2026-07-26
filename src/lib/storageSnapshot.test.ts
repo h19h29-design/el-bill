@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../data/ratePlans'
+import { defaultCalculationSettings } from './calculationSettings'
 import {
   defaultScenario,
   defaultSchoolProfile,
@@ -31,6 +32,7 @@ const makeData = (
   profile: defaultSchoolProfile,
   scenario: defaultScenario,
   ratePlans: defaultRatePlans,
+  calculationSettings: defaultCalculationSettings,
   powerPlanner: null,
   provenance,
 })
@@ -61,6 +63,54 @@ const legacyPayload = (
 ) => JSON.stringify({ createdAt, expiresAt, data })
 
 describe('locked session-scoped snapshots', () => {
+  it('restores custom calculation settings without changing the session expiry', async () => {
+    const now = Date.parse('2026-07-26T00:00:00.000Z')
+    const calculationSettings = {
+      ...defaultCalculationSettings,
+      mode: 'tariffFull' as const,
+      fuelAdjustmentWonPerKwh: -4,
+    }
+    expect(
+      (
+        await startNewStorageSnapshot(
+          { ...makeData(), calculationSettings },
+          now,
+          'calculation-settings',
+        )
+      ).ok,
+    ).toBe(true)
+
+    const restored = readStorageSnapshot(now + 1_000)
+    expect(restored?.data.calculationSettings).toEqual(calculationSettings)
+    expect(restored?.session.expiresAt).toBe(
+      new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    )
+  })
+
+  it('defaults calculation settings in an old atomic snapshot without extending TTL', async () => {
+    const now = Date.parse('2026-07-26T00:00:00.000Z')
+    const oldRoot = snapshot('old-calculation-settings', makeData(), now)
+    const oldData = { ...oldRoot.data } as Partial<StorageSnapshotData>
+    delete oldData.calculationSettings
+    localStorage.setItem(
+      storageSnapshotKeyFor(oldRoot.session.sessionId),
+      JSON.stringify({ ...oldRoot, data: oldData }),
+    )
+    localStorage.setItem(
+      storageActivePointerKey,
+      JSON.stringify({
+        schemaVersion: 1,
+        sessionId: oldRoot.session.sessionId,
+      }),
+    )
+
+    const restored = readStorageSnapshot(now + 1_000)
+    expect(restored?.data.calculationSettings).toEqual(
+      defaultCalculationSettings,
+    )
+    expect(restored?.session.expiresAt).toBe(oldRoot.session.expiresAt)
+  })
+
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(now)

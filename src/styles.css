@@ -1586,6 +1586,71 @@ textarea:focus {
   grid-template-columns: repeat(4, minmax(120px, 1fr));
 }
 
+.calculation-mode-options {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+}
+
+.calculation-mode-options legend {
+  margin-bottom: 8px;
+  color: #41566f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.calculation-mode-options label {
+  position: relative;
+  display: block;
+}
+
+.calculation-mode-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.calculation-mode-options span {
+  display: block;
+  padding: 9px 14px;
+  border: 1px solid #c8d9ec;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #31506f;
+  cursor: pointer;
+}
+
+.calculation-mode-options input:checked + span {
+  border-color: var(--blue-600);
+  background: #eaf4ff;
+  color: var(--blue-700);
+}
+
+.calculation-mode-options input:focus-visible + span {
+  box-shadow: 0 0 0 3px rgba(11, 114, 231, 0.16);
+}
+
+.calculation-factor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.input-with-unit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-with-unit > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .auto-cta-panel,
 .diagnosis-hero {
   display: flex;
@@ -2025,6 +2090,7 @@ textarea:focus {
   .profile-form,
   .rate-setting-main,
   .season-rate-grid,
+  .calculation-factor-grid,
   .diagnosis-result-grid,
   .diagnosis-note-grid,
   .operation-plan-grid,
@@ -2032,6 +2098,10 @@ textarea:focus {
   .operating-window-grid,
   .recognition-grid {
     grid-template-columns: 1fr;
+  }
+
+  .calculation-mode-options {
+    flex-direction: column;
   }
 
   .auto-cta-panel,

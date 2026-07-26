@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../data/sampleBills'
 import type { AutoDiagnosisResult, PlanCandidateComparison, RatePlan } from '../types'
 import { buildDocumentBundle, rateChangeCaution } from './documentTemplates'
+import { defaultCalculationSettings } from './calculationSettings'
 
 const comparison = {
   currentAnnualWon: 66_589_800,
@@ -74,6 +75,7 @@ const diagnosis: AutoDiagnosisResult = {
   additionalCandidates: [],
   comparison: candidateComparison,
   calculationMode: 'billDelta',
+  calculationSettings: defaultCalculationSettings,
   dataConfidence: '보통',
   dataRecognitionRate: 92,
   recognizedMonths: 36,
@@ -87,6 +89,35 @@ const diagnosis: AutoDiagnosisResult = {
 }
 
 describe('document template harness', () => {
+  it('states tariff-full mode and all selected correction factors', () => {
+    const tariffDiagnosis: AutoDiagnosisResult = {
+      ...diagnosis,
+      calculationMode: 'tariffFull',
+      calculationSettings: {
+        mode: 'tariffFull',
+        climateEnvironmentWonPerKwh: 10,
+        fuelAdjustmentWonPerKwh: -4,
+        vatPercent: 11,
+        fundPercent: 4,
+      },
+    }
+    const bundle = buildDocumentBundle(
+      defaultSchoolProfile,
+      sampleBills.at(-1),
+      comparison,
+      defaultScenario,
+      tariffDiagnosis,
+    )
+
+    expect(bundle.calculationSummaryText).toContain('요금표 기반 전체 추정')
+    expect(bundle.calculationSummaryText).toContain('10원/kWh')
+    expect(bundle.calculationSummaryText).toContain('-4원/kWh')
+    expect(bundle.calculationSummaryText).toContain('부가세율: 11%')
+    expect(bundle.calculationSummaryText).toContain(
+      '전력산업기반기금 비율: 4%',
+    )
+  })
+
   it('includes the one-change-per-year caution in generated documents', () => {
     const bundle = buildDocumentBundle(
       defaultSchoolProfile,
