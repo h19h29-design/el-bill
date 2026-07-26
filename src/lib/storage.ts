@@ -12,6 +12,7 @@ export const dataProvenanceStorageKey = 'el-bill:data-provenance'
 export const legacyDataModeStorageKey = 'el-bill:data-mode'
 export const powerPlannerStorageKey = 'el-bill:power-planner'
 export const storageSessionKey = 'el-bill:storage-session'
+export const storageCommitKey = 'el-bill:storage-commit'
 export const defaultDataProvenance: DataProvenance = {
   bills: 'sample',
   powerPlanner: 'none',
@@ -109,7 +110,13 @@ export const readStorageSession = (
   if (!rawSession) return null
   try {
     const session = JSON.parse(rawSession) as unknown
-    return isStorageSession(session) && !isExpired(session) ? session : null
+    return (
+      isStorageSession(session) &&
+      !isExpired(session) &&
+      hasMatchingCommitMarker(session)
+    )
+      ? session
+      : null
   } catch {
     return null
   }
@@ -120,22 +127,69 @@ export const isActiveStorageSession = (session: StorageSession) => {
   if (!rawSession) return false
   try {
     const activeSession = JSON.parse(rawSession) as unknown
-    return isStorageSession(activeSession) && sessionsMatch(activeSession, session)
+    return (
+      isStorageSession(activeSession) &&
+      !isExpired(activeSession) &&
+      sessionsMatch(activeSession, session)
+    )
   } catch {
     return false
   }
+}
+
+const hasMatchingCommitMarker = (session: StorageSession) => {
+  const rawCommit = localStorage.getItem(storageCommitKey)
+  if (!rawCommit) return false
+  try {
+    const marker = JSON.parse(rawCommit) as unknown
+    return isStorageSession(marker) && sessionsMatch(marker, session)
+  } catch {
+    return false
+  }
+}
+
+export const isCommittedStorageSession = (session: StorageSession) =>
+  isActiveStorageSession(session) && hasMatchingCommitMarker(session)
+
+const hasMatchingSessionPayload = (key: string, session: StorageSession) => {
+  const payload = parseStoredPayload<unknown>(localStorage.getItem(key))
+  return Boolean(
+    payload &&
+    !isExpired({ ...payload, sessionId: payload.sessionId ?? 'legacy' }) &&
+    payload.sessionId &&
+    sessionsMatch({ ...payload, sessionId: payload.sessionId }, session),
+  )
+}
+
+export const commitStorageSession = (
+  session: StorageSession,
+  requiredKeys: string[],
+) => {
+  if (!isActiveStorageSession(session)) return false
+  if (!requiredKeys.every((key) => hasMatchingSessionPayload(key, session))) return false
+  localStorage.setItem(storageCommitKey, JSON.stringify(session))
+  return true
 }
 
 export const startNewStorageSession = (
   entries: StorageEntry[] = [],
   now = Date.now(),
   sessionId = createSessionId(),
+  requiredKeys = entries.map(([key]) => key),
 ): StorageSession => {
   const session = createStorageSession(now, sessionId)
+  localStorage.removeItem(storageCommitKey)
   localStorage.setItem(storageSessionKey, JSON.stringify(session))
   entries.forEach(([key, data]) => {
     localStorage.setItem(key, JSON.stringify({ ...session, data }))
   })
+  if (!commitStorageSession(session, requiredKeys)) {
+    new Set([...requiredKeys, ...entries.map(([key]) => key)]).forEach((key) =>
+      localStorage.removeItem(key),
+    )
+    localStorage.removeItem(storageSessionKey)
+    localStorage.removeItem(storageCommitKey)
+  }
   return session
 }
 
@@ -144,7 +198,7 @@ export const saveForSession = <T>(
   data: T,
   session: StorageSession,
 ): StoredPayload<T> | null => {
-  if (!isActiveStorageSession(session)) return null
+  if (!isCommittedStorageSession(session)) return null
   const payload: StoredPayload<T> = { ...session, data }
   localStorage.setItem(key, JSON.stringify(payload))
   return payload
@@ -166,12 +220,20 @@ export const purgeStorageSession = (
   if (!isStorageSession(session)) {
     keys.forEach((key) => localStorage.removeItem(key))
     localStorage.removeItem(sessionKey)
+    localStorage.removeItem(storageCommitKey)
     return true
   }
   if (expectedSession && !sessionsMatch(session, expectedSession)) return false
+  if (!hasMatchingCommitMarker(session)) {
+    keys.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(sessionKey)
+    localStorage.removeItem(storageCommitKey)
+    return true
+  }
   if (!isExpired(session)) return false
   keys.forEach((key) => localStorage.removeItem(key))
   localStorage.removeItem(sessionKey)
+  localStorage.removeItem(storageCommitKey)
   return true
 }
 
@@ -182,18 +244,31 @@ export const purgeStorageSession = (
 export const restoreStorageSession = (
   keys: string[],
   sessionKey = storageSessionKey,
+  requiredKeys = keys,
 ): StorageSession | null => {
   const rawSession = localStorage.getItem(sessionKey)
   if (rawSession) {
     try {
       const session = JSON.parse(rawSession) as unknown
-      if (isStorageSession(session) && !isExpired(session)) return session
+      if (isStorageSession(session) && !isExpired(session)) {
+        if (
+          isCommittedStorageSession(session) &&
+          requiredKeys.every((key) => hasMatchingSessionPayload(key, session))
+        ) {
+          return session
+        }
+      }
       if (
         isSessionMetadata(session) &&
         !hasSessionIdField(session) &&
         !isExpired({ ...session, sessionId: 'legacy' })
       ) {
-        const migrated = migrateLegacyStorageSession(keys, session, sessionKey)
+        const migrated = migrateLegacyStorageSession(
+          keys,
+          session,
+          sessionKey,
+          requiredKeys,
+        )
         if (migrated) return migrated
       }
     } catch {
@@ -201,10 +276,11 @@ export const restoreStorageSession = (
     }
     keys.forEach((key) => localStorage.removeItem(key))
     localStorage.removeItem(sessionKey)
+    localStorage.removeItem(storageCommitKey)
     return null
   }
 
-  const migrated = migrateLegacyStorageSession(keys, undefined, sessionKey)
+  const migrated = migrateLegacyStorageSession(keys, undefined, sessionKey, requiredKeys)
   if (migrated) return migrated
   return null
 }
@@ -213,6 +289,7 @@ const migrateLegacyStorageSession = (
   keys: string[],
   legacySession: LegacySessionMetadata | undefined,
   sessionKey: string,
+  requiredKeys: string[],
 ): StorageSession | null => {
   const payloads = keys.map((key) => ({
     key,
@@ -221,6 +298,7 @@ const migrateLegacyStorageSession = (
   if (payloads.some(({ payload }) => hasSessionIdField(payload))) {
     keys.forEach((key) => localStorage.removeItem(key))
     localStorage.removeItem(sessionKey)
+    localStorage.removeItem(storageCommitKey)
     return null
   }
 
@@ -230,6 +308,7 @@ const migrateLegacyStorageSession = (
   if (!validPayloads.length) {
     keys.forEach((key) => localStorage.removeItem(key))
     localStorage.removeItem(sessionKey)
+    localStorage.removeItem(storageCommitKey)
     return null
   }
 
@@ -253,6 +332,12 @@ const migrateLegacyStorageSession = (
       localStorage.removeItem(key)
     }
   })
+  if (!commitStorageSession(session, requiredKeys)) {
+    keys.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(sessionKey)
+    localStorage.removeItem(storageCommitKey)
+    return null
+  }
   return session
 }
 
@@ -260,14 +345,13 @@ export const loadForSession = <T>(
   key: string,
   session: StorageSession,
 ): StoredPayload<T> | null => {
-  const activeSession = readStorageSession()
-  if (!activeSession || !sessionsMatch(activeSession, session)) return null
+  if (!isCommittedStorageSession(session)) return null
   const payload = parseStoredPayload<T>(localStorage.getItem(key))
   if (!payload || isExpired({ ...payload, sessionId: payload.sessionId ?? 'legacy' })) {
     localStorage.removeItem(key)
     return null
   }
-  if (!payload.sessionId || !sessionsMatch({ ...payload, sessionId: payload.sessionId }, activeSession)) {
+  if (!payload.sessionId || !sessionsMatch({ ...payload, sessionId: payload.sessionId }, session)) {
     localStorage.removeItem(key)
     return null
   }

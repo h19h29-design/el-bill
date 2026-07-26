@@ -11,6 +11,7 @@ import {
   saveForSession,
   saveWithExpiry,
   startNewStorageSession,
+  storageCommitKey,
   storageSessionKey,
 } from './storage'
 
@@ -171,6 +172,42 @@ describe('local demo storage TTL harness', () => {
     expect(saveForSession('el-bill:bills', { version: 3 }, staleSession)).toBeNull()
     expect(loadForSession('el-bill:bills', staleSession)).toBeNull()
     expect(loadForSession<{ version: number }>('el-bill:bills', activeSession)?.data).toEqual({ version: 2 })
+  })
+
+  it('purges an interrupted session without a matching commit marker', () => {
+    const session = createStorageSession(Date.now(), 'interrupted-session')
+    localStorage.setItem(storageSessionKey, JSON.stringify(session))
+    localStorage.setItem('el-bill:bills', JSON.stringify({ ...session, data: { version: 1 } }))
+
+    expect(restoreStorageSession(['el-bill:bills'])).toBeNull()
+    expect(localStorage.getItem(storageSessionKey)).toBeNull()
+    expect(localStorage.getItem(storageCommitKey)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+  })
+
+  it('restores a fully committed snapshot immediately after upload', () => {
+    const session = startNewStorageSession([
+      ['el-bill:bills', { version: 2 }],
+      ['el-bill:profile', { version: 2 }],
+    ], Date.now(), 'committed-session')
+
+    expect(restoreStorageSession(['el-bill:bills', 'el-bill:profile'])).toEqual(session)
+    expect(JSON.parse(localStorage.getItem(storageCommitKey) ?? '{}')).toEqual(session)
+    expect(loadForSession<{ version: number }>('el-bill:bills', session)?.data).toEqual({ version: 2 })
+    expect(loadForSession<{ version: number }>('el-bill:profile', session)?.data).toEqual({ version: 2 })
+  })
+
+  it('rejects writes to an expired background session even when the ID matches', () => {
+    const session = startNewStorageSession(
+      [['el-bill:bills', { version: 1 }]],
+      Date.now(),
+      'expired-session',
+    )
+
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000)
+
+    expect(saveForSession('el-bill:bills', { version: 2 }, session)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).not.toContain('"version":2')
   })
 
   it('does not migrate a malformed session ID as legacy data', () => {

@@ -30,7 +30,7 @@ import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import {
   dataProvenanceStorageKey,
-  isActiveStorageSession,
+  isCommittedStorageSession,
   isStoredMonthlyBillCollection,
   legacyDataModeStorageKey,
   loadDataProvenance,
@@ -41,6 +41,7 @@ import {
   restoreStorageSession,
   saveForSession,
   startNewStorageSession,
+  storageCommitKey,
   storageSessionKey,
   type StorageEntry,
   type StorageSession,
@@ -59,10 +60,22 @@ const storageKeys = [
   dataProvenanceStorageKey,
   legacyDataModeStorageKey,
 ]
+const storageSnapshotKeys = [
+  billsKey,
+  profileKey,
+  scenarioKey,
+  ratePlansKey,
+  powerPlannerStorageKey,
+  dataProvenanceStorageKey,
+]
 const maxBrowserTimeoutMs = 2_147_483_647
 
 function App() {
-  const initialStorageSession = restoreStorageSession(storageKeys)
+  const initialStorageSession = restoreStorageSession(
+    storageKeys,
+    storageSessionKey,
+    storageSnapshotKeys,
+  )
 
   const loadedBillsPayload = initialStorageSession
     ? loadForSession<unknown>(billsKey, initialStorageSession)
@@ -126,11 +139,7 @@ function App() {
 
   useEffect(() => {
     if (!storageSession) return
-    if (powerPlannerDataSource) {
-      saveForSession(powerPlannerStorageKey, powerPlannerDataSource, storageSession)
-    } else {
-      localStorage.removeItem(powerPlannerStorageKey)
-    }
+    saveForSession(powerPlannerStorageKey, powerPlannerDataSource, storageSession)
   }, [powerPlannerDataSource, storageSession])
 
   useEffect(() => {
@@ -157,7 +166,10 @@ function App() {
 
     let timeoutId: number | undefined
     const scheduleExpiry = () => {
-      if (!isActiveStorageSession(storageSession)) return
+      if (!isCommittedStorageSession(storageSession)) {
+        expireSession()
+        return
+      }
       const remainingMs = Date.parse(storageSession.expiresAt) - Date.now()
       if (remainingMs <= 0) {
         expireSession()
@@ -177,9 +189,10 @@ function App() {
 
   useEffect(() => {
     if (!storageSession) return
-    const handleStorageSessionChange = (event: StorageEvent) => {
-      if (event.storageArea !== localStorage || event.key !== storageSessionKey) return
-      if (isActiveStorageSession(storageSession)) return
+    const resetStaleSession = () => {
+      const expired = Date.parse(storageSession.expiresAt) <= Date.now()
+      if (!expired && isCommittedStorageSession(storageSession)) return
+      purgeStorageSession(storageKeys, storageSession, storageSessionKey)
       setStorageSession(null)
       setBills(sampleBills)
       setProfile(defaultSchoolProfile)
@@ -188,10 +201,31 @@ function App() {
       setPowerPlannerDataSource(null)
       setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
       setActiveView('dashboard')
-      setExpiryMessage('다른 탭에서 저장 세션이 변경되어 시연 샘플로 전환했습니다.')
+      setExpiryMessage(
+        expired
+          ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
+          : '다른 탭에서 저장 세션이 변경되어 시연 샘플로 전환했습니다.',
+      )
+    }
+    const handleStorageSessionChange = (event: StorageEvent) => {
+      if (
+        event.storageArea !== localStorage ||
+        (event.key !== storageSessionKey && event.key !== storageCommitKey)
+      ) return
+      resetStaleSession()
+    }
+    const handleFocus = () => resetStaleSession()
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') resetStaleSession()
     }
     window.addEventListener('storage', handleStorageSessionChange)
-    return () => window.removeEventListener('storage', handleStorageSessionChange)
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.removeEventListener('storage', handleStorageSessionChange)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [storageSession])
 
   const sortedBills = useMemo(() => sortBillsChronologically(bills), [bills])
@@ -219,6 +253,7 @@ function App() {
   const resetSample = () => {
     storageKeys.forEach((key) => localStorage.removeItem(key))
     localStorage.removeItem(storageSessionKey)
+    localStorage.removeItem(storageCommitKey)
     setStorageSession(null)
     setBills(sampleBills)
     setProfile(defaultSchoolProfile)
@@ -239,13 +274,15 @@ function App() {
       [profileKey, profile],
       [scenarioKey, scenario],
       [ratePlansKey, ratePlans],
+      [powerPlannerStorageKey, nextPowerPlannerDataSource],
       [dataProvenanceStorageKey, nextProvenance],
     ]
-    if (nextPowerPlannerDataSource) {
-      entries.push([powerPlannerStorageKey, nextPowerPlannerDataSource])
-    }
-    const nextSession = startNewStorageSession(entries)
-    if (!nextPowerPlannerDataSource) localStorage.removeItem(powerPlannerStorageKey)
+    const nextSession = startNewStorageSession(
+      entries,
+      Date.now(),
+      undefined,
+      storageSnapshotKeys,
+    )
     setStorageSession(nextSession)
     setExpiryMessage('')
   }

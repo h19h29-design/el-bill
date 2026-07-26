@@ -3,8 +3,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import App from './App'
-import { sampleBills } from './data/sampleBills'
+import { defaultScenario, defaultSchoolProfile, sampleBills } from './data/sampleBills'
 import { samplePowerPlannerDataSource } from './data/samplePowerPlanner'
+import { defaultRatePlans } from './data/ratePlans'
+import { startNewStorageSession, storageCommitKey, storageSessionKey } from './lib/storage'
+import type { DataProvenance } from './types'
 
 const stored = (data: unknown) =>
   JSON.stringify({
@@ -20,6 +23,38 @@ const expiredStored = (data: unknown) =>
     data,
   })
 
+const snapshotEntries = (
+  provenance: DataProvenance = { bills: 'uploaded', powerPlanner: 'none' },
+  powerPlanner: unknown = null,
+) => [
+  ['el-bill:bills', sampleBills],
+  ['el-bill:profile', defaultSchoolProfile],
+  ['el-bill:scenario', defaultScenario],
+  ['el-bill:rate-plans', defaultRatePlans],
+  ['el-bill:power-planner', powerPlanner],
+  ['el-bill:data-provenance', provenance],
+] as const
+
+const startCommittedSnapshot = (
+  provenance: DataProvenance = { bills: 'uploaded', powerPlanner: 'none' },
+  powerPlanner: unknown = null,
+) => startNewStorageSession(
+  [...snapshotEntries(provenance, powerPlanner)],
+  Date.parse('2026-07-26T00:00:00Z'),
+)
+
+const writeCommittedSnapshot = (
+  session: { createdAt: string; expiresAt: string; sessionId: string },
+  provenance: DataProvenance = { bills: 'uploaded', powerPlanner: 'none' },
+  powerPlanner: unknown = null,
+) => {
+  localStorage.setItem(storageSessionKey, JSON.stringify(session))
+  snapshotEntries(provenance, powerPlanner).forEach(([key, data]) => {
+    localStorage.setItem(key, JSON.stringify({ ...session, data }))
+  })
+  localStorage.setItem(storageCommitKey, JSON.stringify(session))
+}
+
 describe('data provenance persistence', () => {
   afterEach(() => {
     cleanup()
@@ -34,10 +69,7 @@ describe('data provenance persistence', () => {
     expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 시연 샘플')
     await waitFor(() => {
       expect(localStorage.getItem('el-bill:data-mode')).toBeNull()
-      expect(JSON.parse(localStorage.getItem('el-bill:data-provenance') ?? '{}').data).toEqual({
-        bills: 'sample',
-        powerPlanner: 'none',
-      })
+      expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
     })
 
     firstRender.unmount()
@@ -54,10 +86,7 @@ describe('data provenance persistence', () => {
 
     expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 시연 샘플')
     await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem('el-bill:data-provenance') ?? '{}').data).toEqual({
-        bills: 'sample',
-        powerPlanner: 'none',
-      })
+      expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
       expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
     })
     fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
@@ -73,11 +102,10 @@ describe('data provenance persistence', () => {
   })
 
   it('restores PowerPlanner records for a new explicit provenance session', () => {
-    localStorage.setItem(
-      'el-bill:data-provenance',
-      stored({ bills: 'sample', powerPlanner: 'uploaded' }),
+    startCommittedSnapshot(
+      { bills: 'sample', powerPlanner: 'uploaded' },
+      samplePowerPlannerDataSource,
     )
-    localStorage.setItem('el-bill:power-planner', stored(samplePowerPlannerDataSource))
 
     render(<App />)
 
@@ -92,26 +120,27 @@ describe('data provenance persistence', () => {
     ['expired', expiredStored(samplePowerPlannerDataSource)],
     ['invalid JSON', '{invalid'],
   ])('downgrades explicit PowerPlanner provenance when its payload is %s', (_, payload) => {
-    localStorage.setItem(
-      'el-bill:data-provenance',
-      stored({ bills: 'sample', powerPlanner: 'uploaded' }),
+    startCommittedSnapshot(
+      { bills: 'sample', powerPlanner: 'uploaded' },
+      samplePowerPlannerDataSource,
     )
-    if (payload) localStorage.setItem('el-bill:power-planner', payload)
+    if (payload) {
+      localStorage.setItem('el-bill:power-planner', payload)
+    } else {
+      localStorage.removeItem('el-bill:power-planner')
+    }
 
     render(<App />)
 
     expect(document.querySelector('.notice-detail')?.textContent).toContain('파워플래너: 미사용')
     expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
-    expect(JSON.parse(localStorage.getItem('el-bill:data-provenance') ?? '{}').data).toEqual({
-      bills: 'sample',
-      powerPlanner: 'none',
-    })
+    expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
   })
 
   it('rejects malformed explicit PowerPlanner payloads before they reach the view', () => {
-    localStorage.setItem(
-      'el-bill:data-provenance',
-      stored({ bills: 'sample', powerPlanner: 'uploaded' }),
+    startCommittedSnapshot(
+      { bills: 'sample', powerPlanner: 'uploaded' },
+      samplePowerPlannerDataSource,
     )
     localStorage.setItem(
       'el-bill:power-planner',
@@ -157,10 +186,7 @@ describe('data provenance persistence', () => {
 
     expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 시연 샘플')
     await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem('el-bill:data-provenance') ?? '{}').data).toEqual({
-        bills: 'sample',
-        powerPlanner: 'none',
-      })
+      expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
     })
   })
 
@@ -174,10 +200,7 @@ describe('data provenance persistence', () => {
 
     expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 시연 샘플')
     await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem('el-bill:data-provenance') ?? '{}').data).toEqual({
-        bills: 'sample',
-        powerPlanner: 'none',
-      })
+      expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
     })
   })
 
@@ -192,10 +215,7 @@ describe('data provenance persistence', () => {
 
     expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 시연 샘플')
     await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem('el-bill:data-provenance') ?? '{}').data).toEqual({
-        bills: 'sample',
-        powerPlanner: 'none',
-      })
+      expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
     })
   })
 })
@@ -213,16 +233,9 @@ describe('shared live storage expiry', () => {
     const session = {
       createdAt: '2026-07-26T00:00:00.000Z',
       expiresAt: '2026-07-27T00:00:00.000Z',
+      sessionId: 'expiry-session',
     }
-    localStorage.setItem('el-bill:storage-session', JSON.stringify(session))
-    localStorage.setItem(
-      'el-bill:bills',
-      JSON.stringify({ ...session, data: sampleBills }),
-    )
-    localStorage.setItem(
-      'el-bill:data-provenance',
-      JSON.stringify({ ...session, data: { bills: 'uploaded', powerPlanner: 'none' } }),
-    )
+    writeCommittedSnapshot(session)
 
     render(<App />)
     expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 사용자 업로드')
@@ -239,23 +252,11 @@ describe('shared live storage expiry', () => {
   it('bounds a long migrated session timer to the browser timeout limit', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-26T00:00:00Z'))
-    localStorage.setItem(
-      'el-bill:storage-session',
-      JSON.stringify({
-        createdAt: '2030-01-01T00:00:00.000Z',
-        expiresAt: '2030-01-02T00:00:00.000Z',
-        sessionId: 'long-session',
-      }),
-    )
-    localStorage.setItem(
-      'el-bill:bills',
-      JSON.stringify({
-        createdAt: '2030-01-01T00:00:00.000Z',
-        expiresAt: '2030-01-02T00:00:00.000Z',
-        sessionId: 'long-session',
-        data: sampleBills,
-      }),
-    )
+    writeCommittedSnapshot({
+      createdAt: '2030-01-01T00:00:00.000Z',
+      expiresAt: '2030-01-02T00:00:00.000Z',
+      sessionId: 'long-session',
+    })
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
 
     render(<App />)
@@ -276,12 +277,7 @@ describe('shared live storage expiry', () => {
       expiresAt: new Date(Date.now() + maxDelay + 1_000).toISOString(),
       sessionId: 'capped-session',
     }
-    localStorage.setItem('el-bill:storage-session', JSON.stringify(session))
-    localStorage.setItem('el-bill:bills', JSON.stringify({ ...session, data: sampleBills }))
-    localStorage.setItem(
-      'el-bill:data-provenance',
-      JSON.stringify({ ...session, data: { bills: 'uploaded', powerPlanner: 'none' } }),
-    )
+    writeCommittedSnapshot(session)
 
     render(<App />)
     act(() => {
@@ -302,5 +298,49 @@ describe('shared live storage expiry', () => {
       '현재 저장된 사용자 데이터 없음',
     )
     expect(document.querySelector('.notice-detail')?.textContent).not.toContain('만료 예정')
+  })
+
+  it('purges an expired background session when focus returns', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-26T00:00:00Z'))
+    startNewStorageSession([
+      ['el-bill:bills', sampleBills],
+      ['el-bill:profile', defaultSchoolProfile],
+      ['el-bill:scenario', defaultScenario],
+      ['el-bill:rate-plans', defaultRatePlans],
+      ['el-bill:power-planner', null],
+      ['el-bill:data-provenance', { bills: 'uploaded', powerPlanner: 'none' }],
+    ], Date.now(), 'focus-session')
+    render(<App />)
+
+    vi.setSystemTime(new Date('2026-07-27T00:00:00Z'))
+    act(() => {
+      fireEvent.focus(window)
+    })
+
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+    expect(screen.getByText('24시간이 지나 시연 데이터가 삭제되었습니다.')).toBeTruthy()
+  })
+
+  it('purges an expired background session when the document becomes visible', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-26T00:00:00Z'))
+    startNewStorageSession([
+      ['el-bill:bills', sampleBills],
+      ['el-bill:profile', defaultSchoolProfile],
+      ['el-bill:scenario', defaultScenario],
+      ['el-bill:rate-plans', defaultRatePlans],
+      ['el-bill:power-planner', null],
+      ['el-bill:data-provenance', { bills: 'uploaded', powerPlanner: 'none' }],
+    ], Date.now(), 'visibility-session')
+    render(<App />)
+
+    vi.setSystemTime(new Date('2026-07-27T00:00:00Z'))
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
   })
 })
