@@ -12,8 +12,8 @@ import {
 import { samplePowerPlannerDataSource } from './data/samplePowerPlanner'
 import {
   startNewStorageSnapshot,
-  storageSnapshotKey,
-  type StorageSession,
+  storageActivePointerKey,
+  storageSnapshotKeyFor,
   type StorageSnapshotData,
 } from './lib/storage'
 
@@ -36,19 +36,6 @@ const makeData = (
   ...overrides,
 })
 
-const writeRoot = (
-  session: StorageSession,
-  data: StorageSnapshotData = makeData({
-    provenance: { bills: 'uploaded', powerPlanner: 'none' },
-  }),
-) => {
-  localStorage.setItem(storageSnapshotKey, JSON.stringify({
-    schemaVersion: 1,
-    session,
-    data,
-  }))
-}
-
 afterEach(() => {
   cleanup()
   localStorage.clear()
@@ -66,7 +53,7 @@ describe('data provenance persistence', () => {
       '고지서: 시연 샘플',
     )
     expect(localStorage.getItem('el-bill:data-mode')).toBeNull()
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
+    expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
   })
 
   it('migrates legacy payloads conservatively when explicit provenance is absent', () => {
@@ -85,7 +72,7 @@ describe('data provenance persistence', () => {
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '파워플래너: 미사용',
     )
-    expect(localStorage.getItem(storageSnapshotKey)).not.toBeNull()
+    expect(localStorage.getItem(storageActivePointerKey)).not.toBeNull()
     expect(localStorage.getItem('el-bill:data-mode')).toBeNull()
     expect(localStorage.getItem('el-bill:bills')).toBeNull()
     expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
@@ -106,7 +93,7 @@ describe('data provenance persistence', () => {
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '파워플래너: 사용자 업로드',
     )
-    expect(localStorage.length).toBe(1)
+    expect(localStorage.length).toBe(2)
   })
 })
 
@@ -131,33 +118,44 @@ describe('shared live storage expiry', () => {
       vi.advanceTimersByTime(24 * 60 * 60 * 1000)
     })
 
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
+    expect(localStorage.getItem(storageSnapshotKeyFor('expiry-session'))).toBeNull()
     expect(screen.getByText('24시간이 지나 시연 데이터가 삭제되었습니다.')).toBeTruthy()
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '고지서: 시연 샘플',
     )
   })
 
-  it('reschedules after the browser timer cap before deleting the root', () => {
+  it('purges a malformed 25-day session instead of scheduling it', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'))
-    const maxDelay = 2_147_483_647
-    writeRoot({
-      createdAt: new Date(Date.now()).toISOString(),
-      expiresAt: new Date(Date.now() + maxDelay + 1_000).toISOString(),
-      sessionId: 'capped-session',
-    })
+    const sessionId = 'overlong-session'
+    localStorage.setItem(
+      storageSnapshotKeyFor(sessionId),
+      JSON.stringify({
+        schemaVersion: 1,
+        session: {
+          createdAt: new Date(Date.now()).toISOString(),
+          expiresAt: new Date(
+            Date.now() + 25 * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+          sessionId,
+        },
+        data: makeData({
+          provenance: { bills: 'uploaded', powerPlanner: 'none' },
+        }),
+      }),
+    )
+    localStorage.setItem(
+      storageActivePointerKey,
+      JSON.stringify({ schemaVersion: 1, sessionId }),
+    )
 
     render(<App />)
-    act(() => {
-      vi.advanceTimersByTime(maxDelay)
-    })
-    expect(localStorage.getItem(storageSnapshotKey)).not.toBeNull()
 
-    act(() => {
-      vi.advanceTimersByTime(1_000)
-    })
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
+    expect(localStorage.getItem(storageSnapshotKeyFor(sessionId))).toBeNull()
+    expect(document.querySelector('.notice-detail')?.textContent).toContain(
+      '현재 저장된 사용자 데이터 없음',
+    )
   })
 
   it('does not show an expiry countdown without a root snapshot', () => {
@@ -184,7 +182,7 @@ describe('shared live storage expiry', () => {
       fireEvent.focus(window)
     })
 
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
+    expect(localStorage.getItem(storageSnapshotKeyFor('focus-session'))).toBeNull()
     expect(screen.getByText('24시간이 지나 시연 데이터가 삭제되었습니다.')).toBeTruthy()
   })
 
@@ -205,6 +203,8 @@ describe('shared live storage expiry', () => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
 
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
+    expect(
+      localStorage.getItem(storageSnapshotKeyFor('visibility-session')),
+    ).toBeNull()
   })
 })

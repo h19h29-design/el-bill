@@ -9,14 +9,20 @@ import {
 } from '../data/sampleBills'
 import type { DataProvenance } from '../types'
 import {
-  purgeExpiredStorageSnapshot,
-  restoreStorageSnapshot,
+  cleanupExpiredStorageSnapshots,
+  initializeStorageAfterMount,
+  legacyAtomicStorageSnapshotKey,
+  readStorageSnapshot,
+  removeStorageSnapshot,
   startNewStorageSnapshot,
-  storageSnapshotKey,
+  storageActivePointerKey,
+  storageSnapshotKeyFor,
   updateStorageSnapshot,
+  type StorageSnapshot,
   type StorageSnapshotData,
 } from './storage'
 
+const dayMs = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-07-26T00:00:00.000Z')
 
 const makeData = (
@@ -30,16 +36,31 @@ const makeData = (
   provenance,
 })
 
-const legacyPayload = (
-  data: unknown,
-  expiresAt = '2026-07-27T00:00:00.000Z',
-) => JSON.stringify({
-  createdAt: '2026-07-26T00:00:00.000Z',
-  expiresAt,
+const pointer = (sessionId: string) =>
+  JSON.stringify({ schemaVersion: 1, sessionId })
+
+const snapshot = (
+  sessionId: string,
+  data = makeData(),
+  createdAt = now,
+  expiresAt = now + dayMs,
+): StorageSnapshot => ({
+  schemaVersion: 1,
+  session: {
+    sessionId,
+    createdAt: new Date(createdAt).toISOString(),
+    expiresAt: new Date(expiresAt).toISOString(),
+  },
   data,
 })
 
-describe('atomic storage snapshots', () => {
+const legacyPayload = (
+  data: unknown,
+  expiresAt = '2026-07-27T00:00:00.000Z',
+  createdAt = '2026-07-26T00:00:00.000Z',
+) => JSON.stringify({ createdAt, expiresAt, data })
+
+describe('session-scoped atomic storage snapshots', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(now)
@@ -52,127 +73,261 @@ describe('atomic storage snapshots', () => {
     localStorage.clear()
   })
 
-  it('commits and immediately restores a complete snapshot through one root key', () => {
-    const result = startNewStorageSnapshot(makeData(), now, 'upload-session')
-
-    expect(result.ok).toBe(true)
-    expect(localStorage.length).toBe(1)
-    expect(localStorage.getItem(storageSnapshotKey)).not.toBeNull()
-    expect(restoreStorageSnapshot(makeData(), now)).toEqual(
-      expect.objectContaining({
-        schemaVersion: 1,
-        session: expect.objectContaining({ sessionId: 'upload-session' }),
-        data: expect.objectContaining({
-          bills: sampleBills,
-          provenance: { bills: 'uploaded', powerPlanner: 'none' },
-        }),
-      }),
-    )
-  })
-
-  it('removes leftover legacy keys only after a new root upload commits', () => {
-    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
-    localStorage.setItem('el-bill:data-mode', legacyPayload('uploaded'))
-
-    const result = startNewStorageSnapshot(makeData(), now, 'new-upload')
-
-    expect(result.ok).toBe(true)
-    expect(localStorage.length).toBe(1)
-    expect(localStorage.getItem(storageSnapshotKey)).not.toBeNull()
-    expect(localStorage.getItem('el-bill:bills')).toBeNull()
-    expect(localStorage.getItem('el-bill:data-mode')).toBeNull()
-  })
-
-  it('leaves the previous committed snapshot untouched when quota blocks an upload', () => {
-    const first = startNewStorageSnapshot(makeData(), now, 'first-session')
-    expect(first.ok).toBe(true)
-    const previousRoot = localStorage.getItem(storageSnapshotKey)
+  it('writes a complete session snapshot before switching the active pointer', () => {
+    const writes: string[] = []
     const nativeSetItem = Storage.prototype.setItem
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
       this: Storage,
       key,
       value,
     ) {
-      if (key === storageSnapshotKey) {
+      writes.push(key)
+      nativeSetItem.call(this, key, value)
+    })
+
+    const result = startNewStorageSnapshot(makeData(), now, 'upload-session')
+
+    expect(result.ok).toBe(true)
+    expect(writes.slice(0, 2)).toEqual([
+      storageSnapshotKeyFor('upload-session'),
+      storageActivePointerKey,
+    ])
+    expect(readStorageSnapshot(now)).toEqual(result.ok && result.snapshot)
+  })
+
+  it('leaves the previous active session untouched when snapshot storage fails', () => {
+    expect(startNewStorageSnapshot(makeData(), now, 'first-session').ok).toBe(true)
+    const previousPointer = localStorage.getItem(storageActivePointerKey)
+    const previousSnapshot = localStorage.getItem(
+      storageSnapshotKeyFor('first-session'),
+    )
+    const nativeSetItem = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      if (key === storageSnapshotKeyFor('failed-session')) {
         throw new DOMException('quota exceeded', 'QuotaExceededError')
       }
       nativeSetItem.call(this, key, value)
     })
 
-    const failed = startNewStorageSnapshot(
-      makeData({ bills: 'sample', powerPlanner: 'none' }),
-      now + 1,
-      'failed-session',
+    const result = startNewStorageSnapshot(makeData(), now + 1, 'failed-session')
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: false, reason: 'storage-error' }),
     )
-
-    expect(failed).toEqual(expect.objectContaining({ ok: false, reason: 'storage-error' }))
-    expect(localStorage.getItem(storageSnapshotKey)).toBe(previousRoot)
-  })
-
-  it('rejects a stale-tab edit after a newer upload has replaced its session', () => {
-    const stale = startNewStorageSnapshot(makeData(), now, 'stale-session')
-    expect(stale.ok).toBe(true)
-    const current = startNewStorageSnapshot(makeData(), now + 1, 'current-session')
-    expect(current.ok).toBe(true)
-
-    const result = updateStorageSnapshot(
-      'stale-session',
-      makeData({ bills: 'sample', powerPlanner: 'none' }),
-      now + 2,
-    )
-
-    expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'stale-session' }))
-    expect(restoreStorageSnapshot(makeData(), now + 2)?.session.sessionId).toBe(
-      'current-session',
+    expect(localStorage.getItem(storageActivePointerKey)).toBe(previousPointer)
+    expect(localStorage.getItem(storageSnapshotKeyFor('first-session'))).toBe(
+      previousSnapshot,
     )
   })
 
-  it('does not overwrite a newer root that appears immediately before a CAS commit', () => {
-    expect(
-      startNewStorageSnapshot(makeData(), now, 'stale-session').ok,
-    ).toBe(true)
-    const staleRoot = localStorage.getItem(storageSnapshotKey)!
-    expect(
-      startNewStorageSnapshot(makeData(), now + 1, 'newer-session').ok,
-    ).toBe(true)
-    const newerRoot = localStorage.getItem(storageSnapshotKey)!
-    localStorage.setItem(storageSnapshotKey, staleRoot)
-    const nativeGetItem = Storage.prototype.getItem
+  it('leaves the previous pointer active and removes its uncommitted snapshot when pointer storage fails', () => {
+    expect(startNewStorageSnapshot(makeData(), now, 'first-session').ok).toBe(true)
+    const previousPointer = localStorage.getItem(storageActivePointerKey)
     const nativeSetItem = Storage.prototype.setItem
-    let rootReadCount = 0
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
       this: Storage,
       key,
+      value,
     ) {
-      if (key !== storageSnapshotKey) return nativeGetItem.call(this, key)
-      rootReadCount += 1
-      if (rootReadCount === 2) {
-        nativeSetItem.call(this, storageSnapshotKey, newerRoot)
+      if (
+        key === storageActivePointerKey &&
+        JSON.parse(value).sessionId === 'failed-session'
+      ) {
+        throw new DOMException('quota exceeded', 'QuotaExceededError')
       }
-      return nativeGetItem.call(this, key)
+      nativeSetItem.call(this, key, value)
     })
 
-    const result = updateStorageSnapshot('stale-session', makeData(), now + 2)
+    const result = startNewStorageSnapshot(makeData(), now + 1, 'failed-session')
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: false, reason: 'storage-error' }),
+    )
+    expect(localStorage.getItem(storageActivePointerKey)).toBe(previousPointer)
+    expect(localStorage.getItem(storageSnapshotKeyFor('failed-session'))).toBeNull()
+  })
+
+  it('leaves the previous active session untouched when serialization fails', () => {
+    expect(startNewStorageSnapshot(makeData(), now, 'first-session').ok).toBe(true)
+    const previousPointer = localStorage.getItem(storageActivePointerKey)
+    const previousSnapshot = localStorage.getItem(
+      storageSnapshotKeyFor('first-session'),
+    )
+    const circular = makeData() as StorageSnapshotData & {
+      unsupported?: unknown
+    }
+    circular.unsupported = circular
+
+    const result = startNewStorageSnapshot(
+      circular,
+      now + 1,
+      'serialization-failure',
+    )
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: false, reason: 'invalid-data' }),
+    )
+    expect(localStorage.getItem(storageActivePointerKey)).toBe(previousPointer)
+    expect(localStorage.getItem(storageSnapshotKeyFor('first-session'))).toBe(
+      previousSnapshot,
+    )
+    expect(
+      localStorage.getItem(storageSnapshotKeyFor('serialization-failure')),
+    ).toBeNull()
+  })
+
+  it('rejects a new upload that tries to reuse an existing session key', () => {
+    expect(startNewStorageSnapshot(makeData(), now, 'reused-session').ok).toBe(
+      true,
+    )
+    const previous = localStorage.getItem(
+      storageSnapshotKeyFor('reused-session'),
+    )
+
+    const result = startNewStorageSnapshot(
+      makeData({ bills: 'sample', powerPlanner: 'none' }),
+      now + 1,
+      'reused-session',
+    )
 
     expect(result).toEqual(
       expect.objectContaining({ ok: false, reason: 'stale-session' }),
     )
-    expect(nativeGetItem.call(localStorage, storageSnapshotKey)).toBe(newerRoot)
+    expect(localStorage.getItem(storageSnapshotKeyFor('reused-session'))).toBe(
+      previous,
+    )
   })
 
-  it('rejects an edit at the exact expiry without changing the committed root', () => {
-    const started = startNewStorageSnapshot(makeData(), now, 'expired-session')
-    expect(started.ok).toBe(true)
-    const previousRoot = localStorage.getItem(storageSnapshotKey)
+  it('cannot damage a newer upload injected after a stale writer last checks the pointer', () => {
+    expect(startNewStorageSnapshot(makeData(), now, 'stale-session').ok).toBe(true)
+    const winnerData = makeData({ bills: 'sample', powerPlanner: 'none' })
+    const staleKey = storageSnapshotKeyFor('stale-session')
+    const nativeSetItem = Storage.prototype.setItem
+    let injected = false
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      if (key === staleKey && !injected) {
+        injected = true
+        expect(
+          startNewStorageSnapshot(winnerData, now + 1, 'winner-session').ok,
+        ).toBe(true)
+      }
+      nativeSetItem.call(this, key, value)
+    })
 
     const result = updateStorageSnapshot(
-      'expired-session',
-      makeData({ bills: 'sample', powerPlanner: 'none' }),
-      now + 24 * 60 * 60 * 1000,
+      'stale-session',
+      makeData(),
+      now + 2,
     )
 
-    expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'expired' }))
-    expect(localStorage.getItem(storageSnapshotKey)).toBe(previousRoot)
+    expect(result).toEqual(
+      expect.objectContaining({ ok: false, reason: 'stale-session' }),
+    )
+    expect(readStorageSnapshot(now + 2)).toEqual(
+      expect.objectContaining({
+        session: expect.objectContaining({ sessionId: 'winner-session' }),
+        data: winnerData,
+      }),
+    )
+  })
+
+  it('keeps the complete winner in a dual-new-upload race', () => {
+    const nativeSetItem = Storage.prototype.setItem
+    let injected = false
+    const winnerData = makeData({ bills: 'sample', powerPlanner: 'none' })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      nativeSetItem.call(this, key, value)
+      if (
+        key === storageActivePointerKey &&
+        JSON.parse(value).sessionId === 'first-upload' &&
+        !injected
+      ) {
+        injected = true
+        expect(
+          startNewStorageSnapshot(winnerData, now + 1, 'second-upload').ok,
+        ).toBe(true)
+      }
+    })
+
+    const first = startNewStorageSnapshot(makeData(), now, 'first-upload')
+
+    expect(first).toEqual(
+      expect.objectContaining({ ok: false, reason: 'stale-session' }),
+    )
+    expect(readStorageSnapshot(now + 2)).toEqual(
+      expect.objectContaining({
+        session: expect.objectContaining({ sessionId: 'second-upload' }),
+        data: winnerData,
+      }),
+    )
+    expect(
+      JSON.parse(localStorage.getItem(storageSnapshotKeyFor('second-upload'))!),
+    ).toEqual(readStorageSnapshot(now + 2))
+  })
+
+  it('removes only the stale session key when a winner appears immediately before removal', () => {
+    expect(startNewStorageSnapshot(makeData(), now, 'stale-session').ok).toBe(true)
+    const staleKey = storageSnapshotKeyFor('stale-session')
+    const nativeRemoveItem = Storage.prototype.removeItem
+    let injected = false
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key,
+    ) {
+      if (key === staleKey && !injected) {
+        injected = true
+        expect(
+          startNewStorageSnapshot(makeData(), now + 1, 'winner-session').ok,
+        ).toBe(true)
+      }
+      nativeRemoveItem.call(this, key)
+    })
+
+    expect(removeStorageSnapshot('stale-session')).toBe(false)
+    expect(readStorageSnapshot(now + 2)?.session.sessionId).toBe('winner-session')
+    expect(localStorage.getItem(storageSnapshotKeyFor('winner-session'))).not.toBeNull()
+  })
+
+  it('rejects edits at expiry and purges data at exactly 24 hours', () => {
+    expect(startNewStorageSnapshot(makeData(), now, 'expiry-session').ok).toBe(true)
+
+    expect(
+      updateStorageSnapshot('expiry-session', makeData(), now + dayMs),
+    ).toEqual(expect.objectContaining({ ok: false, reason: 'expired' }))
+    expect(cleanupExpiredStorageSnapshots(now + dayMs)).toContain(
+      storageSnapshotKeyFor('expiry-session'),
+    )
+    expect(localStorage.getItem(storageSnapshotKeyFor('expiry-session'))).toBeNull()
+    expect(readStorageSnapshot(now + dayMs)).toBeNull()
+  })
+
+  it.each([
+    ['zero duration', now, now],
+    ['negative duration', now, now - 1],
+    ['more than 24 hours', now, now + dayMs + 1],
+  ])('rejects and purges a %s session', (_, createdAt, expiresAt) => {
+    const invalid = snapshot('invalid-duration', makeData(), createdAt, expiresAt)
+    localStorage.setItem(
+      storageSnapshotKeyFor('invalid-duration'),
+      JSON.stringify(invalid),
+    )
+    localStorage.setItem(storageActivePointerKey, pointer('invalid-duration'))
+
+    expect(readStorageSnapshot(now)).toBeNull()
+    initializeStorageAfterMount(makeData(), now)
+    expect(localStorage.getItem(storageSnapshotKeyFor('invalid-duration'))).toBeNull()
   })
 
   it.each([
@@ -180,38 +335,68 @@ describe('atomic storage snapshots', () => {
     [
       'incomplete data',
       JSON.stringify({
-        schemaVersion: 1,
-        session: {
-          sessionId: 'incomplete',
-          createdAt: '2026-07-26T00:00:00.000Z',
-          expiresAt: '2026-07-27T00:00:00.000Z',
-        },
+        ...snapshot('invalid-root'),
         data: { bills: sampleBills },
       }),
     ],
-    [
-      'incoherent provenance',
-      JSON.stringify({
-        schemaVersion: 1,
-        session: {
-          sessionId: 'incoherent',
-          createdAt: '2026-07-26T00:00:00.000Z',
-          expiresAt: '2026-07-27T00:00:00.000Z',
-        },
-        data: makeData({
-          bills: 'sample',
-          powerPlanner: 'uploaded',
-        }),
-      }),
-    ],
-  ])('ignores and purges a %s root snapshot', (_, root) => {
-    localStorage.setItem(storageSnapshotKey, root)
+  ])('purely ignores then effect-purges a %s snapshot', (_, raw) => {
+    const key = storageSnapshotKeyFor('invalid-root')
+    localStorage.setItem(key, raw)
+    localStorage.setItem(storageActivePointerKey, pointer('invalid-root'))
 
-    expect(restoreStorageSnapshot(makeData(), now)).toBeNull()
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
+    expect(readStorageSnapshot(now)).toBeNull()
+    expect(localStorage.getItem(key)).toBe(raw)
+
+    initializeStorageAfterMount(makeData(), now)
+    expect(localStorage.getItem(key)).toBeNull()
   })
 
-  it('migrates complete legacy keys once and keeps their earliest expiry', () => {
+  it('purges an expired stale session without touching a winner injected before removal', () => {
+    const stale = snapshot(
+      'expired-stale',
+      makeData(),
+      now - dayMs,
+      now,
+    )
+    const staleKey = storageSnapshotKeyFor('expired-stale')
+    localStorage.setItem(staleKey, JSON.stringify(stale))
+    localStorage.setItem(storageActivePointerKey, pointer('expired-stale'))
+    const nativeRemoveItem = Storage.prototype.removeItem
+    let injected = false
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key,
+    ) {
+      if (key === staleKey && !injected) {
+        injected = true
+        expect(
+          startNewStorageSnapshot(makeData(), now, 'cleanup-winner').ok,
+        ).toBe(true)
+      }
+      nativeRemoveItem.call(this, key)
+    })
+
+    cleanupExpiredStorageSnapshots(now)
+
+    expect(readStorageSnapshot(now)?.session.sessionId).toBe('cleanup-winner')
+    expect(localStorage.getItem(storageSnapshotKeyFor('cleanup-winner'))).not.toBeNull()
+  })
+})
+
+describe('one-time legacy migration', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+    localStorage.clear()
+  })
+
+  it('migrates valid per-key data to a scoped snapshot without extending the earliest expiry', () => {
     localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
     localStorage.setItem(
       'el-bill:profile',
@@ -219,51 +404,113 @@ describe('atomic storage snapshots', () => {
     )
     localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
     localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
-    localStorage.setItem('el-bill:power-planner', legacyPayload(null))
     localStorage.setItem(
       'el-bill:data-provenance',
       legacyPayload({ bills: 'uploaded', powerPlanner: 'none' }),
     )
 
-    const migrated = restoreStorageSnapshot(makeData(), now)
+    const migrated = initializeStorageAfterMount(makeData(), now)
 
     expect(migrated?.session.expiresAt).toBe('2026-07-26T12:00:00.000Z')
-    expect(migrated?.data.provenance).toEqual({
-      bills: 'uploaded',
-      powerPlanner: 'none',
-    })
-    expect(localStorage.length).toBe(1)
-    expect(localStorage.getItem(storageSnapshotKey)).not.toBeNull()
-  })
-
-  it('migrates a complete legacy session and commit with matching payload IDs', () => {
-    const session = {
-      createdAt: '2026-07-26T00:00:00.000Z',
-      expiresAt: '2026-07-27T00:00:00.000Z',
-      sessionId: 'legacy-committed',
-    }
-    localStorage.setItem('el-bill:storage-session', JSON.stringify(session))
-    localStorage.setItem('el-bill:storage-commit', JSON.stringify(session))
-    const write = (key: string, data: unknown) =>
-      localStorage.setItem(key, JSON.stringify({ ...session, data }))
-    write('el-bill:bills', sampleBills)
-    write('el-bill:profile', defaultSchoolProfile)
-    write('el-bill:scenario', defaultScenario)
-    write('el-bill:rate-plans', defaultRatePlans)
-    write('el-bill:power-planner', null)
-    write('el-bill:data-provenance', {
-      bills: 'uploaded',
-      powerPlanner: 'none',
-    })
-
-    const migrated = restoreStorageSnapshot(makeData(), now)
-
     expect(migrated?.data.provenance.bills).toBe('uploaded')
-    expect(localStorage.length).toBe(1)
-    expect(localStorage.getItem(storageSnapshotKey)).not.toBeNull()
+    expect(localStorage.getItem(storageActivePointerKey)).not.toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+    expect(localStorage.getItem('el-bill:profile')).toBeNull()
   })
 
-  it('does not merge a legacy payload whose session ID differs from its commit', () => {
+  it('migrates the former fixed root through the pointer protocol', () => {
+    const oldRoot = snapshot('fixed-root-session')
+    localStorage.setItem(legacyAtomicStorageSnapshotKey, JSON.stringify(oldRoot))
+
+    const migrated = initializeStorageAfterMount(makeData(), now)
+
+    expect(migrated).toEqual(oldRoot)
+    expect(localStorage.getItem(legacyAtomicStorageSnapshotKey)).toBeNull()
+    expect(localStorage.getItem(storageSnapshotKeyFor('fixed-root-session'))).toBe(
+      JSON.stringify(oldRoot),
+    )
+    expect(localStorage.getItem(storageActivePointerKey)).toBe(
+      pointer('fixed-root-session'),
+    )
+  })
+
+  it('preserves valid unexpired legacy data when migration storage fails', () => {
+    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+    localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
+    const nativeSetItem = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      if (key.startsWith('el-bill:storage-snapshot:')) {
+        throw new DOMException('quota exceeded', 'QuotaExceededError')
+      }
+      nativeSetItem.call(this, key, value)
+    })
+
+    expect(initializeStorageAfterMount(makeData(), now)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).not.toBeNull()
+    expect(localStorage.getItem('el-bill:profile')).not.toBeNull()
+    expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
+  })
+
+  it('adopts a valid new-upload winner when migration loses the pointer race', () => {
+    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+    localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
+    const winnerData = makeData({ bills: 'sample', powerPlanner: 'none' })
+    const nativeSetItem = Storage.prototype.setItem
+    let injected = false
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      nativeSetItem.call(this, key, value)
+      if (key === storageActivePointerKey && !injected) {
+        injected = true
+        expect(
+          startNewStorageSnapshot(
+            winnerData,
+            now + 1,
+            'migration-race-winner',
+          ).ok,
+        ).toBe(true)
+      }
+    })
+
+    const initialized = initializeStorageAfterMount(makeData(), now + 2)
+
+    expect(initialized).toEqual(
+      expect.objectContaining({
+        session: expect.objectContaining({
+          sessionId: 'migration-race-winner',
+        }),
+        data: winnerData,
+      }),
+    )
+    expect(readStorageSnapshot(now + 2)).toEqual(initialized)
+  })
+
+  it('always removes expired legacy PII even when migration storage would fail', () => {
+    localStorage.setItem(
+      'el-bill:bills',
+      legacyPayload(sampleBills, '2026-07-26T00:00:00.000Z'),
+    )
+    localStorage.setItem(
+      'el-bill:profile',
+      legacyPayload(defaultSchoolProfile, '2026-07-26T00:00:00.000Z'),
+    )
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota exceeded', 'QuotaExceededError')
+    })
+
+    expect(initializeStorageAfterMount(makeData(), now)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+    expect(localStorage.getItem('el-bill:profile')).toBeNull()
+  })
+
+  it('always removes malformed and session-mismatched legacy data', () => {
     const session = {
       createdAt: '2026-07-26T00:00:00.000Z',
       expiresAt: '2026-07-27T00:00:00.000Z',
@@ -273,61 +520,44 @@ describe('atomic storage snapshots', () => {
     localStorage.setItem('el-bill:storage-commit', JSON.stringify(session))
     localStorage.setItem(
       'el-bill:bills',
-      JSON.stringify({ ...session, sessionId: 'stale-payload', data: sampleBills }),
+      JSON.stringify({
+        ...session,
+        sessionId: 'stale-payload',
+        data: sampleBills,
+      }),
     )
+    localStorage.setItem('el-bill:profile', '{broken')
+
+    expect(initializeStorageAfterMount(makeData(), now)).toBeNull()
+    expect(localStorage.getItem('el-bill:storage-session')).toBeNull()
+    expect(localStorage.getItem('el-bill:storage-commit')).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+    expect(localStorage.getItem('el-bill:profile')).toBeNull()
+  })
+
+  it('rejects and removes a legacy fixture whose lifetime exceeds 24 hours', () => {
     localStorage.setItem(
-      'el-bill:profile',
-      JSON.stringify({ ...session, data: defaultSchoolProfile }),
+      'el-bill:bills',
+      legacyPayload(
+        sampleBills,
+        '2026-07-27T00:00:00.001Z',
+        '2026-07-26T00:00:00.000Z',
+      ),
     )
 
-    expect(restoreStorageSnapshot(makeData(), now)).toBeNull()
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
-    expect(localStorage.getItem('el-bill:bills')).not.toBeNull()
+    expect(initializeStorageAfterMount(makeData(), now)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
   })
 
-  it('keeps all legacy keys when the atomic migration commit fails', () => {
+  it('keeps ambiguous legacy provenance at sample and none', () => {
     localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
-    localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
-    localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
-    localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
-    const nativeSetItem = Storage.prototype.setItem
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
-      this: Storage,
-      key,
-      value,
-    ) {
-      if (key === storageSnapshotKey) {
-        throw new DOMException('quota exceeded', 'QuotaExceededError')
-      }
-      nativeSetItem.call(this, key, value)
+    localStorage.setItem('el-bill:data-mode', legacyPayload('uploaded'))
+
+    const migrated = initializeStorageAfterMount(makeData(), now)
+
+    expect(migrated?.data.provenance).toEqual({
+      bills: 'sample',
+      powerPlanner: 'none',
     })
-
-    expect(restoreStorageSnapshot(makeData(), now)).toBeNull()
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
-    expect(localStorage.getItem('el-bill:bills')).not.toBeNull()
-    expect(localStorage.getItem('el-bill:profile')).not.toBeNull()
-  })
-
-  it('purges the root at exactly 24 hours but never purges a newer session', () => {
-    const first = startNewStorageSnapshot(makeData(), now, 'first-session')
-    expect(first.ok).toBe(true)
-    expect(
-      purgeExpiredStorageSnapshot('first-session', now + 24 * 60 * 60 * 1000 - 1),
-    ).toBe(false)
-
-    const second = startNewStorageSnapshot(makeData(), now + 1, 'second-session')
-    expect(second.ok).toBe(true)
-    expect(
-      purgeExpiredStorageSnapshot('first-session', now + 24 * 60 * 60 * 1000),
-    ).toBe(false)
-    expect(localStorage.getItem(storageSnapshotKey)).not.toBeNull()
-
-    expect(
-      purgeExpiredStorageSnapshot(
-        'second-session',
-        now + 1 + 24 * 60 * 60 * 1000,
-      ),
-    ).toBe(true)
-    expect(localStorage.getItem(storageSnapshotKey)).toBeNull()
   })
 })

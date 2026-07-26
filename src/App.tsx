@@ -24,15 +24,20 @@ import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import {
-  purgeExpiredStorageSnapshot,
+  cleanupExpiredStorageSnapshots,
+  getNextStorageExpiry,
+  initializeStorageAfterMount,
+  isSessionSnapshotStorageKey,
   readStorageSnapshot,
+  readStorageActivePointer,
   removeStorageSnapshot,
-  restoreStorageSnapshot,
   startNewStorageSnapshot,
-  storageSnapshotKey,
+  storageActivePointerKey,
+  storageSnapshotKeyFor,
   updateStorageSnapshot,
   type StorageSnapshot,
   type StorageSnapshotData,
+  type StorageSnapshotWriteResult,
   type StorageSession,
 } from './lib/storage'
 
@@ -50,7 +55,7 @@ const defaultStorageData = (): StorageSnapshotData => ({
 })
 
 const initializeAppStorage = () => {
-  const snapshot = restoreStorageSnapshot(defaultStorageData())
+  const snapshot = readStorageSnapshot()
   return {
     snapshot,
     data: snapshot?.data ?? defaultStorageData(),
@@ -144,66 +149,47 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!storageSession) return
-    const result = updateStorageSnapshot(storageSession.sessionId, {
-      bills,
-      profile,
-      scenario,
-      ratePlans,
-      powerPlanner: powerPlannerDataSource,
-      provenance: dataProvenance,
-    })
-    if (result.ok) return
-    if (result.reason === 'storage-error' || result.reason === 'invalid-data') {
-      setExpiryMessage(storageFailureMessage)
+    const initialized = initializeStorageAfterMount(defaultStorageData())
+    if (initialized) {
+      applySnapshot(initialized)
       return
     }
-    const latest = readStorageSnapshot()
-    if (latest) {
-      applySnapshot(latest)
-      return
+    if (initialStorage.snapshot) {
+      resetInMemoryToSamples(
+        '저장 데이터가 만료되었거나 손상되어 시연 샘플로 전환했습니다.',
+      )
     }
-    resetInMemoryToSamples(
-      result.reason === 'expired'
-        ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
-        : '다른 탭에서 저장 데이터가 변경되어 시연 샘플로 전환했습니다.',
-    )
   }, [
     applySnapshot,
-    bills,
-    dataProvenance,
-    powerPlannerDataSource,
-    profile,
-    ratePlans,
+    initialStorage.snapshot,
     resetInMemoryToSamples,
-    scenario,
-    storageSession,
   ])
 
   useEffect(() => {
-    if (!storageSession) return
-
-    const expireSession = () => {
-      if (
-        purgeExpiredStorageSnapshot(storageSession.sessionId) ||
-        !readStorageSnapshot()
-      ) {
-        resetInMemoryToSamples('24시간이 지나 시연 데이터가 삭제되었습니다.')
-        return
-      }
-      const latest = readStorageSnapshot()
-      if (latest) applySnapshot(latest)
-    }
-
     let timeoutId: number | undefined
+    const expireStoredData = () => {
+      cleanupExpiredStorageSnapshots()
+      const latest = readStorageSnapshot()
+      if (latest) {
+        applySnapshot(latest)
+      } else if (storageSession) {
+        resetInMemoryToSamples('24시간이 지나 시연 데이터가 삭제되었습니다.')
+      }
+    }
     const scheduleExpiry = () => {
-      const remainingMs = Date.parse(storageSession.expiresAt) - Date.now()
+      const nextExpiry = getNextStorageExpiry()
+      if (nextExpiry === null) return
+      const remainingMs = nextExpiry - Date.now()
       if (remainingMs <= 0) {
-        expireSession()
+        expireStoredData()
+        if (getNextStorageExpiry() !== null) scheduleExpiry()
         return
       }
       timeoutId = window.setTimeout(
-        scheduleExpiry,
+        () => {
+          expireStoredData()
+          scheduleExpiry()
+        },
         Math.min(remainingMs, maxBrowserTimeoutMs),
       )
     }
@@ -215,7 +201,8 @@ function App() {
   }, [applySnapshot, resetInMemoryToSamples, storageSession])
 
   useEffect(() => {
-    const adoptCurrentRoot = (missingMessage: string) => {
+    const adoptCurrentSnapshot = (missingMessage: string) => {
+      cleanupExpiredStorageSnapshots()
       const latest = readStorageSnapshot()
       if (latest) {
         applySnapshot(latest)
@@ -225,14 +212,27 @@ function App() {
     }
 
     const handleStorageSessionChange = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage) return
+      if (event.key === storageActivePointerKey) {
+        adoptCurrentSnapshot(
+          '다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.',
+        )
+        return
+      }
+      if (!isSessionSnapshotStorageKey(event.key)) return
+      const activeSessionId = readStorageActivePointer()?.sessionId
       if (
-        event.storageArea !== localStorage ||
-        event.key !== storageSnapshotKey
-      ) return
-      adoptCurrentRoot('다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.')
+        !activeSessionId ||
+        event.key !== storageSnapshotKeyFor(activeSessionId)
+      ) {
+        return
+      }
+      adoptCurrentSnapshot(
+        '다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.',
+      )
     }
     const handleFocus = () =>
-      adoptCurrentRoot(
+      adoptCurrentSnapshot(
         Date.parse(storageSession?.expiresAt ?? '') <= Date.now()
           ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
           : '다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.',
@@ -279,10 +279,80 @@ function App() {
         applySnapshot(latest)
         return
       }
-    } else if (!storageSession) {
-      removeStorageSnapshot()
     }
     resetInMemoryToSamples()
+  }
+
+  const handleStorageWriteFailure = useCallback((
+    result: Exclude<StorageSnapshotWriteResult, { ok: true }>,
+  ) => {
+    if (result.reason === 'storage-error' || result.reason === 'invalid-data') {
+      setExpiryMessage(storageFailureMessage)
+      return
+    }
+    const latest = readStorageSnapshot()
+    if (latest) {
+      applySnapshot(latest)
+      return
+    }
+    resetInMemoryToSamples(
+      result.reason === 'expired'
+        ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
+        : '다른 탭에서 저장 데이터가 변경되어 시연 샘플로 전환했습니다.',
+    )
+  }, [applySnapshot, resetInMemoryToSamples])
+
+  const persistControlledData = useCallback((
+    nextData: StorageSnapshotData,
+  ) => {
+    if (!storageSession) return true
+    const result = updateStorageSnapshot(storageSession.sessionId, nextData)
+    if (!result.ok) {
+      handleStorageWriteFailure(result)
+      return false
+    }
+    applySnapshot(result.snapshot)
+    return true
+  }, [applySnapshot, handleStorageWriteFailure, storageSession])
+
+  const currentStorageData = useCallback((): StorageSnapshotData => ({
+    bills,
+    profile,
+    scenario,
+    ratePlans,
+    powerPlanner: powerPlannerDataSource,
+    provenance: dataProvenance,
+  }), [
+    bills,
+    dataProvenance,
+    powerPlannerDataSource,
+    profile,
+    ratePlans,
+    scenario,
+  ])
+
+  const changeProfile = (nextProfile: SchoolProfile) => {
+    if (!storageSession) {
+      setProfile(nextProfile)
+      return
+    }
+    persistControlledData({ ...currentStorageData(), profile: nextProfile })
+  }
+
+  const changeScenario = (nextScenario: PeakScenario) => {
+    if (!storageSession) {
+      setScenario(nextScenario)
+      return
+    }
+    persistControlledData({ ...currentStorageData(), scenario: nextScenario })
+  }
+
+  const changeRatePlans = (nextRatePlans: RatePlan[]) => {
+    if (!storageSession) {
+      setRatePlans(nextRatePlans)
+      return
+    }
+    persistControlledData({ ...currentStorageData(), ratePlans: nextRatePlans })
   }
 
   const startUploadSession = (
@@ -299,7 +369,7 @@ function App() {
       provenance: nextProvenance,
     })
     if (!result.ok) {
-      setExpiryMessage(storageFailureMessage)
+      handleStorageWriteFailure(result)
       return false
     }
     applySnapshot(result.snapshot)
@@ -330,8 +400,18 @@ function App() {
     if (nextDataSource && origin === 'uploaded') {
       if (!startUploadSession(bills, nextDataSource, nextProvenance)) return false
     } else {
-      setPowerPlannerDataSource(nextDataSource)
-      setDataProvenance(nextProvenance)
+      if (storageSession) {
+        if (!persistControlledData({
+          ...currentStorageData(),
+          powerPlanner: nextDataSource,
+          provenance: nextProvenance,
+        })) {
+          return false
+        }
+      } else {
+        setPowerPlannerDataSource(nextDataSource)
+        setDataProvenance(nextProvenance)
+      }
     }
     if (nextDataSource) {
       setActiveView('diagnosis')
@@ -389,7 +469,7 @@ function App() {
                 <SchoolProfilePanel
                   profile={profile}
                   ratePlans={ratePlans}
-                  onProfileChange={setProfile}
+                  onProfileChange={changeProfile}
                 />
               )}
               {activeView === 'bills' && (
@@ -415,7 +495,7 @@ function App() {
                     candidatePlan={candidatePlan}
                     candidates={diagnosis.topCandidates}
                     scenario={scenario}
-                    onScenarioChange={setScenario}
+                    onScenarioChange={changeScenario}
                   />
                 ) : (
                   <section className="document-block-notice" role="status">
@@ -430,7 +510,7 @@ function App() {
               {activeView === 'peak' && (
                 <PeakManager
                   scenario={scenario}
-                  onScenarioChange={setScenario}
+                  onScenarioChange={changeScenario}
                   powerPlannerDataSource={powerPlannerDataSource}
                   peakOperationPlan={peakOperationPlan}
                 />
@@ -448,7 +528,7 @@ function App() {
             </Suspense>
           </ViewErrorBoundary>
           {activeView === 'settings' && (
-            <RatePlanSettings plans={ratePlans} onPlansChange={setRatePlans} />
+            <RatePlanSettings plans={ratePlans} onPlansChange={changeRatePlans} />
           )}
         </section>
       </main>
