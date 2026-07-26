@@ -1,6 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { defaultScenario, sampleBills } from '../../data/sampleBills'
@@ -258,5 +259,77 @@ describe('rate simulator usability harness', () => {
       ),
     ).toBeTruthy()
     expect(screen.queryByText('0원')).toBeNull()
+  })
+
+  it('blocks the simulator when annual diagnosis data is unavailable', () => {
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={{
+          ...diagnosis.comparison,
+          annualDataAvailable: false,
+          recommendation: '추가 검토 필요',
+          basis: '최근 12개월의 연속된 고지서 자료가 부족합니다.',
+        }}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={async () => true}
+      />,
+    )
+
+    expect(screen.getByText('요금제 비교 보류')).toBeTruthy()
+    expect(screen.getByText(/최근 12개월/)).toBeTruthy()
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.queryByText(candidatePlan.planName)).toBeNull()
+  })
+
+  it('supports roving focus and wrapped keyboard navigation across tabs', async () => {
+    const user = userEvent.setup()
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={async () => true}
+      />,
+    )
+
+    const annualTab = screen.getByRole('tab', { name: '최근 12개월' })
+    const threeYearTab = screen.getByRole('tab', { name: '최근 3년' })
+    const peakTab = screen.getByRole('tab', { name: '피크 예상 시나리오' })
+
+    expect(annualTab.tabIndex).toBe(0)
+    expect(threeYearTab.tabIndex).toBe(-1)
+    expect(peakTab.tabIndex).toBe(-1)
+
+    annualTab.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toBe(threeYearTab)
+    expect(threeYearTab.getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(
+      threeYearTab.id,
+    )
+
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toBe(peakTab)
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toBe(annualTab)
+    await user.keyboard('{ArrowLeft}')
+    expect(document.activeElement).toBe(peakTab)
+
+    await user.keyboard('{Home}')
+    expect(document.activeElement).toBe(annualTab)
+    await user.keyboard('{End}')
+    expect(document.activeElement).toBe(peakTab)
+    expect(annualTab.tabIndex).toBe(-1)
+    expect(peakTab.tabIndex).toBe(0)
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(
+      peakTab.id,
+    )
   })
 })

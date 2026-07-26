@@ -258,6 +258,156 @@ describe('automatic diagnosis harness', () => {
     expect(comparison.peakScenarioCandidateAnnualWon).toBe(1_180_000 * 12)
   })
 
+  it.each([
+    {
+      label: 'all optional adjustment columns absent',
+      overrides: {
+        climateChargeWon: 0,
+        fuelAdjustmentWon: 0,
+        vatWon: 0,
+        fundWon: 0,
+        powerFactorChargeWon: 0,
+        observedFields: [
+          'year',
+          'month',
+          'usageKwh',
+          'totalBillWon',
+          'appliedPowerKw',
+          'baseChargeWon',
+          'energyChargeWon',
+        ] as MonthlyBillObservedField[],
+      },
+      expectedBaseline: 1_650_000,
+      expectedPeakCurrent: 1_760_000,
+      expectedPeakCandidate: 1_210_000,
+    },
+    {
+      label: 'only a partial adjustment column present',
+      overrides: {
+        climateChargeWon: 50_000,
+        fuelAdjustmentWon: 0,
+        vatWon: 0,
+        fundWon: 0,
+        powerFactorChargeWon: 0,
+        observedFields: [
+          'year',
+          'month',
+          'usageKwh',
+          'totalBillWon',
+          'appliedPowerKw',
+          'baseChargeWon',
+          'energyChargeWon',
+          'climateChargeWon',
+        ] as MonthlyBillObservedField[],
+      },
+      expectedBaseline: 1_650_000,
+      expectedPeakCurrent: 1_760_000,
+      expectedPeakCandidate: 1_210_000,
+    },
+    {
+      label: 'negative fuel adjustment present',
+      overrides: {
+        climateChargeWon: 90_000,
+        fuelAdjustmentWon: -40_000,
+        vatWon: 0,
+        fundWon: 0,
+        powerFactorChargeWon: 0,
+      },
+      expectedBaseline: 1_650_000,
+      expectedPeakCurrent: 1_760_000,
+      expectedPeakCandidate: 1_210_000,
+    },
+    {
+      label: 'actual total contains a larger residual',
+      overrides: {
+        totalBillWon: 1_800_000,
+        climateChargeWon: 0,
+        fuelAdjustmentWon: 0,
+        vatWon: 0,
+        fundWon: 0,
+        powerFactorChargeWon: 0,
+      },
+      expectedBaseline: 1_800_000,
+      expectedPeakCurrent: 1_920_000,
+      expectedPeakCandidate: 1_320_000,
+    },
+  ])(
+    'preserves the actual-bill residual when $label',
+    ({
+      overrides,
+      expectedBaseline,
+      expectedPeakCurrent,
+      expectedPeakCandidate,
+    }) => {
+      const bills = exactTwelveBills.map((bill) => ({
+        ...bill,
+        ...overrides,
+      }))
+      const comparison = comparePlansForDiagnosis(
+        bills,
+        currentPlan,
+        cheaperPlan,
+        { ...zeroGrowthScenario, expectedPeakKw: 600 },
+        defaultCalculationSettings,
+      )
+
+      expect(comparison.currentAnnualWon).toBe(expectedBaseline * 12)
+      expect(comparison.peakScenarioCurrentAnnualWon).toBe(
+        expectedPeakCurrent * 12,
+      )
+      expect(comparison.peakScenarioCandidateAnnualWon).toBe(
+        expectedPeakCandidate * 12,
+      )
+    },
+  )
+
+  it.each([
+    {
+      label: 'positive residual',
+      totalBillWon: 3_000_000,
+      expectedPeakCurrent: 3_135_000,
+      expectedPeakCandidate: 2_460_000,
+    },
+    {
+      label: 'negative residual',
+      totalBillWon: 500_000,
+      expectedPeakCurrent: 580_000,
+      expectedPeakCandidate: 180_000,
+    },
+  ])(
+    'clamps an extreme $label before applying bill-delta component changes',
+    ({
+      totalBillWon,
+      expectedPeakCurrent,
+      expectedPeakCandidate,
+    }) => {
+      const bills = exactTwelveBills.map((bill) => ({
+        ...bill,
+        totalBillWon,
+        climateChargeWon: 0,
+        fuelAdjustmentWon: 0,
+        vatWon: 0,
+        fundWon: 0,
+        powerFactorChargeWon: 0,
+      }))
+      const comparison = comparePlansForDiagnosis(
+        bills,
+        currentPlan,
+        cheaperPlan,
+        { ...zeroGrowthScenario, expectedPeakKw: 600 },
+        defaultCalculationSettings,
+      )
+
+      expect(comparison.currentAnnualWon).toBe(totalBillWon * 12)
+      expect(comparison.peakScenarioCurrentAnnualWon).toBe(
+        expectedPeakCurrent * 12,
+      )
+      expect(comparison.peakScenarioCandidateAnnualWon).toBe(
+        expectedPeakCandidate * 12,
+      )
+    },
+  )
+
   it('applies the baseline candidate component delta once from the actual bill', () => {
     const comparison = comparePlansForDiagnosis(
       exactTwelveBills,
@@ -328,18 +478,31 @@ describe('automatic diagnosis harness', () => {
   })
 
 
-  it('marks under-12-month data as additional review', () => {
-    const diagnosis = buildAutoDiagnosis({
-      bills: sampleBills.slice(0, 6),
-      profile: defaultSchoolProfile,
-      ratePlans: defaultRatePlans,
-      scenario: defaultScenario,
-      calculationSettings: defaultCalculationSettings,
-    })
+  it.each([1, 11])(
+    'withholds every recommendation for %i consecutive month(s)',
+    (monthCount) => {
+      const diagnosis = buildAutoDiagnosis({
+        bills: sampleBills.slice(-monthCount),
+        profile: defaultSchoolProfile,
+        ratePlans: defaultRatePlans,
+        scenario: defaultScenario,
+        calculationSettings: defaultCalculationSettings,
+      })
 
-    expect(diagnosis.finalJudgement).toBe('추가 검토 필요')
-    expect(diagnosis.completed).toBe(false)
-  })
+      expect(diagnosis.finalJudgement).toBe('추가 검토 필요')
+      expect(diagnosis.completed).toBe(false)
+      expect(diagnosis.recommendedPlan).toBeNull()
+      expect(diagnosis.topCandidates.length).toBeGreaterThan(0)
+      expect(
+        diagnosis.topCandidates.every(
+          (candidate) =>
+            candidate.recommendation === '추가 검토 필요' &&
+            candidate.reviewReason.includes('12개월'),
+        ),
+      ).toBe(true)
+      expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+    },
+  )
 
   it('recommends change when 12-month and 3-year estimates both save money', () => {
     const comparison = comparePlansForDiagnosis(

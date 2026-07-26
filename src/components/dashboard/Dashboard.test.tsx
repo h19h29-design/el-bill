@@ -92,9 +92,9 @@ describe('dashboard diagnosis consistency', () => {
       />,
     )
 
-    const annualCard = screen.getByText('예상 연간 절감액').closest('article')
-    expect(annualCard).not.toBeNull()
-    expect(annualCard?.textContent).toContain('자료 부족')
-    expect(annualCard?.textContent).not.toContain('0원')
+    expect(screen.queryByText('예상 연간 절감액')).toBeNull()
+    expect(screen.getByText('요금제 추천 보류')).toBeTruthy()
+    expect(screen.getByText(/12개월/)).toBeTruthy()
+    expect(screen.queryByText(defaultRatePlans[0].planName)).toBeNull()
   })
 })

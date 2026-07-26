@@ -88,18 +88,11 @@ describe('automatic diagnosis period integrity', () => {
       />,
     )
 
-    const annualCard = screen
-      .getAllByText('최근 12개월 절감액')[0]
-      .closest('article')
-    const peakCard = screen
-      .getAllByText('피크 시나리오 절감액')[0]
-      .closest('article')
-
-    expect(annualCard?.textContent).toContain('12개월 연속 자료 부족')
-    expect(annualCard?.textContent).not.toContain('0원')
-    expect(peakCard?.textContent).toContain('피크 시나리오 자료 부족')
-    expect(peakCard?.textContent).not.toContain('0원')
-    expect(screen.getAllByText('자료 부족').length).toBeGreaterThan(0)
+    expect(screen.getByText('자동진단 결과를 확정할 수 없습니다')).toBeTruthy()
+    expect(screen.getByText('요금제 추천 및 변경신청 문서 생성 보류')).toBeTruthy()
+    expect(screen.getAllByText(/12개월/).length).toBeGreaterThan(0)
+    expect(screen.queryByText('추천 요금제')).toBeNull()
+    expect(screen.queryByText(defaultRatePlans[0].planName)).toBeNull()
   })
 
   it.each([

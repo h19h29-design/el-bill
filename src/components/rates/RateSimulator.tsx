@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { AlertTriangle, CheckCircle2, TrendingDown } from 'lucide-react'
@@ -33,6 +33,14 @@ interface RateSimulatorProps {
   onScenarioChange: (scenario: PeakScenario) => Promise<boolean>
 }
 
+const comparisonTabs = [
+  ['12', '최근 12개월'],
+  ['36', '최근 3년'],
+  ['peak', '피크 예상 시나리오'],
+] as const
+
+type ComparisonTab = (typeof comparisonTabs)[number][0]
+
 export function RateSimulator({
   currentPlan,
   candidatePlan,
@@ -42,7 +50,8 @@ export function RateSimulator({
   scenario,
   onScenarioChange,
 }: RateSimulatorProps) {
-  const [tab, setTab] = useState<'12' | '36' | 'peak'>('12')
+  const [tab, setTab] = useState<ComparisonTab>('12')
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const form = useForm<PeakScenario>({
     defaultValues: scenario,
   })
@@ -80,13 +89,16 @@ export function RateSimulator({
             summaryLabel: '최근 12개월 절감액',
           }
 
-  if (reviewOnlyCandidate?.recommendation === '추가 검토 필요') {
+  if (
+    !comparison.annualDataAvailable ||
+    reviewOnlyCandidate?.recommendation === '추가 검토 필요'
+  ) {
     return (
       <section className="document-block-notice" role="status">
         <AlertTriangle size={22} />
         <div>
           <strong>요금제 비교 보류</strong>
-          <p>{reviewOnlyCandidate.basis}</p>
+          <p>{reviewOnlyCandidate?.basis ?? comparison.basis}</p>
         </div>
       </section>
     )
@@ -95,20 +107,37 @@ export function RateSimulator({
   return (
     <div className="view-stack">
       <section className="tabs" role="tablist" aria-label="요금 비교 범위">
-        {[
-          ['12', '최근 12개월'],
-          ['36', '최근 3년'],
-          ['peak', '피크 예상 시나리오'],
-        ].map(([key, label]) => (
+        {comparisonTabs.map(([key, label], index) => (
           <button
             key={key}
+            ref={(element) => {
+              tabRefs.current[index] = element
+            }}
             id={`rate-simulator-tab-${key}`}
             type="button"
             role="tab"
             aria-selected={tab === key}
             aria-controls="rate-simulator-panel"
+            tabIndex={tab === key ? 0 : -1}
             className={tab === key ? 'active' : ''}
-            onClick={() => setTab(key as typeof tab)}
+            onClick={() => setTab(key)}
+            onKeyDown={(event) => {
+              const lastIndex = comparisonTabs.length - 1
+              let nextIndex: number | null = null
+              if (event.key === 'ArrowRight') {
+                nextIndex = index === lastIndex ? 0 : index + 1
+              } else if (event.key === 'ArrowLeft') {
+                nextIndex = index === 0 ? lastIndex : index - 1
+              } else if (event.key === 'Home') {
+                nextIndex = 0
+              } else if (event.key === 'End') {
+                nextIndex = lastIndex
+              }
+              if (nextIndex === null) return
+              event.preventDefault()
+              setTab(comparisonTabs[nextIndex][0])
+              tabRefs.current[nextIndex]?.focus()
+            }}
           >
             {label}
           </button>

@@ -161,3 +161,55 @@ warning.
 
 Vite continues to report only the existing large lazy-loaded Excel/PDF chunk
 warning.
+
+## Third Review Round
+
+- Replaced optional adjustment-column summation in `billDelta` with the actual
+  bill residual:
+  - observed positive base and energy components are preferred;
+  - missing components use current-plan rate fallbacks;
+  - residual is `totalBillWon - baselineBase - baselineEnergy`;
+  - ancillary ratio is `residual / (baselineBase + baselineEnergy)`.
+- Kept the established safe ancillary-ratio clamp at `-20%..35%`, now with
+  named bounds and matching documentation. Exact tests cover absent adjustment
+  columns, partial columns, negative fuel adjustment, larger residuals, and
+  both clamp limits. Baseline current totals remain exact uploaded totals.
+- With fewer than 12 consecutive months, every candidate is now explicitly
+  marked `추가 검토 필요` and `recommendedPlan` is `null`. Dashboard,
+  AutoDiagnosis, RateSimulator, and document generation all use the same
+  blocked state without exposing an arbitrary candidate name.
+- Completed RateSimulator tab keyboard behavior:
+  - only the selected tab has `tabIndex=0`;
+  - Left/Right arrows wrap;
+  - Home/End select the first/last tab;
+  - focus, `aria-selected`, and panel linkage move together.
+- Added `@testing-library/user-event` for interaction-level keyboard tests.
+
+## Third Review Round TDD Evidence
+
+1. Residual tests failed because omitted or partial optional adjustment columns
+   changed the scenario result despite an unchanged actual bill total.
+2. Clamp tests failed because the previous ratio came from adjustment fields
+   instead of the total residual.
+3. One- and eleven-month tests failed because `recommendedPlan` still exposed
+   the first ranked candidate.
+4. Dashboard and AutoDiagnosis tests failed because the arbitrary candidate
+   kept the full result UI open.
+5. RateSimulator tests failed because unavailable annual data left the
+   simulator controls open and every tab remained in the keyboard tab order.
+6. `user-event` arrow-key tests failed until selection, focus, wrapping, and
+   panel associations were implemented together.
+
+## Third Review Round Verification
+
+- `npm run typecheck`: passed
+- `npm run lint`: passed
+- `npm test -- --run`: 23 files, 218 tests passed
+- `npm run build`: passed
+- initial Vite entry: 274,995 bytes, under the 700,000-byte budget
+- `npm run test:e2e`: 8 Chromium tests passed
+- `git diff --check`: passed
+
+Vite continues to report only the existing large lazy-loaded Excel/PDF chunk
+warning. `npm install` reported the repository's existing dependency audit
+findings; no automatic audit fix was applied.

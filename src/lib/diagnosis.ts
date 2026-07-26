@@ -49,6 +49,11 @@ const normalizedOptionalBillColumns = [
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
+const ancillaryRatioBounds = {
+  min: -0.2,
+  max: 0.35,
+} as const
+
 const matches = (value: string, expected: string) =>
   value.trim().replace(/\s/g, '') === expected.trim().replace(/\s/g, '')
 
@@ -185,15 +190,15 @@ const getBillAdjustmentRatio = (
   currentPlan: RatePlan,
 ) => {
   const components = getObservedBillComponents(bill, currentPlan)
-  const base = components.baseChargeWon + components.energyChargeWon
-  if (base <= 0) return 0
-  const knownAdjustments =
-    bill.powerFactorChargeWon +
-    bill.climateChargeWon +
-    bill.fuelAdjustmentWon +
-    bill.vatWon +
-    bill.fundWon
-  return clamp(knownAdjustments / base, -0.2, 0.35)
+  const componentTotal =
+    components.baseChargeWon + components.energyChargeWon
+  if (componentTotal <= 0) return 0
+  const residual = bill.totalBillWon - componentTotal
+  return clamp(
+    residual / componentTotal,
+    ancillaryRatioBounds.min,
+    ancillaryRatioBounds.max,
+  )
 }
 
 const getAdjustedUsage = (bill: MonthlyBill, scenario?: PeakScenario) => {
@@ -582,6 +587,7 @@ export const buildAutoDiagnosis = ({
   const schoolPlans = ratePlans.filter((plan) => plan.contractType.includes('교육용'))
   const candidates = schoolPlans.filter((plan) => plan.id !== currentPlan.id)
   const hasPeriodIssues = periodValidation.issues.length > 0
+  const hasAnnualData = periodValidation.hasRequiredConsecutiveMonths
   const periodIssueReason = hasPeriodIssues
     ? `고지서 기간 문제: ${periodValidation.issues
         .map((issue) => describePeriodIssue(issue.code, issue.period))
@@ -621,13 +627,17 @@ export const buildAutoDiagnosis = ({
         b.savingWon - a.savingWon,
     )
 
+  const insufficientAnnualReason =
+    '최근 12개월의 연속된 고지서 자료가 부족하여 요금제 추천을 확정할 수 없습니다.'
   const applyPeriodReview = (candidate: PlanCandidateComparison) =>
-    hasPeriodIssues
+    hasPeriodIssues || !hasAnnualData
       ? {
           ...candidate,
           recommendation: '추가 검토 필요' as const,
-          basis: periodIssueReason,
-          reviewReason: periodIssueReason,
+          basis: hasPeriodIssues ? periodIssueReason : insufficientAnnualReason,
+          reviewReason: hasPeriodIssues
+            ? periodIssueReason
+            : insufficientAnnualReason,
         }
       : candidate
   const ranked = rankedBeforePeriodReview.map(applyPeriodReview)
@@ -642,7 +652,7 @@ export const buildAutoDiagnosis = ({
     ),
   )
   const comparison = topCandidates[0] ?? fallbackComparison
-  const recommendedPlan = hasPeriodIssues
+  const recommendedPlan = hasPeriodIssues || !comparison.annualDataAvailable
     ? null
     : ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ?? currentPlan
   const hasValidRequiredPeriods =
@@ -657,7 +667,7 @@ export const buildAutoDiagnosis = ({
     : hasPeriodIssues
       ? periodIssueReason
       : !comparison.annualDataAvailable
-        ? '최근 12개월의 연속된 고지서 자료가 부족하여 변경신청 문서를 생성할 수 없습니다.'
+        ? `${insufficientAnnualReason} 변경신청 문서를 생성할 수 없습니다.`
       : !billsAreUserUploaded
         ? '사용자 고지서 업로드 후 생성 가능'
         : '최종 판단이 변경 추천이고 현재 계약종별·수전전압과 일치하는 후보인 경우에만 변경신청 문서를 생성할 수 있습니다.'

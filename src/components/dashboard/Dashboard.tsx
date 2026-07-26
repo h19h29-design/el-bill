@@ -59,11 +59,16 @@ export function Dashboard({
 }: DashboardProps) {
   if (!currentPlan || !candidatePlan) {
     const periodReview = diagnosis.judgementBasis.includes('고지서 기간 문제')
+    const insufficientData = !diagnosis.comparison.annualDataAvailable
     return (
       <section className="document-block-notice" role="status">
         <AlertTriangle size={22} />
         <div>
-          <strong>{periodReview ? '요금제 추천 보류' : '요금제 설정 확인 필요'}</strong>
+          <strong>
+            {periodReview || insufficientData
+              ? '요금제 추천 보류'
+              : '요금제 설정 확인 필요'}
+          </strong>
           <p>{diagnosis.judgementBasis}</p>
         </div>
       </section>
