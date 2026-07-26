@@ -1,6 +1,12 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PowerPlannerDataSource } from '../../types'
 import { POWER_PLANNER_AGGREGATE_RECORD_LIMIT } from '../../lib/powerPlanner'
@@ -26,7 +32,7 @@ const uploadCsv = async (container: HTMLElement) => {
 describe('PowerPlannerUpload aggregate limit', () => {
   it('does not add duplicate records when the same file is applied again', async () => {
     const updates: PowerPlannerDataSource[] = []
-    const onDataSourceChange = vi.fn((next: PowerPlannerDataSource | null) => {
+    const onDataSourceChange = vi.fn(async (next: PowerPlannerDataSource | null) => {
       if (next) updates.push(next)
       return true
     })
@@ -40,6 +46,7 @@ describe('PowerPlannerUpload aggregate limit', () => {
 
     await uploadCsv(container)
     fireEvent.click(screen.getByRole('button', { name: '매핑 적용' }))
+    await waitFor(() => expect(updates).toHaveLength(1))
     const firstSource = updates.at(-1)!
     expect(firstSource.records).toHaveLength(2)
 
@@ -52,8 +59,9 @@ describe('PowerPlannerUpload aggregate limit', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '매핑 적용' }))
 
+    await waitFor(() => expect(updates).toHaveLength(2))
     expect(updates.at(-1)!.records).toHaveLength(2)
-    expect(screen.getByText(/중복 2건은 제외했습니다/)).toBeTruthy()
+    expect(await screen.findByText(/중복 2건은 제외했습니다/)).toBeTruthy()
   })
 
   it('rejects cumulative overflow without replacing the existing source', async () => {
@@ -73,7 +81,7 @@ describe('PowerPlannerUpload aggregate limit', () => {
         sourceRowIndex: index,
       })),
     }
-    const onDataSourceChange = vi.fn(() => true)
+    const onDataSourceChange = vi.fn(async () => true)
     const { container } = render(
       <PowerPlannerUpload
         dataSource={source}

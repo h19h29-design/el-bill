@@ -18,7 +18,7 @@ const plan = (id: string, planName: string): RatePlan => ({
 
 describe('rate-plan settings validation', () => {
   it('rejects an edit that duplicates an existing contract-voltage-plan tuple', () => {
-    const onPlansChange = vi.fn()
+    const onPlansChange = vi.fn(async () => true)
     render(
       <RatePlanSettings
         plans={[plan('first', '선택요금Ⅰ'), plan('second', '선택요금Ⅱ')]}

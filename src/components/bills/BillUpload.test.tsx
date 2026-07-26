@@ -13,7 +13,7 @@ describe('bill upload tariff configuration', () => {
         bills={sampleBills}
         profile={{ ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' }}
         ratePlans={defaultRatePlans}
-        onBillsChange={() => true}
+        onBillsChange={async () => true}
       />,
     )
 
@@ -37,7 +37,7 @@ describe('bill upload tariff configuration', () => {
   })
 
   it('does not apply manually mapped bills without an exact plan', async () => {
-    const onBillsChange = vi.fn(() => true)
+    const onBillsChange = vi.fn(async () => true)
     const { container } = render(
       <BillUpload
         bills={sampleBills}

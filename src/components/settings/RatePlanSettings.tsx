@@ -3,7 +3,7 @@ import type { RatePlan, Season } from '../../types'
 
 interface RatePlanSettingsProps {
   plans: RatePlan[]
-  onPlansChange: (plans: RatePlan[]) => void
+  onPlansChange: (plans: RatePlan[]) => Promise<boolean>
 }
 
 const seasonLabels: Record<Season, string> = {
@@ -41,7 +41,7 @@ export function RatePlanSettings({
       return
     }
     setValidationMessage('')
-    onPlansChange(nextPlans)
+    void onPlansChange(nextPlans).catch(() => undefined)
   }
 
   const addPlan = () => {
@@ -62,7 +62,7 @@ export function RatePlanSettings({
       suffix += 1
       planName = `사용자 요금제 ${suffix}`
     }
-    onPlansChange([
+    void onPlansChange([
       ...plans,
       {
         ...base,
@@ -70,7 +70,7 @@ export function RatePlanSettings({
         planName,
         memo: '설정 화면에서 추가',
       },
-    ])
+    ]).catch(() => undefined)
   }
 
   return (

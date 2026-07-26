@@ -65,6 +65,75 @@ test('checked-in synthetic XLSX reaches recognized mapping and analysis state', 
   await expect(page.getByText('사용자 고지서 분석', { exact: false })).toBeVisible()
 })
 
+test('two tabs merge different active-session edits under Web Locks', async ({ page }) => {
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '고지서 입력',
+    exact: true,
+  }).click()
+  await page
+    .locator('input[type="file"][accept=".xlsx,.xls"]')
+    .first()
+    .setInputFiles(resolve('e2e/fixtures/monthly-bills.xlsx'))
+  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+  await expect(page.getByText('고지서: 사용자 업로드', { exact: true })).toBeVisible()
+
+  const secondPage = await page.context().newPage()
+  await secondPage.goto('/')
+  await expect(
+    secondPage.getByText('고지서: 사용자 업로드', { exact: true }),
+  ).toBeVisible()
+
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '학교정보',
+    exact: true,
+  }).click()
+  await secondPage.locator('.sidebar-nav').getByRole('button', {
+    name: '피크관리',
+    exact: true,
+  }).click()
+
+  await Promise.all([
+    page.getByLabel('화면 표시명').fill('교차 탭 학교'),
+    secondPage.getByLabel('목표 피크(kW)').fill('611'),
+  ])
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const pointerRaw = localStorage.getItem('el-bill:storage-active')
+        if (!pointerRaw) return null
+        const pointer = JSON.parse(pointerRaw) as { sessionId: string }
+        const snapshotRaw = localStorage.getItem(
+          `el-bill:storage-snapshot:${encodeURIComponent(pointer.sessionId)}`,
+        )
+        if (!snapshotRaw) return null
+        const snapshot = JSON.parse(snapshotRaw) as {
+          revision: number
+          data: {
+            profile: { displaySchoolName: string }
+            scenario: { targetPeakKw: number }
+          }
+        }
+        return {
+          revision: snapshot.revision,
+          schoolName: snapshot.data.profile.displaySchoolName,
+          targetPeakKw: snapshot.data.scenario.targetPeakKw,
+        }
+      }),
+    )
+    .toEqual({
+      revision: 2,
+      schoolName: '교차 탭 학교',
+      targetPeakKw: 611,
+    })
+
+  await secondPage.close()
+})
+
 test('PowerPlanner-only upload stays sample-bill mode', async ({ page }, testInfo) => {
   const powerPlannerCsv = testInfo.outputPath('power-planner-hourly.csv')
   await writeFile(

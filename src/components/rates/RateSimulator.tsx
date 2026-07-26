@@ -28,7 +28,7 @@ interface RateSimulatorProps {
   candidatePlan: RatePlan
   candidates: PlanCandidateComparison[]
   scenario: PeakScenario
-  onScenarioChange: (scenario: PeakScenario) => void
+  onScenarioChange: (scenario: PeakScenario) => Promise<boolean>
 }
 
 export function RateSimulator({
@@ -146,12 +146,12 @@ export function RateSimulator({
         </div>
         <form
           className="scenario-form"
-          onSubmit={form.handleSubmit((values) =>
-            onScenarioChange({
+          onSubmit={form.handleSubmit((values) => {
+            void onScenarioChange({
               ...scenario,
               ...scenarioSchema.parse(values),
-            }),
-          )}
+            }).catch(() => undefined)
+          })}
         >
           <label>
             예상 최대수요전력(kW)

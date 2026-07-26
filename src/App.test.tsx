@@ -1,6 +1,13 @@
 /* @vitest-environment jsdom */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { defaultRatePlans } from './data/ratePlans'
@@ -36,6 +43,14 @@ const makeData = (
   ...overrides,
 })
 
+const flushStorageTasks = async () => {
+  await act(async () => {
+    for (let index = 0; index < 6; index += 1) {
+      await Promise.resolve()
+    }
+  })
+}
+
 afterEach(() => {
   cleanup()
   localStorage.clear()
@@ -44,7 +59,17 @@ afterEach(() => {
 })
 
 describe('data provenance persistence', () => {
-  it('removes an ambiguous legacy upload mode without granting upload eligibility', () => {
+  it('warns users to keep one tab open when Web Locks are unavailable', () => {
+    render(<App />)
+
+    expect(
+      screen.getByText(
+        '이 브라우저에서는 여러 탭 동시 편집을 안전하게 조정할 수 없습니다. 다른 탭을 닫고 한 탭에서만 사용하세요.',
+      ),
+    ).toBeTruthy()
+  })
+
+  it('removes an ambiguous legacy upload mode without granting upload eligibility', async () => {
     localStorage.setItem('el-bill:data-mode', stored('uploaded'))
 
     render(<App />)
@@ -52,11 +77,13 @@ describe('data provenance persistence', () => {
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '고지서: 시연 샘플',
     )
-    expect(localStorage.getItem('el-bill:data-mode')).toBeNull()
+    await waitFor(() =>
+      expect(localStorage.getItem('el-bill:data-mode')).toBeNull(),
+    )
     expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
   })
 
-  it('migrates legacy payloads conservatively when explicit provenance is absent', () => {
+  it('migrates legacy payloads conservatively when explicit provenance is absent', async () => {
     localStorage.setItem('el-bill:data-mode', stored('uploaded'))
     localStorage.setItem('el-bill:bills', stored(sampleBills))
     localStorage.setItem(
@@ -72,20 +99,22 @@ describe('data provenance persistence', () => {
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '파워플래너: 미사용',
     )
-    expect(localStorage.getItem(storageActivePointerKey)).not.toBeNull()
+    await waitFor(() =>
+      expect(localStorage.getItem(storageActivePointerKey)).not.toBeNull(),
+    )
     expect(localStorage.getItem('el-bill:data-mode')).toBeNull()
     expect(localStorage.getItem('el-bill:bills')).toBeNull()
     expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
   })
 
-  it('restores explicit PowerPlanner provenance from the atomic root', () => {
+  it('restores explicit PowerPlanner provenance from the atomic root', async () => {
     expect(
-      startNewStorageSnapshot(
+      (await startNewStorageSnapshot(
         makeData({
           powerPlanner: samplePowerPlannerDataSource,
           provenance: { bills: 'sample', powerPlanner: 'uploaded' },
         }),
-      ).ok,
+      )).ok,
     ).toBe(true)
 
     render(<App />)
@@ -98,15 +127,15 @@ describe('data provenance persistence', () => {
 })
 
 describe('shared live storage expiry', () => {
-  it('clears live user state at the exact 24-hour expiry', () => {
+  it('clears live user state at the exact 24-hour expiry', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'))
     expect(
-      startNewStorageSnapshot(
+      (await startNewStorageSnapshot(
         makeData({ provenance: { bills: 'uploaded', powerPlanner: 'none' } }),
         Date.now(),
         'expiry-session',
-      ).ok,
+      )).ok,
     ).toBe(true)
 
     render(<App />)
@@ -117,15 +146,18 @@ describe('shared live storage expiry', () => {
     act(() => {
       vi.advanceTimersByTime(24 * 60 * 60 * 1000)
     })
+    await flushStorageTasks()
 
-    expect(localStorage.getItem(storageSnapshotKeyFor('expiry-session'))).toBeNull()
+    expect(
+      localStorage.getItem(storageSnapshotKeyFor('expiry-session')),
+    ).toBeNull()
     expect(screen.getByText('24시간이 지나 시연 데이터가 삭제되었습니다.')).toBeTruthy()
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '고지서: 시연 샘플',
     )
   })
 
-  it('purges a malformed 25-day session instead of scheduling it', () => {
+  it('purges a malformed 25-day session instead of scheduling it', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'))
     const sessionId = 'overlong-session'
@@ -151,6 +183,7 @@ describe('shared live storage expiry', () => {
     )
 
     render(<App />)
+    await flushStorageTasks()
 
     expect(localStorage.getItem(storageSnapshotKeyFor(sessionId))).toBeNull()
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
@@ -169,11 +202,15 @@ describe('shared live storage expiry', () => {
     )
   })
 
-  it('purges an expired background root when focus returns', () => {
+  it('purges an expired background root when focus returns', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'))
     expect(
-      startNewStorageSnapshot(makeData(), Date.now(), 'focus-session').ok,
+      (await startNewStorageSnapshot(
+        makeData(),
+        Date.now(),
+        'focus-session',
+      )).ok,
     ).toBe(true)
     render(<App />)
 
@@ -181,16 +218,23 @@ describe('shared live storage expiry', () => {
     act(() => {
       fireEvent.focus(window)
     })
+    await flushStorageTasks()
 
-    expect(localStorage.getItem(storageSnapshotKeyFor('focus-session'))).toBeNull()
+    expect(
+      localStorage.getItem(storageSnapshotKeyFor('focus-session')),
+    ).toBeNull()
     expect(screen.getByText('24시간이 지나 시연 데이터가 삭제되었습니다.')).toBeTruthy()
   })
 
-  it('purges an expired background root when the document becomes visible', () => {
+  it('purges an expired background root when the document becomes visible', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'))
     expect(
-      startNewStorageSnapshot(makeData(), Date.now(), 'visibility-session').ok,
+      (await startNewStorageSnapshot(
+        makeData(),
+        Date.now(),
+        'visibility-session',
+      )).ok,
     ).toBe(true)
     render(<App />)
 
@@ -202,6 +246,7 @@ describe('shared live storage expiry', () => {
     act(() => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
+    await flushStorageTasks()
 
     expect(
       localStorage.getItem(storageSnapshotKeyFor('visibility-session')),

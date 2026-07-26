@@ -20,7 +20,7 @@ interface BillUploadProps {
   bills: MonthlyBill[]
   profile: SchoolProfile
   ratePlans: RatePlan[]
-  onBillsChange: (bills: MonthlyBill[]) => boolean
+  onBillsChange: (bills: MonthlyBill[]) => Promise<boolean>
 }
 
 const mappingFields = [
@@ -159,7 +159,7 @@ export function BillUpload({
     await handleFile(file)
   }
 
-  const applyMapping = () => {
+  const applyMapping = async () => {
     if (!selectedSheet) return
     if (!importContext) {
       setMessage(
@@ -172,7 +172,13 @@ export function BillUpload({
       setMessage('필수 매핑 결과가 없습니다. 연도, 월, 사용량, 총 전기요금을 확인해 주세요.')
       return
     }
-    if (!onBillsChange(mapped)) {
+    let saved = false
+    try {
+      saved = await onBillsChange(mapped)
+    } catch {
+      saved = false
+    }
+    if (!saved) {
       setMessage(
         '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
       )
@@ -181,7 +187,7 @@ export function BillUpload({
     setMessage(`${mapped.length.toLocaleString('ko-KR')}건을 매핑해 반영했습니다.`)
   }
 
-  const applyRecognizedMapping = () => {
+  const applyRecognizedMapping = async () => {
     if (!parseResult) return
     if (!importContext) {
       setMessage(
@@ -190,7 +196,13 @@ export function BillUpload({
       return
     }
     if (parseResult.autoRows.length) {
-      if (!onBillsChange(parseResult.autoRows)) {
+      let saved = false
+      try {
+        saved = await onBillsChange(parseResult.autoRows)
+      } catch {
+        saved = false
+      }
+      if (!saved) {
         setMessage(
           '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
         )
@@ -206,7 +218,7 @@ export function BillUpload({
       )
       return
     }
-    applyMapping()
+    await applyMapping()
   }
 
   return (
@@ -349,7 +361,9 @@ export function BillUpload({
               type="button"
               className="primary-button"
               disabled={!recognition.canAnalyze || !importContext}
-              onClick={applyRecognizedMapping}
+              onClick={() => {
+                void applyRecognizedMapping()
+              }}
             >
               이 매핑으로 분석 시작
             </button>
@@ -384,7 +398,13 @@ export function BillUpload({
                 ))}
               </select>
             </label>
-            <button type="button" className="primary-button" onClick={applyMapping}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                void applyMapping()
+              }}
+            >
               선택 시트 적용
             </button>
           </div>

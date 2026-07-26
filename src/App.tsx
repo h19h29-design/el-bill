@@ -35,6 +35,7 @@ import {
   storageActivePointerKey,
   storageSnapshotKeyFor,
   updateStorageSnapshot,
+  usesSameTabStorageLockFallback,
   type StorageSnapshot,
   type StorageSnapshotData,
   type StorageSnapshotWriteResult,
@@ -44,6 +45,10 @@ import {
 const maxBrowserTimeoutMs = 2_147_483_647
 const storageFailureMessage =
   '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.'
+const storageLockFailureMessage =
+  '안전한 저장 잠금을 확보하지 못했습니다. 다른 탭을 닫고 다시 시도해 주세요.'
+const storageLockFallbackMessage =
+  '이 브라우저에서는 여러 탭 동시 편집을 안전하게 조정할 수 없습니다. 다른 탭을 닫고 한 탭에서만 사용하세요.'
 
 const defaultStorageData = (): StorageSnapshotData => ({
   bills: sampleBills,
@@ -149,15 +154,25 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const initialized = initializeStorageAfterMount(defaultStorageData())
-    if (initialized) {
-      applySnapshot(initialized)
-      return
-    }
-    if (initialStorage.snapshot) {
-      resetInMemoryToSamples(
-        '저장 데이터가 만료되었거나 손상되어 시연 샘플로 전환했습니다.',
-      )
+    let cancelled = false
+    void initializeStorageAfterMount(defaultStorageData())
+      .then((initialized) => {
+        if (cancelled) return
+        if (initialized) {
+          applySnapshot(initialized)
+          return
+        }
+        if (initialStorage.snapshot) {
+          resetInMemoryToSamples(
+            '저장 데이터가 만료되었거나 손상되어 시연 샘플로 전환했습니다.',
+          )
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setExpiryMessage(storageFailureMessage)
+      })
+    return () => {
+      cancelled = true
     }
   }, [
     applySnapshot,
@@ -167,13 +182,17 @@ function App() {
 
   useEffect(() => {
     let timeoutId: number | undefined
-    const expireStoredData = () => {
-      cleanupExpiredStorageSnapshots()
-      const latest = readStorageSnapshot()
-      if (latest) {
-        applySnapshot(latest)
-      } else if (storageSession) {
-        resetInMemoryToSamples('24시간이 지나 시연 데이터가 삭제되었습니다.')
+    const expireStoredData = async () => {
+      try {
+        await cleanupExpiredStorageSnapshots()
+        const latest = readStorageSnapshot()
+        if (latest) {
+          applySnapshot(latest)
+        } else if (storageSession) {
+          resetInMemoryToSamples('24시간이 지나 시연 데이터가 삭제되었습니다.')
+        }
+      } catch {
+        setExpiryMessage(storageFailureMessage)
       }
     }
     const scheduleExpiry = () => {
@@ -181,14 +200,14 @@ function App() {
       if (nextExpiry === null) return
       const remainingMs = nextExpiry - Date.now()
       if (remainingMs <= 0) {
-        expireStoredData()
-        if (getNextStorageExpiry() !== null) scheduleExpiry()
+        void expireStoredData().then(() => {
+          if (getNextStorageExpiry() !== null) scheduleExpiry()
+        })
         return
       }
       timeoutId = window.setTimeout(
         () => {
-          expireStoredData()
-          scheduleExpiry()
+          void expireStoredData().then(scheduleExpiry)
         },
         Math.min(remainingMs, maxBrowserTimeoutMs),
       )
@@ -202,7 +221,6 @@ function App() {
 
   useEffect(() => {
     const adoptCurrentSnapshot = (missingMessage: string) => {
-      cleanupExpiredStorageSnapshots()
       const latest = readStorageSnapshot()
       if (latest) {
         applySnapshot(latest)
@@ -231,12 +249,15 @@ function App() {
         '다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.',
       )
     }
-    const handleFocus = () =>
-      adoptCurrentSnapshot(
+    const handleFocus = () => {
+      void cleanupExpiredStorageSnapshots()
+        .then(() => adoptCurrentSnapshot(
         Date.parse(storageSession?.expiresAt ?? '') <= Date.now()
           ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
           : '다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.',
-      )
+        ))
+        .catch(() => setExpiryMessage(storageFailureMessage))
+    }
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') handleFocus()
     }
@@ -272,12 +293,25 @@ function App() {
     [scenario],
   )
 
-  const resetSample = () => {
-    if (storageSession && !removeStorageSnapshot(storageSession.sessionId)) {
-      const latest = readStorageSnapshot()
-      if (latest) {
-        applySnapshot(latest)
-        return
+  const resetSample = async () => {
+    if (storageSession) {
+      const removal = await removeStorageSnapshot(storageSession.sessionId)
+      if (!removal.ok) {
+        const latest = readStorageSnapshot()
+        if (
+          removal.reason === 'storage-error'
+        ) {
+          setExpiryMessage(storageFailureMessage)
+          return
+        }
+        if (removal.reason === 'lock-error') {
+          setExpiryMessage(storageLockFailureMessage)
+          return
+        }
+        if (latest) {
+          applySnapshot(latest)
+          return
+        }
       }
     }
     resetInMemoryToSamples()
@@ -286,8 +320,15 @@ function App() {
   const handleStorageWriteFailure = useCallback((
     result: Exclude<StorageSnapshotWriteResult, { ok: true }>,
   ) => {
-    if (result.reason === 'storage-error' || result.reason === 'invalid-data') {
+    if (
+      result.reason === 'storage-error' ||
+      result.reason === 'invalid-data'
+    ) {
       setExpiryMessage(storageFailureMessage)
+      return
+    }
+    if (result.reason === 'lock-error') {
+      setExpiryMessage(storageLockFailureMessage)
       return
     }
     const latest = readStorageSnapshot()
@@ -302,11 +343,11 @@ function App() {
     )
   }, [applySnapshot, resetInMemoryToSamples])
 
-  const persistControlledData = useCallback((
-    nextData: StorageSnapshotData,
+  const persistControlledPatch = useCallback(async (
+    patch: Partial<StorageSnapshotData>,
   ) => {
     if (!storageSession) return true
-    const result = updateStorageSnapshot(storageSession.sessionId, nextData)
+    const result = await updateStorageSnapshot(storageSession.sessionId, patch)
     if (!result.ok) {
       handleStorageWriteFailure(result)
       return false
@@ -315,52 +356,36 @@ function App() {
     return true
   }, [applySnapshot, handleStorageWriteFailure, storageSession])
 
-  const currentStorageData = useCallback((): StorageSnapshotData => ({
-    bills,
-    profile,
-    scenario,
-    ratePlans,
-    powerPlanner: powerPlannerDataSource,
-    provenance: dataProvenance,
-  }), [
-    bills,
-    dataProvenance,
-    powerPlannerDataSource,
-    profile,
-    ratePlans,
-    scenario,
-  ])
-
-  const changeProfile = (nextProfile: SchoolProfile) => {
+  const changeProfile = async (nextProfile: SchoolProfile) => {
     if (!storageSession) {
       setProfile(nextProfile)
-      return
+      return true
     }
-    persistControlledData({ ...currentStorageData(), profile: nextProfile })
+    return persistControlledPatch({ profile: nextProfile })
   }
 
-  const changeScenario = (nextScenario: PeakScenario) => {
+  const changeScenario = async (nextScenario: PeakScenario) => {
     if (!storageSession) {
       setScenario(nextScenario)
-      return
+      return true
     }
-    persistControlledData({ ...currentStorageData(), scenario: nextScenario })
+    return persistControlledPatch({ scenario: nextScenario })
   }
 
-  const changeRatePlans = (nextRatePlans: RatePlan[]) => {
+  const changeRatePlans = async (nextRatePlans: RatePlan[]) => {
     if (!storageSession) {
       setRatePlans(nextRatePlans)
-      return
+      return true
     }
-    persistControlledData({ ...currentStorageData(), ratePlans: nextRatePlans })
+    return persistControlledPatch({ ratePlans: nextRatePlans })
   }
 
-  const startUploadSession = (
+  const startUploadSession = async (
     nextBills: MonthlyBill[],
     nextPowerPlannerDataSource: PowerPlannerDataSource | null,
     nextProvenance: DataProvenance,
   ) => {
-    const result = startNewStorageSnapshot({
+    const result = await startNewStorageSnapshot({
       bills: nextBills,
       profile,
       scenario,
@@ -377,19 +402,23 @@ function App() {
     return true
   }
 
-  const applyBillsAndOpenDiagnosis = (nextBills: MonthlyBill[]) => {
+  const applyBillsAndOpenDiagnosis = async (nextBills: MonthlyBill[]) => {
     const nextProvenance: DataProvenance = {
       ...dataProvenance,
       bills: 'uploaded',
     }
-    if (!startUploadSession(nextBills, powerPlannerDataSource, nextProvenance)) {
+    if (!(await startUploadSession(
+      nextBills,
+      powerPlannerDataSource,
+      nextProvenance,
+    ))) {
       return false
     }
     setActiveView('diagnosis')
     return true
   }
 
-  const applyPowerPlannerAndOpenDiagnosis = (
+  const applyPowerPlannerAndOpenDiagnosis = async (
     nextDataSource: PowerPlannerDataSource | null,
     origin: DataProvenance['powerPlanner'],
   ) => {
@@ -398,14 +427,15 @@ function App() {
       powerPlanner: origin,
     }
     if (nextDataSource && origin === 'uploaded') {
-      if (!startUploadSession(bills, nextDataSource, nextProvenance)) return false
+      if (!(await startUploadSession(bills, nextDataSource, nextProvenance))) {
+        return false
+      }
     } else {
       if (storageSession) {
-        if (!persistControlledData({
-          ...currentStorageData(),
+        if (!(await persistControlledPatch({
           powerPlanner: nextDataSource,
           provenance: nextProvenance,
-        })) {
+        }))) {
           return false
         }
       } else {
@@ -431,8 +461,15 @@ function App() {
           <TopNotice
             expiresAt={storageSession?.expiresAt}
             dataProvenance={dataProvenance}
-            onReset={resetSample}
-            expiryMessage={expiryMessage}
+            onReset={() => {
+              void resetSample()
+            }}
+            expiryMessage={
+              expiryMessage ||
+              (usesSameTabStorageLockFallback()
+                ? storageLockFallbackMessage
+                : '')
+            }
           />
         </header>
 
@@ -587,7 +624,7 @@ const viewMeta: Record<ViewKey, { step: string; title: string; description: stri
 interface SchoolProfilePanelProps {
   profile: SchoolProfile
   ratePlans: RatePlan[]
-  onProfileChange: (profile: SchoolProfile) => void
+  onProfileChange: (profile: SchoolProfile) => Promise<boolean>
 }
 
 function SchoolProfilePanel({
@@ -596,12 +633,12 @@ function SchoolProfilePanel({
   onProfileChange,
 }: SchoolProfilePanelProps) {
   const update = (key: keyof SchoolProfile, value: string) => {
-    onProfileChange({
+    void onProfileChange({
       ...profile,
       [key]: ['contractPowerKw', 'appliedPowerKw'].includes(key)
         ? Number(value)
         : value,
-    })
+    }).catch(() => undefined)
   }
 
   const contractTypes = Array.from(new Set(ratePlans.map((plan) => plan.contractType)))
@@ -634,12 +671,12 @@ function SchoolProfilePanel({
     )
     const nextPlan = compatiblePlans.find((plan) => plan.id === currentPlanId)
       ?? compatiblePlans[0]
-    onProfileChange({
+    void onProfileChange({
       ...profile,
       contractType,
       voltageType,
       currentPlan: nextPlan?.planName ?? '',
-    })
+    }).catch(() => undefined)
   }
 
   const updateContractType = (contractType: string) => {

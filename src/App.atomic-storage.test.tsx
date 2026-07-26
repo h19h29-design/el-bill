@@ -124,16 +124,16 @@ describe('App session-scoped storage integration', () => {
     expect(localStorage.getItem('el-bill:profile')).toBeNull()
   })
 
-  it('restores one complete active snapshot immediately after reload', () => {
+  it('restores one complete active snapshot immediately after reload', async () => {
     expect(
-      startNewStorageSnapshot(
+      (await startNewStorageSnapshot(
         makeData({
           powerPlanner: samplePowerPlannerDataSource,
           provenance: { bills: 'uploaded', powerPlanner: 'uploaded' },
         }),
         now,
         'reload-session',
-      ).ok,
+      )).ok,
     ).toBe(true)
 
     render(<App />)
@@ -148,7 +148,7 @@ describe('App session-scoped storage integration', () => {
 
   it('keeps prior UI and storage when a new upload cannot be written', async () => {
     expect(
-      startNewStorageSnapshot(makeData(), now, 'sample-session').ok,
+      (await startNewStorageSnapshot(makeData(), now, 'sample-session')).ok,
     ).toBe(true)
     render(<App />)
     const previousPointer = localStorage.getItem(storageActivePointerKey)
@@ -184,22 +184,24 @@ describe('App session-scoped storage integration', () => {
     expect(globalThis.crypto.randomUUID).not.toBe(originalRandomUuid)
   })
 
-  it('adopts a new pointer winner and ignores events for inactive snapshot keys', () => {
-    expect(startNewStorageSnapshot(makeData(), now, 'first-tab').ok).toBe(true)
+  it('adopts a new pointer winner and ignores events for inactive snapshot keys', async () => {
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'first-tab')).ok,
+    ).toBe(true)
     render(<App />)
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '파워플래너: 미사용',
     )
 
     expect(
-      startNewStorageSnapshot(
+      (await startNewStorageSnapshot(
         makeData({
           powerPlanner: samplePowerPlannerDataSource,
           provenance: { bills: 'sample', powerPlanner: 'uploaded' },
         }),
         now + 1,
         'second-tab',
-      ).ok,
+      )).ok,
     ).toBe(true)
     act(() => {
       window.dispatchEvent(
@@ -228,13 +230,23 @@ describe('App session-scoped storage integration', () => {
     )
   })
 
-  it('adopts active-session edits and resets when its snapshot is removed', () => {
-    expect(startNewStorageSnapshot(makeData(), now, 'active-tab').ok).toBe(true)
+  it('adopts active-session edits and resets when its snapshot is removed', async () => {
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'active-tab')).ok,
+    ).toBe(true)
     render(<App />)
     const updatedData = makeData({
       provenance: { bills: 'uploaded', powerPlanner: 'none' },
     })
-    expect(updateStorageSnapshot('active-tab', updatedData, now + 1).ok).toBe(true)
+    expect(
+      (
+        await updateStorageSnapshot(
+          'active-tab',
+          { provenance: updatedData.provenance },
+          now + 1,
+        )
+      ).ok,
+    ).toBe(true)
 
     act(() => {
       window.dispatchEvent(
@@ -249,11 +261,14 @@ describe('App session-scoped storage integration', () => {
       '고지서: 사용자 업로드',
     )
 
-    expect(removeStorageSnapshot('active-tab')).toBe(true)
+    expect(await removeStorageSnapshot('active-tab')).toEqual({
+      ok: true,
+      removed: true,
+    })
     act(() => {
       window.dispatchEvent(
         new StorageEvent('storage', {
-          key: storageSnapshotKeyFor('active-tab'),
+          key: storageActivePointerKey,
           newValue: null,
           storageArea: localStorage,
         }),
@@ -264,13 +279,13 @@ describe('App session-scoped storage integration', () => {
     )
   })
 
-  it('resets when another tab removes the active pointer', () => {
+  it('resets when another tab removes the active pointer', async () => {
     expect(
-      startNewStorageSnapshot(
+      (await startNewStorageSnapshot(
         makeData({ provenance: { bills: 'uploaded', powerPlanner: 'none' } }),
         now,
         'pointer-removal',
-      ).ok,
+      )).ok,
     ).toBe(true)
     render(<App />)
     localStorage.removeItem(storageActivePointerKey)
@@ -294,7 +309,9 @@ describe('App session-scoped storage integration', () => {
   })
 
   it('retains the prior profile control value when persistence fails', async () => {
-    expect(startNewStorageSnapshot(makeData(), now, 'profile-session').ok).toBe(true)
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'profile-session')).ok,
+    ).toBe(true)
     render(<App />)
     failWritesFor('profile-session')
     fireEvent.click(screen.getByRole('button', { name: '학교정보' }))
@@ -305,11 +322,15 @@ describe('App session-scoped storage integration', () => {
     expect((input as HTMLInputElement).value).toBe(
       defaultSchoolProfile.displaySchoolName,
     )
-    expect(screen.getByText(/브라우저 저장소에 자료를 저장하지 못했습니다/)).toBeTruthy()
+    expect(
+      await screen.findByText(/브라우저 저장소에 자료를 저장하지 못했습니다/),
+    ).toBeTruthy()
   })
 
   it('retains the prior scenario control value when persistence fails', async () => {
-    expect(startNewStorageSnapshot(makeData(), now, 'scenario-session').ok).toBe(true)
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'scenario-session')).ok,
+    ).toBe(true)
     render(<App />)
     failWritesFor('scenario-session')
     fireEvent.click(screen.getByRole('button', { name: '피크관리' }))
@@ -320,11 +341,15 @@ describe('App session-scoped storage integration', () => {
     expect((input as HTMLInputElement).value).toBe(
       String(defaultScenario.targetPeakKw),
     )
-    expect(screen.getByText(/브라우저 저장소에 자료를 저장하지 못했습니다/)).toBeTruthy()
+    expect(
+      await screen.findByText(/브라우저 저장소에 자료를 저장하지 못했습니다/),
+    ).toBeTruthy()
   })
 
   it('retains the prior rate-plan control value when persistence fails', async () => {
-    expect(startNewStorageSnapshot(makeData(), now, 'rate-session').ok).toBe(true)
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'rate-session')).ok,
+    ).toBe(true)
     render(<App />)
     failWritesFor('rate-session')
     fireEvent.click(screen.getByRole('button', { name: '설정' }))
@@ -333,19 +358,29 @@ describe('App session-scoped storage integration', () => {
     fireEvent.change(input, { target: { value: '저장 실패 요금제' } })
 
     expect((input as HTMLInputElement).value).toBe(defaultRatePlans[0].planName)
-    expect(screen.getByText(/브라우저 저장소에 자료를 저장하지 못했습니다/)).toBeTruthy()
+    expect(
+      await screen.findByText(/브라우저 저장소에 자료를 저장하지 못했습니다/),
+    ).toBeTruthy()
   })
 
   it('retains the prior PowerPlanner state when persistence fails', async () => {
     expect(
-      startNewStorageSnapshot(makeData(), now, 'power-planner-session').ok,
+      (
+        await startNewStorageSnapshot(
+          makeData(),
+          now,
+          'power-planner-session',
+        )
+      ).ok,
     ).toBe(true)
     render(<App />)
     failWritesFor('power-planner-session')
     fireEvent.click(screen.getByRole('button', { name: '파워플래너' }))
     fireEvent.click(await screen.findByRole('button', { name: '시연 샘플 적용' }))
 
-    expect(screen.getByText(/브라우저 저장소에 자료를 저장하지 못했습니다/)).toBeTruthy()
+    expect(
+      await screen.findByText(/브라우저 저장소에 자료를 저장하지 못했습니다/),
+    ).toBeTruthy()
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '파워플래너: 미사용',
     )

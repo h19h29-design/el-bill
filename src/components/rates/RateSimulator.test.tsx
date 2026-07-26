@@ -23,7 +23,7 @@ describe('rate simulator usability harness', () => {
       specialRoomTime: '15:00~16:00',
       exemptSpaces: '보건실, 서버실',
     }
-    const onScenarioChange = vi.fn()
+    const onScenarioChange = vi.fn(async () => true)
 
     render(
       <RateSimulator
@@ -84,7 +84,7 @@ describe('rate simulator usability harness', () => {
         candidatePlan={candidatePlan}
         candidates={[reviewOnlyCandidate]}
         scenario={defaultScenario}
-        onScenarioChange={() => undefined}
+        onScenarioChange={async () => true}
       />,
     )
 

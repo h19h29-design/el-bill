@@ -45,7 +45,7 @@ interface PowerPlannerUploadProps {
   onDataSourceChange: (
     dataSource: PowerPlannerDataSource | null,
     origin: DataProvenance['powerPlanner'],
-  ) => boolean
+  ) => Promise<boolean>
 }
 
 const dataTypes = Object.entries(powerPlannerDataTypeLabels) as Array<
@@ -114,7 +114,7 @@ export function PowerPlannerUpload({
     event.currentTarget.querySelector('input')?.click()
   }
 
-  const applyMapping = () => {
+  const applyMapping = async () => {
     if (!selectedSheet) {
       setMessage('선택된 시트가 없습니다.')
       return
@@ -147,7 +147,13 @@ export function PowerPlannerUpload({
       sourceName,
       `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건 반영`,
     )
-    if (!onDataSourceChange(next, 'uploaded')) {
+    let saved = false
+    try {
+      saved = await onDataSourceChange(next, 'uploaded')
+    } catch {
+      saved = false
+    }
+    if (!saved) {
       setMessage(
         '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
       )
@@ -225,7 +231,13 @@ export function PowerPlannerUpload({
               }}
             />
           </label>
-          <button type="button" className="outline-action" onClick={applyMapping}>
+          <button
+            type="button"
+            className="outline-action"
+            onClick={() => {
+              void applyMapping()
+            }}
+          >
             <FileSpreadsheet size={18} />
             매핑 적용
           </button>
@@ -233,8 +245,21 @@ export function PowerPlannerUpload({
             type="button"
             className="ghost-button"
             onClick={() => {
-              if (!onDataSourceChange(samplePowerPlannerDataSource, 'sample')) return
-              setMessage('시연용 시간대별 파워플래너 샘플을 적용했습니다.')
+              void onDataSourceChange(
+                samplePowerPlannerDataSource,
+                'sample',
+              )
+                .then((saved) => {
+                  if (!saved) return
+                  setMessage(
+                    '시연용 시간대별 파워플래너 샘플을 적용했습니다.',
+                  )
+                })
+                .catch(() => {
+                  setMessage(
+                    '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+                  )
+                })
             }}
           >
             시연 샘플 적용
@@ -347,8 +372,16 @@ export function PowerPlannerUpload({
             type="button"
             className="ghost-button"
             onClick={() => {
-              if (!onDataSourceChange(null, 'none')) return
-              setMessage('파워플래너 업로드 자료를 초기화했습니다.')
+              void onDataSourceChange(null, 'none')
+                .then((saved) => {
+                  if (!saved) return
+                  setMessage('파워플래너 업로드 자료를 초기화했습니다.')
+                })
+                .catch(() => {
+                  setMessage(
+                    '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+                  )
+                })
             }}
           >
             업로드 자료 초기화

@@ -27,7 +27,7 @@ import type { PeakOperationPlan } from '../../lib/peakOperations'
 
 interface PeakManagerProps {
   scenario: PeakScenario
-  onScenarioChange: (scenario: PeakScenario) => void
+  onScenarioChange: (scenario: PeakScenario) => Promise<boolean>
   powerPlannerDataSource?: PowerPlannerDataSource | null
   peakOperationPlan: PeakOperationPlan
 }
@@ -87,7 +87,7 @@ export function PeakManager({
       return
     }
 
-    onScenarioChange({
+    void onScenarioChange({
       ...scenario,
       [key]:
         key === 'memo' ||
@@ -100,7 +100,7 @@ export function PeakManager({
           : Number.isFinite(numericValue)
             ? numericValue
             : 0,
-    })
+    }).catch(() => undefined)
   }
 
   return (
