@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { Inflate } from 'pako'
 import type {
   BillImportContext,
   MonthlyBill,
@@ -32,6 +33,18 @@ const zipEntryLimitMessage =
   'XLSX 내부 파일 수가 200개를 초과하여 브라우저 분석을 중단했습니다. 필요한 시트와 이미지만 남겨 다시 저장해 주세요.'
 const zipUncompressedLimitMessage =
   '압축 해제 예상 크기가 50MB를 초과하여 브라우저 분석을 중단했습니다. 기간이나 시트를 나눠 업로드해 주세요.'
+const csvColumnLimitMessage =
+  'CSV 열 수가 256개를 초과하여 브라우저 분석을 중단했습니다. 필요한 열만 남겨 다시 저장해 주세요.'
+const htmlColumnLimitMessage =
+  'HTML 열 수가 256개를 초과하여 브라우저 분석을 중단했습니다. 필요한 열만 남겨 다시 저장해 주세요.'
+
+interface ZipEntryMetadata {
+  flags: number
+  method: number
+  compressedSize: number
+  uncompressedSize: number
+  localHeaderOffset: number
+}
 
 export const validateUploadFile = (
   file: Pick<File, 'name' | 'size'>,
@@ -112,7 +125,7 @@ const stripHtml = (value: string) =>
   decodeHtmlEntities(value.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim()
 
 const getHtmlAttr = (attrs: string, name: string) => {
-  const match = attrs.match(new RegExp(`${name}=["']([^"']*)["']`, 'i'))
+  const match = attrs.match(new RegExp(`${name}\\s*=\\s*["']\\s*([^"']*)["']`, 'i'))
   return match ? decodeHtmlEntities(match[1]) : ''
 }
 
@@ -141,7 +154,7 @@ const findZipEndOfCentralDirectory = (view: DataView) => {
   return -1
 }
 
-const assertXlsxArchiveLimits = (buffer: ArrayBuffer) => {
+const inspectXlsxArchive = (buffer: ArrayBuffer): ZipEntryMetadata[] => {
   const view = new DataView(buffer)
   const eocdOffset = findZipEndOfCentralDirectory(view)
   if (eocdOffset < 0) throw new Error(legacyXlsMessage)
@@ -162,6 +175,7 @@ const assertXlsxArchiveLimits = (buffer: ArrayBuffer) => {
   let offset = centralDirectoryOffset
   const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize
   let uncompressedBytes = 0
+  const entries: ZipEntryMetadata[] = []
   for (let index = 0; index < entryCount; index += 1) {
     if (offset + 46 > centralDirectoryEnd || view.getUint32(offset, true) !== 0x02014b50) {
       throw new Error(legacyXlsMessage)
@@ -171,6 +185,9 @@ const assertXlsxArchiveLimits = (buffer: ArrayBuffer) => {
     const fileNameLength = view.getUint16(offset + 28, true)
     const extraLength = view.getUint16(offset + 30, true)
     const commentLength = view.getUint16(offset + 32, true)
+    const flags = view.getUint16(offset + 8, true)
+    const method = view.getUint16(offset + 10, true)
+    const localHeaderOffset = view.getUint32(offset + 42, true)
     if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff) {
       throw new Error(legacyXlsMessage)
     }
@@ -179,16 +196,109 @@ const assertXlsxArchiveLimits = (buffer: ArrayBuffer) => {
     if (uncompressedBytes > maxZipUncompressedBytes) {
       throw new Error(zipUncompressedLimitMessage)
     }
+    entries.push({
+      flags,
+      method,
+      compressedSize,
+      uncompressedSize,
+      localHeaderOffset,
+    })
     offset += 46 + fileNameLength + extraLength + commentLength
   }
 
-  if (offset > centralDirectoryEnd) throw new Error(legacyXlsMessage)
+  if (offset !== centralDirectoryEnd) throw new Error(legacyXlsMessage)
+  return entries
 }
 
-const assertCsvRowLimit = (text: string) => {
+const getZipEntryPayload = (
+  view: DataView,
+  centralDirectoryOffset: number,
+  entry: ZipEntryMetadata,
+) => {
+  const { localHeaderOffset, flags, method, compressedSize, uncompressedSize } = entry
+  if (localHeaderOffset + 30 > centralDirectoryOffset) throw new Error(legacyXlsMessage)
+  if (view.getUint32(localHeaderOffset, true) !== 0x04034b50) {
+    throw new Error(legacyXlsMessage)
+  }
+
+  const localFlags = view.getUint16(localHeaderOffset + 6, true)
+  const localMethod = view.getUint16(localHeaderOffset + 8, true)
+  const localCompressedSize = view.getUint32(localHeaderOffset + 18, true)
+  const localUncompressedSize = view.getUint32(localHeaderOffset + 22, true)
+  const fileNameLength = view.getUint16(localHeaderOffset + 26, true)
+  const extraLength = view.getUint16(localHeaderOffset + 28, true)
+  if (
+    localFlags !== flags ||
+    localMethod !== method ||
+    flags & 0x0001 ||
+    flags & 0x0040 ||
+    (flags & 0x0008
+      ? (localCompressedSize !== 0 && localCompressedSize !== compressedSize) ||
+        (localUncompressedSize !== 0 && localUncompressedSize !== uncompressedSize)
+      : localCompressedSize !== compressedSize || localUncompressedSize !== uncompressedSize)
+  ) {
+    throw new Error(legacyXlsMessage)
+  }
+  if (method !== 0 && method !== 8) throw new Error(legacyXlsMessage)
+
+  const payloadStart = localHeaderOffset + 30 + fileNameLength + extraLength
+  const payloadEnd = payloadStart + compressedSize
+  if (payloadEnd > centralDirectoryOffset) throw new Error(legacyXlsMessage)
+  return new Uint8Array(view.buffer, payloadStart, compressedSize)
+}
+
+const assertXlsxInflatedBytesWithinLimit = (buffer: ArrayBuffer, entries: ZipEntryMetadata[]) => {
+  const view = new DataView(buffer)
+  const centralDirectoryOffset = findZipEndOfCentralDirectory(view) < 0
+    ? -1
+    : view.getUint32(findZipEndOfCentralDirectory(view) + 16, true)
+  if (centralDirectoryOffset < 0) throw new Error(legacyXlsMessage)
+
+  let inflatedBytes = 0
+  const addInflatedBytes = (size: number) => {
+    inflatedBytes += size
+    if (inflatedBytes > maxZipUncompressedBytes) {
+      throw new Error(zipUncompressedLimitMessage)
+    }
+  }
+
+  for (const entry of entries) {
+    const payload = getZipEntryPayload(view, centralDirectoryOffset, entry)
+    if (entry.method === 0) {
+      if (entry.compressedSize !== entry.uncompressedSize) throw new Error(legacyXlsMessage)
+      addInflatedBytes(payload.byteLength)
+      continue
+    }
+
+    const inflater = new Inflate({ raw: true, chunkSize: 64 * 1024 })
+    inflater.onData = (chunk) => addInflatedBytes(chunk.byteLength)
+    try {
+      for (let offset = 0; offset < payload.byteLength; offset += 64 * 1024) {
+        inflater.push(
+          payload.subarray(offset, Math.min(offset + 64 * 1024, payload.byteLength)),
+          offset + 64 * 1024 >= payload.byteLength,
+        )
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === zipUncompressedLimitMessage) throw error
+      throw new Error(legacyXlsMessage)
+    }
+    if (inflater.err) throw new Error(legacyXlsMessage)
+  }
+}
+
+const assertCsvLimits = (text: string) => {
   let logicalRows = 0
   let quoted = false
   let rowHasContent = false
+  let columns = 1
+
+  const finishRow = () => {
+    if (rowHasContent) logicalRows += 1
+    if (logicalRows > maxWorkbookRows + 1) throw new Error(rowLimitMessage)
+    rowHasContent = false
+    columns = 1
+  }
 
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index]
@@ -202,27 +312,33 @@ const assertCsvRowLimit = (text: string) => {
       }
       continue
     }
+    if (char === ',' && !quoted) {
+      columns += 1
+      if (columns > maxWorksheetColumns) throw new Error(csvColumnLimitMessage)
+      continue
+    }
     if ((char === '\n' || char === '\r') && !quoted) {
       if (char === '\r' && next === '\n') index += 1
-      if (rowHasContent) logicalRows += 1
-      if (logicalRows > maxWorkbookRows + 1) throw new Error(rowLimitMessage)
-      rowHasContent = false
+      finishRow()
       continue
     }
     if (!/\s/.test(char)) rowHasContent = true
   }
 
-  if (rowHasContent && logicalRows + 1 > maxWorkbookRows + 1) {
-    throw new Error(rowLimitMessage)
-  }
+  if (rowHasContent) finishRow()
 }
 
-const assertPowerPlannerHtmlRowLimit = (text: string) => {
+const assertPowerPlannerHtmlLimits = (text: string) => {
+  const headers = text.match(/<th\b/gi)?.length ?? 0
+  if (headers > maxWorksheetColumns) throw new Error(htmlColumnLimitMessage)
+
   const rowRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
   let dataRows = 0
   let match: RegExpExecArray | null
   while ((match = rowRegex.exec(text))) {
-    if (!/<td\b[^>]*aria-describedby=["']grid_/i.test(match[1])) continue
+    const cells = match[1].match(/<td\b/gi)?.length ?? 0
+    if (cells > maxWorksheetColumns) throw new Error(htmlColumnLimitMessage)
+    if (!/<td\b[^>]*aria-describedby\s*=\s*["']\s*grid_/i.test(match[1])) continue
     dataRows += 1
     if (dataRows > maxWorkbookRows) throw new Error(rowLimitMessage)
   }
@@ -335,7 +451,7 @@ const assertWorkbookRowsWithinLimit = (sheets: ParsedSheet[]) => {
 const assertLoadedWorkbookLimits = (workbook: ExcelJS.Workbook) => {
   let actualRows = 0
   for (const sheet of workbook.worksheets) {
-    if (sheet.actualColumnCount > maxWorksheetColumns) {
+    if (Math.max(sheet.columnCount, sheet.actualColumnCount) > maxWorksheetColumns) {
       throw new Error(columnLimitMessage)
     }
     actualRows += sheet.actualRowCount
@@ -467,8 +583,12 @@ const parsePowerPlannerMonthlyBills = (
     })
     .filter((bill): bill is MonthlyBill => Boolean(bill))
 
+const isPowerPlannerHtmlExport = (text: string) =>
+  /ui-jqgrid/i.test(text) &&
+  /aria-describedby\s*=\s*["']\s*grid_/i.test(text)
+
 const parsePowerPlannerHtmlSheet = (text: string): ParsedSheet | null => {
-  if (!text.includes('ui-jqgrid') || !text.includes('aria-describedby="grid_')) {
+  if (!isPowerPlannerHtmlExport(text)) {
     return null
   }
 
@@ -476,7 +596,7 @@ const parsePowerPlannerHtmlSheet = (text: string): ParsedSheet | null => {
   const headerRegex = /<th\b([^>]*)>([\s\S]*?)<\/th>/gi
   let headerMatch: RegExpExecArray | null
   while ((headerMatch = headerRegex.exec(text))) {
-    const id = getHtmlAttr(headerMatch[1], 'id').replace(/^grid_/, '')
+    const id = getHtmlAttr(headerMatch[1], 'id').trim().replace(/^grid_/i, '')
     if (!id) continue
     const label = stripHtml(headerMatch[2])
     if (!label) continue
@@ -494,10 +614,9 @@ const parsePowerPlannerHtmlSheet = (text: string): ParsedSheet | null => {
     const cellRegex = /<td\b([^>]*)>([\s\S]*?)<\/td>/gi
     let cellMatch: RegExpExecArray | null
     while ((cellMatch = cellRegex.exec(rowMatch[1]))) {
-      const describedBy = getHtmlAttr(cellMatch[1], 'aria-describedby').replace(
-        /^grid_/,
-        '',
-      )
+      const describedBy = getHtmlAttr(cellMatch[1], 'aria-describedby')
+        .trim()
+        .replace(/^grid_/i, '')
       const label = labelById.get(describedBy)
       if (!label) continue
       row[label] = getHtmlAttr(cellMatch[1], 'title') || stripHtml(cellMatch[2])
@@ -525,7 +644,7 @@ const parseWorkbookContents = async (
   if (isCfbfBinary(buffer)) throw new Error(legacyXlsMessage)
   const decodedText = decodeSpreadsheetText(buffer)
   if (file instanceof File && file.name.toLowerCase().endsWith('.csv')) {
-    assertCsvRowLimit(decodedText)
+    assertCsvLimits(decodedText)
     return {
       sheets: [parseCsvSheet(decodedText, file.name)],
       autoRows: [],
@@ -533,11 +652,8 @@ const parseWorkbookContents = async (
     }
   }
 
-  const isPowerPlannerHtml =
-    decodedText.includes('ui-jqgrid') &&
-    decodedText.includes('aria-describedby="grid_')
-  if (isPowerPlannerHtml) {
-    assertPowerPlannerHtmlRowLimit(decodedText)
+  if (isPowerPlannerHtmlExport(decodedText)) {
+    assertPowerPlannerHtmlLimits(decodedText)
     const powerPlannerSheet = parsePowerPlannerHtmlSheet(decodedText)
     if (!powerPlannerSheet) throw new Error(legacyXlsMessage)
     assertWorkbookRowsWithinLimit([powerPlannerSheet])
@@ -558,7 +674,8 @@ const parseWorkbookContents = async (
     throw new Error(legacyXlsMessage)
   }
 
-  assertXlsxArchiveLimits(buffer)
+  const zipEntries = inspectXlsxArchive(buffer)
+  assertXlsxInflatedBytesWithinLimit(buffer, zipEntries)
   const workbook = new ExcelJS.Workbook()
   try {
     await workbook.xlsx.load(buffer)

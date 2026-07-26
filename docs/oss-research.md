@@ -9,6 +9,7 @@
 | Tailwind CSS | 유틸리티 CSS 및 디자인 토큰 보조 | 4.3.2 | MIT | 선택. `@tailwindcss/vite`로 Vite 연동 | https://tailwindcss.com, https://github.com/tailwindlabs/tailwindcss |
 | Recharts | 대시보드 차트 | 3.9.0 | MIT | 선택. React 컴포넌트 기반 라인/바/도넛 차트 구현이 빠름 | https://recharts.org, https://github.com/recharts/recharts |
 | ExcelJS | 엑셀 업로드 파싱 | 4.4.0 | MIT | 선택. 브라우저에서 XLSX 표시값을 읽고 수식을 실행하지 않으며, ZIP 메타데이터·행·열 제한과 함께 사용 | https://github.com/exceljs/exceljs |
+| pako | XLSX 사전 해제량 검증 | 2.2.0 | MIT | 선택. ExcelJS 로드 전 deflate 출력을 작은 청크로 세어 압축 폭탄 우회를 차단하며, 해제 결과를 보관하지 않음 | https://github.com/nodeca/pako |
 | TanStack Table | 고지서 입력 테이블 | 8.21.3 | MIT | 선택. 컬럼 확장과 표 렌더링 제어가 좋음 | https://tanstack.com/table, https://github.com/TanStack/table |
 | React Hook Form | 시나리오 입력 폼 | 7.80.0 | MIT | 선택. 입력 상태 관리가 가볍고 Zod와 함께 사용 가능 | https://react-hook-form.com, https://github.com/react-hook-form/react-hook-form |
 | Zod | 폼 입력 검증 | 4.4.3 | MIT | 선택. 피크/사용량 숫자 범위 검증 | https://zod.dev, https://github.com/colinhacks/zod |

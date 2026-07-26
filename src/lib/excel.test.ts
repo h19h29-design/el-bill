@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { deflateRawSync } from 'node:zlib'
 import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
 import {
@@ -96,6 +97,49 @@ const createZipCentralDirectory = ({
   return output.buffer
 }
 
+const createZipWithEntry = ({
+  compressed,
+  declaredUncompressedBytes,
+  flags = 0,
+  method = 8,
+}: {
+  compressed: Uint8Array
+  declaredUncompressedBytes: number
+  flags?: number
+  method?: number
+}) => {
+  const name = new TextEncoder().encode('xl/workbook.xml')
+  const localHeaderSize = 30 + name.byteLength
+  const centralHeaderSize = 46 + name.byteLength
+  const output = new Uint8Array(localHeaderSize + compressed.byteLength + centralHeaderSize + 22)
+  const view = new DataView(output.buffer)
+  view.setUint32(0, 0x04034b50, true)
+  view.setUint16(6, flags, true)
+  view.setUint16(8, method, true)
+  view.setUint32(18, compressed.byteLength, true)
+  view.setUint32(22, declaredUncompressedBytes, true)
+  view.setUint16(26, name.byteLength, true)
+  output.set(name, 30)
+  output.set(compressed, localHeaderSize)
+
+  const centralOffset = localHeaderSize + compressed.byteLength
+  view.setUint32(centralOffset, 0x02014b50, true)
+  view.setUint16(centralOffset + 8, flags, true)
+  view.setUint16(centralOffset + 10, method, true)
+  view.setUint32(centralOffset + 20, compressed.byteLength, true)
+  view.setUint32(centralOffset + 24, declaredUncompressedBytes, true)
+  view.setUint16(centralOffset + 28, name.byteLength, true)
+  output.set(name, centralOffset + 46)
+
+  const eocdOffset = centralOffset + centralHeaderSize
+  view.setUint32(eocdOffset, 0x06054b50, true)
+  view.setUint16(eocdOffset + 8, 1, true)
+  view.setUint16(eocdOffset + 10, 1, true)
+  view.setUint32(eocdOffset + 12, centralHeaderSize, true)
+  view.setUint32(eocdOffset + 16, centralOffset, true)
+  return output.buffer
+}
+
 const powerPlannerHtmlFixture = `
 <html xmlns:x="urn:schemas-microsoft-com:office:excel">
   <body>
@@ -184,6 +228,72 @@ describe('synthetic workbook parser harness', () => {
     ).rejects.toThrow('XLSX 내부 파일 수가 200개를 초과')
   })
 
+  it('rejects forged-small ZIP metadata when deflate output exceeds the actual cap', async () => {
+    const compressed = deflateRawSync(Buffer.alloc(50 * 1024 * 1024 + 1))
+    const forgedZip = createZipWithEntry({
+      compressed,
+      declaredUncompressedBytes: 1,
+    })
+
+    await expect(parseWorkbook(forgedZip)).rejects.toThrow(
+      '압축 해제 예상 크기가 50MB를 초과',
+    )
+  })
+
+  it('rejects ZIP64 sentinel metadata with a conversion instruction', async () => {
+    const zip = createZipCentralDirectory({ entries: 1, uncompressedBytes: 1 })
+    const view = new DataView(zip)
+    view.setUint16(zip.byteLength - 12, 0xffff, true)
+
+    await expect(parseWorkbook(zip)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
+  it('rejects corrupt central-directory metadata with a conversion instruction', async () => {
+    const zip = createZipCentralDirectory({ entries: 1, uncompressedBytes: 1 })
+
+    await expect(parseWorkbook(zip)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
+  it('rejects encrypted ZIP entries before ExcelJS load', async () => {
+    const zip = createZipWithEntry({
+      compressed: new Uint8Array([0]),
+      declaredUncompressedBytes: 1,
+      flags: 0x0001,
+    })
+
+    await expect(parseWorkbook(zip)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
+  it('rejects unsupported ZIP compression methods before ExcelJS load', async () => {
+    const zip = createZipWithEntry({
+      compressed: new Uint8Array([0]),
+      declaredUncompressedBytes: 1,
+      method: 12,
+    })
+
+    await expect(parseWorkbook(zip)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
+  it('rejects local-header methods that differ from central-directory metadata', async () => {
+    const zip = createZipWithEntry({
+      compressed: new Uint8Array([0]),
+      declaredUncompressedBytes: 1,
+    })
+    new DataView(zip).setUint16(8, 0, true)
+
+    await expect(parseWorkbook(zip)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
   it('rejects an oversized browser upload before parsing', () => {
     const message = validateUploadFile({
       name: 'oversized.xlsx',
@@ -238,6 +348,16 @@ describe('synthetic workbook parser harness', () => {
     )
   })
 
+  it('rejects an XLSX sparse reference beyond column 256 before cell extraction', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('2026 시연')
+    sheet.getCell(1, 16_384).value = 'sparse'
+
+    await expect(parseWorkbook(toArrayBuffer(await workbook.xlsx.writeBuffer()))).rejects.toThrow(
+      '시트 열 수가 256개를 초과',
+    )
+  })
+
   it('rejects CSV rows over the 10,000-row limit with quoted newlines', async () => {
     const rows = Array.from(
       { length: 10_001 },
@@ -251,6 +371,13 @@ describe('synthetic workbook parser harness', () => {
     await expect(parseWorkbook(file)).rejects.toThrow('전체 데이터가 10,000행을 초과')
   })
 
+  it('rejects CSV with more than 256 columns before row mapping', async () => {
+    const row = Array.from({ length: 257 }, (_, index) => `열${index + 1}`).join(',')
+    const file = new File([`${row}\n${row}`], 'wide.csv')
+
+    await expect(parseWorkbook(file)).rejects.toThrow('CSV 열 수가 256개를 초과')
+  })
+
   it('rejects PowerPlanner HTML rows over the 10,000-row limit', async () => {
     const rows = Array.from(
       { length: 10_001 },
@@ -262,6 +389,38 @@ describe('synthetic workbook parser harness', () => {
     )
 
     await expect(parseWorkbook(file)).rejects.toThrow('전체 데이터가 10,000행을 초과')
+  })
+
+  it('rejects PowerPlanner HTML with more than 256 columns before row mapping', async () => {
+    const headers = Array.from(
+      { length: 257 },
+      (_, index) => `<th id="grid_C${index}">열${index}</th>`,
+    ).join('')
+    const cells = Array.from(
+      { length: 257 },
+      (_, index) => `<td aria-describedby="grid_C${index}">${index}</td>`,
+    ).join('')
+    const file = new File(
+      [`<table class="UI-JQGRID"><tr>${headers}</tr><tr>${cells}</tr></table>`],
+      'wide-power-planner.xls',
+    )
+
+    await expect(parseWorkbook(file)).rejects.toThrow('HTML 열 수가 256개를 초과')
+  })
+
+  it('recognizes PowerPlanner HTML with mixed case and spaced single-quoted attributes', async () => {
+    const html = powerPlannerHtmlFixture
+      .replace(/ui-jqgrid/g, 'UI-JQGRID')
+      .replace(
+        /aria-describedby="(grid_[^"]*)"/g,
+        "aria-describedby = '$1'",
+      )
+    const file = new File([html], 'case-variant.xls')
+
+    const result = await parseWorkbook(file)
+
+    expect(result.autoRows).toHaveLength(1)
+    expect(result.autoRows[0]).toMatchObject({ year: 2026, month: 6 })
   })
 
   it('auto-merges a deterministic in-memory yearly workbook', async () => {
