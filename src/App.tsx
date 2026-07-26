@@ -29,7 +29,6 @@ import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import {
-  canRestorePowerPlanner,
   createExpiry,
   dataProvenanceStorageKey,
   isStoredMonthlyBillCollection,
@@ -38,6 +37,7 @@ import {
   loadWithExpiry,
   powerPlannerStorageKey,
   purgeExpiredKeys,
+  restorePowerPlannerState,
   saveWithExpiry,
 } from './lib/storage'
 
@@ -63,14 +63,12 @@ function App() {
     ? { ...loadedBillsPayload, data: loadedBillsPayload.data }
     : null
   if (loadedBillsPayload && !loadedBills) localStorage.removeItem(billsKey)
-  const initialDataProvenance = loadDataProvenance(loadedBills?.data)
   const loadedProfile = loadWithExpiry<SchoolProfile>(profileKey)
   const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
   const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
-  const loadedPowerPlanner = canRestorePowerPlanner(initialDataProvenance)
-    ? loadWithExpiry<PowerPlannerDataSource>(powerPlannerStorageKey)
-    : null
-  if (!loadedPowerPlanner) localStorage.removeItem(powerPlannerStorageKey)
+  const [restoredPowerPlanner] = useState(() =>
+    restorePowerPlannerState(loadDataProvenance(loadedBills?.data)),
+  )
 
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [bills, setBills] = useState<MonthlyBill[]>(loadedBills?.data ?? sampleBills)
@@ -84,9 +82,9 @@ function App() {
     loadedPlans?.data ?? defaultRatePlans,
   )
   const [powerPlannerDataSource, setPowerPlannerDataSource] =
-    useState<PowerPlannerDataSource | null>(loadedPowerPlanner?.data ?? null)
+    useState<PowerPlannerDataSource | null>(restoredPowerPlanner.powerPlannerData)
   const [dataProvenance, setDataProvenance] = useState<DataProvenance>(
-    initialDataProvenance,
+    restoredPowerPlanner.provenance,
   )
   const [expiresAt, setExpiresAt] = useState(
     loadedBills?.expiresAt ?? createExpiry().expiresAt,

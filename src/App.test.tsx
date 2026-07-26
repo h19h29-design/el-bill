@@ -87,6 +87,55 @@ describe('data provenance persistence', () => {
     expect(localStorage.getItem('el-bill:power-planner')).not.toBeNull()
   })
 
+  it.each([
+    ['missing', null],
+    ['expired', expiredStored(samplePowerPlannerDataSource)],
+    ['invalid JSON', '{invalid'],
+  ])('downgrades explicit PowerPlanner provenance when its payload is %s', (_, payload) => {
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      stored({ bills: 'sample', powerPlanner: 'uploaded' }),
+    )
+    if (payload) localStorage.setItem('el-bill:power-planner', payload)
+
+    render(<App />)
+
+    expect(document.querySelector('.notice-detail')?.textContent).toContain('파워플래너: 미사용')
+    expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
+    expect(JSON.parse(localStorage.getItem('el-bill:data-provenance') ?? '{}').data).toEqual({
+      bills: 'sample',
+      powerPlanner: 'none',
+    })
+  })
+
+  it('rejects malformed explicit PowerPlanner payloads before they reach the view', () => {
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      stored({ bills: 'sample', powerPlanner: 'uploaded' }),
+    )
+    localStorage.setItem(
+      'el-bill:power-planner',
+      stored({
+        id: 'invalid-source',
+        provider: 'kepco-power-planner',
+        sourceName: '잘못된 자료',
+        sourceLabel: '잘못된 자료',
+        importedAt: '2030-01-01T00:00:00.000Z',
+        records: [{ id: 'invalid-record', dataType: 'hourlyUsage', hour: '13' }],
+        memo: '',
+      }),
+    )
+
+    render(<App />)
+
+    expect(document.querySelector('.notice-detail')?.textContent).toContain('파워플래너: 미사용')
+    expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
+    expect(
+      screen.getByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
+    ).toBeTruthy()
+  })
+
   it('clears PowerPlanner data after an expired legacy mode without explicit provenance', () => {
     localStorage.setItem('el-bill:data-mode', expiredStored('uploaded'))
     localStorage.setItem('el-bill:power-planner', stored(samplePowerPlannerDataSource))
