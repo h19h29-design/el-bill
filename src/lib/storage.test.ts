@@ -53,4 +53,18 @@ describe('local demo storage TTL harness', () => {
     vi.setSystemTime(new Date('2026-07-01T00:00:01+09:00'))
     expect(loadWithExpiry('el-bill:absolute')).toBeNull()
   })
+
+  it('removes malformed payloads with an invalid expiry timestamp', () => {
+    localStorage.setItem(
+      'el-bill:malformed',
+      JSON.stringify({
+        createdAt: '2026-06-30T00:00:00.000Z',
+        expiresAt: 'not-a-date',
+        data: 'untrusted',
+      }),
+    )
+
+    expect(loadWithExpiry('el-bill:malformed')).toBeNull()
+    expect(localStorage.getItem('el-bill:malformed')).toBeNull()
+  })
 })

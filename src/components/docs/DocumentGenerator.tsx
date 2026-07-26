@@ -101,6 +101,15 @@ export function DocumentGenerator({
   )
   const canGenerateChangeDocuments = diagnosis.canGenerateChangeDocuments
 
+  const copyDocumentText = async (text: string, successMessage: string) => {
+    if (!canGenerateChangeDocuments) {
+      setStatus(diagnosis.documentBlockReason)
+      return
+    }
+    await copyText(text)
+    setStatus(successMessage)
+  }
+
   if (!bundle) {
     return (
       <div className="view-stack">
@@ -192,7 +201,7 @@ export function DocumentGenerator({
             <button
               type="button"
               disabled={!canGenerateChangeDocuments}
-              onClick={() => void copyText(bundle.planText).then(() => setStatus('계획안 문안을 복사했습니다.'))}
+              onClick={() => void copyDocumentText(bundle.planText, '계획안 문안을 복사했습니다.')}
             >
               <ClipboardCopy size={16} /> 문안 복사
             </button>
@@ -220,7 +229,7 @@ export function DocumentGenerator({
             <button
               type="button"
               disabled={!canGenerateChangeDocuments}
-              onClick={() => void copyText(bundle.kepcoLetterText).then(() => setStatus('공문 문안을 복사했습니다.'))}
+              onClick={() => void copyDocumentText(bundle.kepcoLetterText, '공문 문안을 복사했습니다.')}
             >
               <ClipboardCopy size={16} /> 문안 복사
             </button>
@@ -249,8 +258,9 @@ export function DocumentGenerator({
               type="button"
               disabled={!canGenerateChangeDocuments}
               onClick={() =>
-                void copyText(JSON.stringify(bundle.applicationPreviewData, null, 2)).then(() =>
-                  setStatus('신청서 자동입력 항목을 복사했습니다.'),
+                void copyDocumentText(
+                  JSON.stringify(bundle.applicationPreviewData, null, 2),
+                  '신청서 자동입력 항목을 복사했습니다.',
                 )
               }
             >

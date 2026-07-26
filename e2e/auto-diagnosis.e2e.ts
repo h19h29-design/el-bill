@@ -69,6 +69,36 @@ test('PowerPlanner-only upload does not claim uploaded-bill diagnosis', async ({
   await expect(page.getByText('사용자 고지서 업로드 후 생성 가능', { exact: true })).toBeVisible()
 })
 
+test('PowerPlanner file replaces a demo sample and clearing it preserves bill origin', async ({ page }, testInfo) => {
+  const powerPlannerCsv = testInfo.outputPath('power-planner-hourly.csv')
+  await writeFile(
+    powerPlannerCsv,
+    [
+      '일자,시간,사용량(kWh)',
+      '2026-07-01,13,420',
+      '2026-07-01,14,460',
+    ].join('\n'),
+  )
+
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await page.locator('.sidebar-nav').getByRole('button', { name: '파워플래너', exact: true }).click()
+  await page.getByRole('button', { name: '시연 샘플 적용' }).click()
+  await page.locator('.sidebar-nav').getByRole('button', { name: '파워플래너', exact: true }).click()
+  await expect(page.locator('.power-summary-grid article').first()).toContainText('25건')
+
+  await page.locator('input[type="file"][accept=".xlsx,.xls,.csv"]').setInputFiles(powerPlannerCsv)
+  await page.getByRole('button', { name: '매핑 적용' }).click()
+  await page.locator('.sidebar-nav').getByRole('button', { name: '파워플래너', exact: true }).click()
+  await expect(page.locator('.power-summary-grid article').first()).toContainText('2건')
+  await expect(page.getByText('파워플래너: 사용자 업로드', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '업로드 자료 초기화' }).click()
+  await expect(page.getByText('고지서: 시연 샘플', { exact: true })).toBeVisible()
+  await expect(page.getByText('파워플래너: 미사용', { exact: true })).toBeVisible()
+})
+
 test('automatic diagnosis flow remains usable end to end', async ({ page }, testInfo) => {
   const billXls = testInfo.outputPath('power-planner-bill.xls')
   const powerPlannerCsv = testInfo.outputPath('power-planner-monthly.csv')

@@ -40,6 +40,7 @@ import { samplePowerPlannerDataSource } from '../../data/samplePowerPlanner'
 
 interface PowerPlannerUploadProps {
   dataSource: PowerPlannerDataSource | null
+  dataOrigin: DataProvenance['powerPlanner']
   onDataSourceChange: (
     dataSource: PowerPlannerDataSource | null,
     origin: DataProvenance['powerPlanner'],
@@ -52,6 +53,7 @@ const dataTypes = Object.entries(powerPlannerDataTypeLabels) as Array<
 
 export function PowerPlannerUpload({
   dataSource,
+  dataOrigin,
   onDataSourceChange,
 }: PowerPlannerUploadProps) {
   const [dataType, setDataType] = useState<PowerPlannerDataType>(
@@ -133,7 +135,7 @@ export function PowerPlannerUpload({
       return
     }
 
-    const existing = dataSource?.records ?? []
+    const existing = dataOrigin === 'uploaded' ? dataSource?.records ?? [] : []
     const next = createPowerPlannerDataSource(
       [...existing, ...records],
       sourceName,

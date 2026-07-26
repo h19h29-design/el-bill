@@ -28,21 +28,29 @@ import type { PowerPlannerDataSource } from './types'
 import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
-import { createExpiry, loadWithExpiry, purgeExpiredKeys, saveWithExpiry } from './lib/storage'
+import {
+  createExpiry,
+  dataProvenanceStorageKey,
+  legacyDataModeStorageKey,
+  loadDataProvenance,
+  loadWithExpiry,
+  purgeExpiredKeys,
+  saveWithExpiry,
+} from './lib/storage'
 
 const billsKey = 'el-bill:bills'
 const profileKey = 'el-bill:profile'
 const scenarioKey = 'el-bill:scenario'
 const ratePlansKey = 'el-bill:rate-plans'
 const powerPlannerKey = 'el-bill:power-planner'
-const dataProvenanceKey = 'el-bill:data-provenance'
 const storageKeys = [
   billsKey,
   profileKey,
   scenarioKey,
   ratePlansKey,
   powerPlannerKey,
-  dataProvenanceKey,
+  dataProvenanceStorageKey,
+  legacyDataModeStorageKey,
 ]
 
 function App() {
@@ -53,7 +61,6 @@ function App() {
   const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
   const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
   const loadedPowerPlanner = loadWithExpiry<PowerPlannerDataSource>(powerPlannerKey)
-  const loadedDataProvenance = loadWithExpiry<DataProvenance>(dataProvenanceKey)
 
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [bills, setBills] = useState<MonthlyBill[]>(loadedBills?.data ?? sampleBills)
@@ -69,7 +76,7 @@ function App() {
   const [powerPlannerDataSource, setPowerPlannerDataSource] =
     useState<PowerPlannerDataSource | null>(loadedPowerPlanner?.data ?? null)
   const [dataProvenance, setDataProvenance] = useState<DataProvenance>(
-    loadedDataProvenance?.data ?? { bills: 'sample', powerPlanner: 'none' },
+    loadDataProvenance,
   )
   const [expiresAt, setExpiresAt] = useState(
     loadedBills?.expiresAt ?? createExpiry().expiresAt,
@@ -101,7 +108,7 @@ function App() {
   }, [powerPlannerDataSource])
 
   useEffect(() => {
-    saveWithExpiry(dataProvenanceKey, dataProvenance)
+    saveWithExpiry(dataProvenanceStorageKey, dataProvenance)
   }, [dataProvenance])
 
   const sortedBills = useMemo(() => sortBillsChronologically(bills), [bills])
@@ -132,7 +139,8 @@ function App() {
     localStorage.removeItem(scenarioKey)
     localStorage.removeItem(ratePlansKey)
     localStorage.removeItem(powerPlannerKey)
-    localStorage.removeItem(dataProvenanceKey)
+    localStorage.removeItem(dataProvenanceStorageKey)
+    localStorage.removeItem(legacyDataModeStorageKey)
     setBills(sampleBills)
     setProfile(defaultSchoolProfile)
     setScenario(defaultScenario)
@@ -215,6 +223,7 @@ function App() {
           {activeView === 'powerPlanner' && (
             <PowerPlannerUpload
               dataSource={powerPlannerDataSource}
+              dataOrigin={dataProvenance.powerPlanner}
               onDataSourceChange={applyPowerPlannerAndOpenDiagnosis}
             />
           )}
