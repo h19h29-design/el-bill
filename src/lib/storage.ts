@@ -1007,9 +1007,17 @@ const migrateLegacyPerKeyStorage = (
   )
   const payloads = new Map<string, LegacyPayload>()
   let valid = committed.valid
+  let malformedProvenancePayload = false
   payloadKeys.forEach((key) => {
     const payload = parseLegacyPayload(localStorage.getItem(key))
-    if (!payload || Date.parse(payload.expiresAt) <= now) {
+    if (!payload) {
+      if (key === dataProvenanceStorageKey) {
+        malformedProvenancePayload = true
+      }
+      valid = false
+      return
+    }
+    if (Date.parse(payload.expiresAt) <= now) {
       valid = false
       return
     }
@@ -1024,6 +1032,21 @@ const migrateLegacyPerKeyStorage = (
     payloads.set(key, payload)
   })
   if (!valid) {
+    if (malformedProvenancePayload) {
+      const fallbackResult = commitNewActiveSnapshotUnlocked({
+        schemaVersion: 1,
+        revision: 0,
+        session: createStorageSession(now),
+        data: {
+          ...fallbackData,
+          powerPlanner: null,
+          provenance: { bills: 'sample', powerPlanner: 'none' },
+        },
+      })
+      if (!fallbackResult.ok) return null
+      removeLegacyPerKeyStorage()
+      return fallbackResult.snapshot
+    }
     removeLegacyPerKeyStorage()
     return null
   }
@@ -1060,19 +1083,23 @@ const migrateLegacyPerKeyStorage = (
   const explicitProvenance = payloads.get(dataProvenanceStorageKey)?.data
   const provenance = isDataProvenance(explicitProvenance)
     ? explicitProvenance
-    : { bills: 'sample' as const, powerPlanner: 'none' as const }
+    : null
   const legacyPowerPlanner = payloads.get(powerPlannerStorageKey)?.data
   const normalizedLegacyPowerPlanner =
     normalizePowerPlannerDataSource(legacyPowerPlanner)
+  const hasLegacyPowerPlannerData =
+    legacyPowerPlanner !== undefined && legacyPowerPlanner !== null
+  const provenanceMatchesPayloads =
+    provenance?.bills === 'uploaded' &&
+    (provenance.powerPlanner === 'none'
+      ? !hasLegacyPowerPlannerData
+      : hasLegacyPowerPlannerData &&
+        normalizedLegacyPowerPlanner.dataSource !== null)
   const powerPlanner =
-    provenance.powerPlanner !== 'none' &&
+    provenance?.powerPlanner !== 'none' &&
     normalizedLegacyPowerPlanner.dataSource
       ? normalizedLegacyPowerPlanner.dataSource
       : null
-  const safeProvenance: DataProvenance = {
-    bills: bills && provenance.bills === 'uploaded' ? 'uploaded' : 'sample',
-    powerPlanner: powerPlanner ? provenance.powerPlanner : 'none',
-  }
   const profile = payloads.get(profileStorageKey)?.data
   const scenario = payloads.get(scenarioStorageKey)?.data
   const ratePlans = payloads.get(ratePlansStorageKey)?.data
@@ -1084,6 +1111,7 @@ const migrateLegacyPerKeyStorage = (
   const validRatePlans = validateRatePlanCollection(ratePlans).valid
   const validCalculationSettings = isCalculationSettings(calculationSettings)
   const usedFallbackDomainData =
+    !provenanceMatchesPayloads ||
     !bills ||
     !validProfile ||
     !normalizedScenario.scenario ||
@@ -1103,7 +1131,7 @@ const migrateLegacyPerKeyStorage = (
         ratePlans: ratePlans as RatePlan[],
         calculationSettings: calculationSettings as CalculationSettings,
         powerPlanner,
-        provenance: safeProvenance,
+        provenance: provenance as DataProvenance,
       }
   const migrationSnapshot: StorageSnapshot = {
     schemaVersion: 1,

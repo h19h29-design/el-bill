@@ -7,6 +7,7 @@ import type {
 } from '../types'
 import {
   isValidMonthlyBill,
+  parseBillNumericValue,
   validateBillRequiredValues,
 } from './domainValidation'
 import {
@@ -98,12 +99,7 @@ export const getWorkbookLimitMessage = (
 }
 
 const normalize = (value: unknown) => String(value ?? '').trim()
-const asNumber = (value: unknown) => {
-  if (typeof value === 'number') return value
-  const cleaned = normalize(value).replace(/,/g, '')
-  const parsed = Number(cleaned)
-  return Number.isFinite(parsed) ? parsed : 0
-}
+const asNumber = parseBillNumericValue
 
 const hasNumericValue = (value: unknown) => {
   if (typeof value === 'number') return Number.isFinite(value)

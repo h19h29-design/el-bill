@@ -350,6 +350,14 @@ export function BillUpload({
                   : '없음'}
               </strong>
             </article>
+            <article className={recognition.invalidRequiredValues.length ? 'danger' : ''}>
+              <span>값 확인 필요</span>
+              <strong>
+                {recognition.invalidRequiredValues.length
+                  ? recognition.invalidRequiredValues.join(', ')
+                  : '없음'}
+              </strong>
+            </article>
             <article>
               <span>선택 컬럼</span>
               <strong>{recognition.optionalColumns.join(', ') || '없음'}</strong>

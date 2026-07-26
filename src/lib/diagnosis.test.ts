@@ -1059,18 +1059,155 @@ describe('automatic diagnosis harness', () => {
     expect(recognition?.canAnalyze).toBe(false)
     expect(recognition?.guidance).toContain('컬럼을 직접 지정')
     expect(recognition?.missingRequiredColumns).toContain('총 전기요금')
+    expect(recognition?.invalidRequiredValues).toEqual([])
   })
 
   it.each([
-    ['2.026e3', 1],
-    ['+2026', 1],
-    ['002026', 1],
-    ['x2026', 1],
-    ['2026', '1e0'],
-    ['2026', 1.5],
+    ['연도', 'year', []],
+    ['월', 'month', [2026]],
+    ['사용량', 'usageKwh', [2026]],
+    ['총 전기요금', 'totalBillWon', [2026]],
+  ])(
+    'reports only the independently missing %s column',
+    (missingLabel, mappingField, recognizedYears) => {
+      const mapping: Record<string, string> = {
+        year: '연도',
+        month: '월',
+        usageKwh: '사용량',
+        totalBillWon: '총 전기요금',
+      }
+      mapping[mappingField] = ''
+      const recognition = summarizeWorkbookRecognition(
+        {
+          sheets: [
+            {
+              name: 'missing-field',
+              headers: ['연도', '월', '사용량', '총 전기요금'],
+              rows: [
+                {
+                  연도: 2026,
+                  월: 1,
+                  사용량: 1000,
+                  '총 전기요금': 100_000,
+                },
+              ],
+            },
+          ],
+          autoRows: [],
+          diagnostics: [],
+        },
+        mapping,
+      )
+
+      expect(recognition?.missingRequiredColumns).toEqual([missingLabel])
+      expect(recognition?.invalidRequiredValues).toEqual([])
+      expect(recognition?.recognizedYears).toEqual(recognizedYears)
+      expect(recognition?.mappingConfidence).toBe(75)
+      expect(recognition?.canAnalyze).toBe(false)
+      expect(recognition?.guidance).toContain(missingLabel)
+      expect(recognition?.guidance).toContain('컬럼을 직접 지정')
+    },
+  )
+
+  it.each([
+    ['연도', 'x2026', 1, 1000, 100_000, []],
+    ['월', 2026, 1.5, 1000, 100_000, [2026]],
+    ['사용량', 2026, 1, 0, 100_000, [2026]],
+    ['총 전기요금', 2026, 1, 1000, -1, [2026]],
+  ])(
+    'reports only the independently invalid %s value',
+    (invalidLabel, year, month, usageKwh, totalBillWon, recognizedYears) => {
+      const recognition = summarizeWorkbookRecognition(
+        {
+          sheets: [
+            {
+              name: 'field-validity',
+              headers: ['연도', '월', '사용량', '총 전기요금'],
+              rows: [
+                {
+                  연도: year,
+                  월: month,
+                  사용량: usageKwh,
+                  '총 전기요금': totalBillWon,
+                },
+              ],
+            },
+          ],
+          autoRows: [],
+          diagnostics: [],
+        },
+        {
+          year: '연도',
+          month: '월',
+          usageKwh: '사용량',
+          totalBillWon: '총 전기요금',
+        },
+      )
+
+      expect(recognition?.missingRequiredColumns).toEqual([])
+      expect(recognition?.invalidRequiredValues).toEqual([invalidLabel])
+      expect(recognition?.recognizedYears).toEqual(recognizedYears)
+      expect(recognition?.mappingConfidence).toBe(75)
+      expect(recognition?.canAnalyze).toBe(false)
+      expect(recognition?.guidance).toContain(invalidLabel)
+      expect(recognition?.guidance).toContain(
+        invalidLabel === '연도' || invalidLabel === '월'
+          ? '값을 수정'
+          : '0보다 큰 숫자로 수정',
+      )
+    },
+  )
+
+  it('combines period and amount guidance without misreporting valid fields', () => {
+    const recognition = summarizeWorkbookRecognition(
+      {
+        sheets: [
+          {
+            name: 'combined-validity',
+            headers: ['연도', '월', '사용량', '총 전기요금'],
+            rows: [
+              {
+                연도: '+2026',
+                월: 7,
+                사용량: Number.NaN,
+                '총 전기요금': 100_000,
+              },
+            ],
+          },
+        ],
+        autoRows: [],
+        diagnostics: [],
+      },
+      {
+        year: '연도',
+        month: '월',
+        usageKwh: '사용량',
+        totalBillWon: '총 전기요금',
+      },
+    )
+
+    expect(recognition?.missingRequiredColumns).toEqual([])
+    expect(recognition?.invalidRequiredValues).toEqual(['연도', '사용량'])
+    expect(recognition?.mappingConfidence).toBe(50)
+    expect(recognition?.canAnalyze).toBe(false)
+    expect(recognition?.guidance).toContain('연도')
+    expect(recognition?.guidance).toContain('값을 수정')
+    expect(recognition?.guidance).toContain('사용량')
+    expect(recognition?.guidance).toContain('0보다 큰 숫자로 수정')
+    expect(recognition?.guidance).not.toContain('월 값')
+    expect(recognition?.guidance).not.toContain('총 전기요금 값')
+  })
+
+  it.each([
+    ['2.026e3', 1, []],
+    ['+2026', 1, []],
+    ['002026', 1, []],
+    ['x2026', 1, []],
+    ['2026', '1e0', [2026]],
+    ['2026', 1.5, [2026]],
   ])(
     'does not recognize malformed mapped period values %s / %s',
-    (year, month) => {
+    (year, month, expectedYears) => {
       const recognition = summarizeWorkbookRecognition(
         {
           sheets: [
@@ -1098,7 +1235,7 @@ describe('automatic diagnosis harness', () => {
         },
       )
 
-      expect(recognition?.recognizedYears).toEqual([])
+      expect(recognition?.recognizedYears).toEqual(expectedYears)
       expect(recognition?.mappingConfidence).toBeLessThan(100)
       expect(recognition?.canAnalyze).toBe(false)
     },

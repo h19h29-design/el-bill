@@ -72,6 +72,17 @@ const uploadedLegacyBills = sampleBills.map((bill) => ({
 const sampleFallbackData = () =>
   makeData({ bills: 'sample', powerPlanner: 'none' })
 
+const storeCompleteLegacyUserData = () => {
+  localStorage.setItem('el-bill:bills', legacyPayload(uploadedLegacyBills))
+  localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
+  localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
+  localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
+  localStorage.setItem(
+    'el-bill:calculation-settings',
+    legacyPayload(defaultCalculationSettings),
+  )
+}
+
 describe('locked session-scoped snapshots', () => {
   it('restores custom calculation settings without changing the session expiry', async () => {
     const now = Date.parse('2026-07-26T00:00:00.000Z')
@@ -692,7 +703,7 @@ describe('locked one-time migration', () => {
     expect(localStorage.getItem('el-bill:scenario')).toBeNull()
   })
 
-  it('drops invalid legacy PowerPlanner data only and preserves uploaded bills', async () => {
+  it('abandons legacy data when PowerPlanner provenance points to invalid data', async () => {
     localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
     localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
     localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
@@ -727,18 +738,13 @@ describe('locked one-time migration', () => {
       legacyPayload({ bills: 'uploaded', powerPlanner: 'uploaded' }),
     )
 
-    const migrated = await initializeStorageAfterMount(makeData(), now)
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
 
-    expect(migrated?.data.bills).toEqual(sampleBills)
-    expect(migrated?.data.profile).toEqual(defaultSchoolProfile)
-    expect(migrated?.data.powerPlanner).toBeNull()
-    expect(migrated?.data.provenance).toEqual({
-      bills: 'uploaded',
-      powerPlanner: 'none',
-    })
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
   })
 
-  it('drops over-limit legacy PowerPlanner data only and preserves uploaded bills', async () => {
+  it('abandons legacy data when PowerPlanner provenance points to over-limit data', async () => {
     const records = Array.from({ length: 10_001 }, (_, index) => ({
       id: `legacy-hourly-${index}`,
       dataType: 'hourlyUsage',
@@ -772,15 +778,10 @@ describe('locked one-time migration', () => {
       legacyPayload({ bills: 'uploaded', powerPlanner: 'uploaded' }),
     )
 
-    const migrated = await initializeStorageAfterMount(makeData(), now)
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
 
-    expect(migrated?.data.bills).toEqual(sampleBills)
-    expect(migrated?.data.profile).toEqual(defaultSchoolProfile)
-    expect(migrated?.data.powerPlanner).toBeNull()
-    expect(migrated?.data.provenance).toEqual({
-      bills: 'uploaded',
-      powerPlanner: 'none',
-    })
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
   })
 
   it.each([
@@ -933,15 +934,74 @@ describe('locked one-time migration', () => {
     expect(localStorage.getItem('el-bill:bills')).toBeNull()
   })
 
-  it('keeps ambiguous legacy provenance at sample and none', async () => {
-    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+  it('abandons complete legacy user data when explicit provenance is absent', async () => {
+    storeCompleteLegacyUserData()
+
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
+
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+  })
+
+  it('abandons complete legacy user data when provenance is malformed', async () => {
+    storeCompleteLegacyUserData()
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      legacyPayload({ bills: 'uploaded', powerPlanner: 'legacy' }),
+    )
+
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
+
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+    expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
+  })
+
+  it('creates the complete sample fallback when the provenance payload JSON is malformed', async () => {
+    storeCompleteLegacyUserData()
+    localStorage.setItem('el-bill:data-provenance', '{"broken"')
+
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
+
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+    expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
+  })
+
+  it('abandons complete legacy user data when only ambiguous data mode exists', async () => {
+    storeCompleteLegacyUserData()
     localStorage.setItem('el-bill:data-mode', legacyPayload('uploaded'))
 
-    const migrated = await initializeStorageAfterMount(makeData(), now)
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
 
-    expect(migrated?.data.provenance).toEqual({
-      bills: 'sample',
-      powerPlanner: 'none',
-    })
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+  })
+
+  it('abandons legacy data when explicit provenance contradicts PowerPlanner data', async () => {
+    storeCompleteLegacyUserData()
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      legacyPayload({ bills: 'uploaded', powerPlanner: 'uploaded' }),
+    )
+
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
+
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+  })
+
+  it('abandons uploaded legacy bills that are inconsistently labeled as sample', async () => {
+    storeCompleteLegacyUserData()
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      legacyPayload({ bills: 'sample', powerPlanner: 'none' }),
+    )
+
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
+
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
   })
 })

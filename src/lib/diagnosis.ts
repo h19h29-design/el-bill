@@ -26,6 +26,8 @@ import {
   isValidMonthlyBill,
   isValidRatePlan,
   normalizeRatePlanIdentityPart,
+  parseBillNumericValue,
+  validateBillRequiredValues,
   validateSchoolProfile,
   validateRatePlanCollection,
 } from './domainValidation'
@@ -853,41 +855,66 @@ export const summarizeWorkbookRecognition = (
   if (!result) return null
   const rows = result.sheets.flatMap((sheet) => sheet.rows)
   const headers = Array.from(new Set(result.sheets.flatMap((sheet) => sheet.headers)))
-  const mappedPeriods = rows.map((row) => ({
-    year: parseStrictYear(row[mapping.year]),
-    month: parseStrictMonth(row[mapping.month]),
-  }))
-  const mappedPeriodsAreValid =
-    rows.length > 0 &&
-    mappedPeriods.every(
-      (period) => period.year !== null && period.month !== null,
-    )
   const mappedYears = Array.from(
     new Set(
-      mappedPeriods
-        .filter(
-          (period) => period.year !== null && period.month !== null,
-        )
-        .map((period) => period.year as number),
+      rows
+        .map((row) => parseStrictYear(row[mapping.year]))
+        .filter((year): year is number => year !== null),
     ),
   ).sort((a, b) => a - b)
-  const requiredMap = [
-    ['연도', mapping.year],
-    ['월', mapping.month],
-    ['사용량', mapping.usageKwh],
-    ['총 전기요금', mapping.totalBillWon],
+  const requiredFields = [
+    {
+      label: '연도',
+      key: mapping.year,
+      isValid: (value: unknown) => parseStrictYear(value) !== null,
+    },
+    {
+      label: '월',
+      key: mapping.month,
+      isValid: (value: unknown) => parseStrictMonth(value) !== null,
+    },
+    {
+      label: '사용량',
+      key: mapping.usageKwh,
+      isValid: (value: unknown) =>
+        validateBillRequiredValues({
+          year: 2026,
+          month: 1,
+          usageKwh: parseBillNumericValue(value),
+          totalBillWon: 1,
+        }).valid,
+    },
+    {
+      label: '총 전기요금',
+      key: mapping.totalBillWon,
+      isValid: (value: unknown) =>
+        validateBillRequiredValues({
+          year: 2026,
+          month: 1,
+          usageKwh: 1,
+          totalBillWon: parseBillNumericValue(value),
+        }).valid,
+    },
   ] as const
-  const missingRequiredColumns = requiredMap
-    .filter(([, key]) => !key)
-    .map(([label]) => label)
-  if (mapping.year && !mappedPeriodsAreValid) {
-    missingRequiredColumns.push('연도')
-  }
-  if (mapping.month && !mappedPeriodsAreValid) {
-    missingRequiredColumns.push('월')
-  }
-  const uniqueMissingRequiredColumns = Array.from(
-    new Set(missingRequiredColumns),
+  const missingRequiredColumns = requiredFields
+    .filter(({ key }) => !key || !headers.includes(key))
+    .map(({ label }) => label)
+  const invalidRequiredValues = requiredFields
+    .filter(
+      ({ key, isValid }) =>
+        Boolean(key) &&
+        headers.includes(key) &&
+        (rows.length === 0 || rows.some((row) => !isValid(row[key]))),
+    )
+    .map(({ label }) => label)
+  const validRequiredFieldCount = requiredFields.length -
+    missingRequiredColumns.length -
+    invalidRequiredValues.length
+  const periodValueIssues = invalidRequiredValues.filter(
+    (label) => label === '연도' || label === '월',
+  )
+  const amountValueIssues = invalidRequiredValues.filter(
+    (label) => label === '사용량' || label === '총 전기요금',
   )
   const mappedOptionalColumns = optionalBillColumns.filter((label) =>
     headers.some((header) => header.includes(label) || label.includes(header)),
@@ -904,13 +931,16 @@ export const summarizeWorkbookRecognition = (
     ? Array.from(new Set(result.autoRows.map((bill) => bill.year))).sort((a, b) => a - b)
     : mappedYears
   const normalizedRequiredColumns = hasAutoRows
-    ? requiredMap.map(([label]) => label)
-    : requiredMap
-        .filter(([, key]) => Boolean(key))
-        .map(([label]) => label)
+    ? requiredFields.map(({ label }) => label)
+    : requiredFields
+        .filter(({ key }) => Boolean(key) && headers.includes(key))
+        .map(({ label }) => label)
   const normalizedMissingRequiredColumns = hasAutoRows
     ? []
-    : uniqueMissingRequiredColumns
+    : missingRequiredColumns
+  const normalizedInvalidRequiredValues = hasAutoRows
+    ? []
+    : invalidRequiredValues
   const mappingConfidence = hasAutoRows
     ? Math.min(
         99,
@@ -920,10 +950,23 @@ export const summarizeWorkbookRecognition = (
         ),
       )
     : Math.round(
-        ((requiredMap.length - normalizedMissingRequiredColumns.length) /
-          requiredMap.length) *
+        (validRequiredFieldCount / requiredFields.length) *
           100,
       )
+  const manualGuidance = [
+    normalizedMissingRequiredColumns.length
+      ? `필수 컬럼이 없습니다: ${normalizedMissingRequiredColumns.join(', ')}. 컬럼을 직접 지정해 주세요.`
+      : '',
+    periodValueIssues.length
+      ? `${periodValueIssues.join(', ')} 값을 수정해 주세요. 연도는 2000~2100의 네 자리 숫자, 월은 1~12 형식이어야 합니다.`
+      : '',
+    amountValueIssues.length
+      ? `${amountValueIssues.join(', ')} 값은 0보다 큰 숫자로 수정해 주세요.`
+      : '',
+  ].filter(Boolean).join(' ')
+  const hasRecognitionBlocker =
+    normalizedMissingRequiredColumns.length > 0 ||
+    normalizedInvalidRequiredValues.length > 0
 
   return {
     sheetNames: result.sheets.map((sheet) => sheet.name),
@@ -932,13 +975,14 @@ export const summarizeWorkbookRecognition = (
     requiredColumns: normalizedRequiredColumns,
     optionalColumns,
     missingRequiredColumns: normalizedMissingRequiredColumns,
+    invalidRequiredValues: normalizedInvalidRequiredValues,
     mappingConfidence,
-    canAnalyze: normalizedMissingRequiredColumns.length === 0,
+    canAnalyze: !hasRecognitionBlocker,
     guidance:
       hasAutoRows
         ? '파일 구조가 자동 인식되었습니다. 이 매핑으로 자동진단을 시작할 수 있습니다.'
-        : normalizedMissingRequiredColumns.length > 0
-        ? '총 전기요금 또는 사용량 컬럼을 찾지 못했습니다. 컬럼을 직접 지정해주세요.'
+        : hasRecognitionBlocker
+        ? manualGuidance
         : '필수 컬럼이 인식되었습니다. 이 매핑으로 자동진단을 시작할 수 있습니다.',
   }
 }

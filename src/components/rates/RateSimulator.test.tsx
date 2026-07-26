@@ -183,6 +183,70 @@ describe('rate simulator usability harness', () => {
     ).toBe('23')
   })
 
+  it('locks every scenario control while persistence is pending without losing the submitted value', async () => {
+    const user = userEvent.setup()
+    let resolveSave!: (scenario: PeakScenario) => void
+    const onScenarioChange = vi.fn(
+      () =>
+        new Promise<PeakScenario>((resolve) => {
+          resolveSave = resolve
+        }),
+    )
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={onScenarioChange}
+      />,
+    )
+
+    const usageInput = screen.getByLabelText(
+      '사용량 증가율(%)',
+    ) as HTMLInputElement
+    await user.clear(usageInput)
+    await user.type(usageInput, '17')
+    await user.click(screen.getByRole('button', { name: '시뮬레이션 설정' }))
+
+    await waitFor(() => expect(onScenarioChange).toHaveBeenCalledTimes(1))
+    const form = usageInput.closest('form') as HTMLFormElement
+    expect(form.getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByRole('status').textContent).toContain('저장하는 중')
+    expect(
+      [
+        '예상 최대수요전력(kW)',
+        '사용량 증가율(%)',
+        '여름 증가율(%)',
+        '겨울 증가율(%)',
+        '분석 기준 연도',
+        'EHP 증설 메모',
+      ].every(
+        (label) => (screen.getByLabelText(label) as HTMLInputElement).disabled,
+      ),
+    ).toBe(true)
+    expect(
+      (screen.getByRole('button', {
+        name: '시뮬레이션 설정',
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect(
+      screen
+        .getAllByRole('tab')
+        .every((tab) => (tab as HTMLButtonElement).disabled),
+    ).toBe(true)
+
+    await user.type(usageInput, '9')
+    expect(usageInput.value).toBe('17')
+
+    resolveSave({ ...defaultScenario, usageIncreasePercent: 17 })
+    await waitFor(() => expect(usageInput.disabled).toBe(false))
+    expect(usageInput.value).toBe('17')
+    expect(form.getAttribute('aria-busy')).toBe('false')
+  })
+
   it.each([
     ['예상 최대수요전력(kW)', '0'],
     ['사용량 증가율(%)', '101'],

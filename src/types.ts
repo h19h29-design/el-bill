@@ -294,6 +294,7 @@ export interface UploadRecognitionSummary {
   requiredColumns: string[]
   optionalColumns: string[]
   missingRequiredColumns: string[]
+  invalidRequiredValues: string[]
   mappingConfidence: number
   canAnalyze: boolean
   guidance: string

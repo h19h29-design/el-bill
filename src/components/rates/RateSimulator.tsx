@@ -57,6 +57,7 @@ export function RateSimulator({
   const [scenarioErrors, setScenarioErrors] = useState<
     Partial<Record<keyof PeakScenario, string>>
   >({})
+  const [isSavingScenario, setIsSavingScenario] = useState(false)
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const form = useForm<PeakScenario>({
     defaultValues: scenario,
@@ -92,16 +93,21 @@ export function RateSimulator({
         .map((field) => [field, parsed.data[field]]),
     ) as Partial<PeakScenario>
     if (Object.keys(patch).length === 0) return
-    const saved = await onScenarioChange({
-      type: 'patch',
-      patch,
-    }).catch(() => false)
-    if (!saved) return
-    form.reset(
-      typeof saved === 'object'
-        ? saved
-        : { ...scenario, ...patch },
-    )
+    setIsSavingScenario(true)
+    try {
+      const saved = await onScenarioChange({
+        type: 'patch',
+        patch,
+      }).catch(() => false)
+      if (!saved) return
+      form.reset(
+        typeof saved === 'object'
+          ? saved
+          : { ...scenario, ...patch },
+      )
+    } finally {
+      setIsSavingScenario(false)
+    }
   }
   const reviewOnlyCandidate = candidates.find(
     (candidate) => candidate.candidatePlanId === candidatePlan.id,
@@ -167,6 +173,7 @@ export function RateSimulator({
             aria-selected={tab === key}
             aria-controls="rate-simulator-panel"
             tabIndex={tab === key ? 0 : -1}
+            disabled={isSavingScenario}
             className={tab === key ? 'active' : ''}
             onClick={() => setTab(key)}
             onKeyDown={(event) => {
@@ -298,6 +305,7 @@ export function RateSimulator({
         <form
           className="scenario-form"
           noValidate
+          aria-busy={isSavingScenario}
           onSubmit={form.handleSubmit(submitScenario)}
         >
           <label>
@@ -305,6 +313,7 @@ export function RateSimulator({
             <input
               type="number"
               min={1}
+              disabled={isSavingScenario}
               aria-invalid={Boolean(scenarioErrors.expectedPeakKw)}
               aria-describedby={
                 scenarioErrors.expectedPeakKw ? 'scenario-validation-status' : undefined
@@ -318,6 +327,7 @@ export function RateSimulator({
               type="number"
               min={-30}
               max={100}
+              disabled={isSavingScenario}
               aria-invalid={Boolean(scenarioErrors.usageIncreasePercent)}
               aria-describedby={
                 scenarioErrors.usageIncreasePercent ? 'scenario-validation-status' : undefined
@@ -331,6 +341,7 @@ export function RateSimulator({
               type="number"
               min={-30}
               max={100}
+              disabled={isSavingScenario}
               aria-invalid={Boolean(scenarioErrors.summerIncreasePercent)}
               aria-describedby={
                 scenarioErrors.summerIncreasePercent ? 'scenario-validation-status' : undefined
@@ -344,6 +355,7 @@ export function RateSimulator({
               type="number"
               min={-30}
               max={100}
+              disabled={isSavingScenario}
               aria-invalid={Boolean(scenarioErrors.winterIncreasePercent)}
               aria-describedby={
                 scenarioErrors.winterIncreasePercent ? 'scenario-validation-status' : undefined
@@ -357,6 +369,7 @@ export function RateSimulator({
               type="number"
               min={2020}
               max={2035}
+              disabled={isSavingScenario}
               aria-invalid={Boolean(scenarioErrors.analysisYear)}
               aria-describedby={
                 scenarioErrors.analysisYear ? 'scenario-validation-status' : undefined
@@ -366,13 +379,22 @@ export function RateSimulator({
           </label>
           <label className="wide-field">
             EHP 증설 메모
-            <input {...form.register('memo')} />
+            <input disabled={isSavingScenario} {...form.register('memo')} />
           </label>
-          <button type="submit" className="primary-button">
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={isSavingScenario}
+          >
             <TrendingDown size={17} />
             시뮬레이션 설정
           </button>
         </form>
+        {isSavingScenario && (
+          <p className="status-line" role="status" aria-live="polite">
+            시나리오 설정을 저장하는 중입니다.
+          </p>
+        )}
         {Object.keys(scenarioErrors).length > 0 && (
           <p id="scenario-validation-status" className="status-line" role="status">
             {Object.values(scenarioErrors)[0]} 입력값을 확인한 뒤 다시 시도해 주세요.

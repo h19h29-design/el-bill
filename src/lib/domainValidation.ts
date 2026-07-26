@@ -43,6 +43,13 @@ const isFiniteInRange = (
   value >= minimum &&
   value <= maximum
 
+export const parseBillNumericValue = (value: unknown) => {
+  if (typeof value === 'number') return value
+  const cleaned = String(value ?? '').trim().replace(/,/g, '')
+  const parsed = Number(cleaned)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 const isValidIsoDate = (value: unknown) => {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return false
