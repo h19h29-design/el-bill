@@ -79,6 +79,14 @@ export function PeakManager({
   )
 
   const update = (key: keyof PeakScenario, value: string | boolean) => {
+    const numericValue = Number(value)
+    if (
+      (key === 'targetPeakKw' || key === 'expectedPeakKw') &&
+      (!Number.isFinite(numericValue) || numericValue <= 0)
+    ) {
+      return
+    }
+
     onScenarioChange({
       ...scenario,
       [key]:
@@ -89,8 +97,8 @@ export function PeakManager({
           ? value
           : key === 'auditoriumCooling'
             ? Boolean(value)
-          : Number.isFinite(Number(value))
-            ? Number(value)
+          : Number.isFinite(numericValue)
+            ? numericValue
             : 0,
     })
   }
@@ -104,6 +112,7 @@ export function PeakManager({
           <label>
             <input
               type="number"
+              min={1}
               aria-label="목표 피크(kW)"
               value={scenario.targetPeakKw}
               onChange={(event) => update('targetPeakKw', event.target.value)}
@@ -117,6 +126,7 @@ export function PeakManager({
           <label>
             <input
               type="number"
+              min={1}
               aria-label="예상 피크(kW)"
               value={scenario.expectedPeakKw}
               onChange={(event) => update('expectedPeakKw', event.target.value)}

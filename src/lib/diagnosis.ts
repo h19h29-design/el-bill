@@ -58,24 +58,44 @@ const describePeriodIssue = (code: string, period?: string) => {
   return `${periodLabel}이 올바르지 않습니다.`
 }
 
+export interface CurrentPlanResolution {
+  plan: RatePlan | null
+  exact: boolean
+  issue?: string
+}
+
+export const resolveCurrentPlan = (
+  profile: SchoolProfile,
+  ratePlans: RatePlan[],
+): CurrentPlanResolution => {
+  const plan = ratePlans.find(
+    (candidate) =>
+      matches(candidate.contractType, profile.contractType) &&
+      matches(candidate.voltageType, profile.voltageType) &&
+      matches(candidate.planName, profile.currentPlan),
+  )
+
+  if (plan) return { plan, exact: true }
+
+  return {
+    plan: null,
+    exact: false,
+    issue: '현재 요금제를 요금표에서 확인해 주세요.',
+  }
+}
+
 export const findCurrentPlan = (
   profile: SchoolProfile,
   ratePlans: RatePlan[],
-) => findExactRatePlan(profile, ratePlans)
+) => resolveCurrentPlan(profile, ratePlans).plan
 
 export const findExactRatePlan = (
   profile: SchoolProfile,
   ratePlans: RatePlan[],
-) =>
-  ratePlans.find(
-    (plan) =>
-      matches(plan.contractType, profile.contractType) &&
-      matches(plan.voltageType, profile.voltageType) &&
-      matches(plan.planName, profile.currentPlan),
-  ) ?? null
+) => resolveCurrentPlan(profile, ratePlans).plan
 
 const configurationRequiredMessage =
-  '요금제 설정이 필요합니다. 현재 프로필의 계약종별, 수전전압, 현재 요금제와 정확히 일치하는 요금제를 설정에서 확인해야 자동진단을 진행할 수 있습니다.'
+  '요금제 설정이 필요합니다. 현재 요금제를 요금표에서 확인해 주세요. 현재 프로필의 계약종별, 수전전압, 현재 요금제와 정확히 일치하는 요금제를 설정에서 확인해야 자동진단을 진행할 수 있습니다.'
 
 const createConfigurationBlockedComparison = (
   profile: SchoolProfile,
@@ -395,7 +415,8 @@ export const buildAutoDiagnosis = ({
 }): AutoDiagnosisResult => {
   const periodValidation = validateBillPeriods(bills, 12)
   const normalizedBills = periodValidation.normalizedBills
-  const currentPlan = findCurrentPlan(profile, ratePlans)
+  const currentPlanResolution = resolveCurrentPlan(profile, ratePlans)
+  const currentPlan = currentPlanResolution.plan
   const confidence = assessDataConfidence(normalizedBills)
   const recentBills = periodValidation.recentConsecutiveBills.slice(-12)
   const lastBill = recentBills.at(-1)
@@ -424,7 +445,11 @@ export const buildAutoDiagnosis = ({
       documentBlockReason: configurationRequiredMessage,
       finalJudgement: '추가 검토 필요',
       judgementBasis: configurationRequiredMessage,
-      missingDataNotes: [configurationRequiredMessage, rateChangeCaution],
+      missingDataNotes: [
+        currentPlanResolution.issue ?? configurationRequiredMessage,
+        configurationRequiredMessage,
+        rateChangeCaution,
+      ],
     }
   }
 

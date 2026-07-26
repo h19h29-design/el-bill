@@ -20,6 +20,7 @@ import {
   createDocumentPackage,
   createPdfBlob,
 } from '../../lib/documentExport'
+import { sanitizeDownloadStem } from '../../lib/downloadNames'
 import type { PeakOperationPlan } from '../../lib/peakOperations'
 
 interface DocumentGeneratorProps {
@@ -44,13 +45,13 @@ const saveBlob = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url)
 }
 
-const renderTextDocument = (title: string, body: string) => {
+const renderTextDocument = (title: string, body: string, displaySchoolName: string) => {
   const [, ...rest] = body.split('\n')
   return (
     <>
       <div className="doc-masthead">
         <span>서울특별시교육청 전기요금 진단 자료</span>
-        <strong>A고등학교</strong>
+        <strong>{displaySchoolName}</strong>
       </div>
       <h3>{title}</h3>
       <div className="doc-alert">
@@ -161,7 +162,10 @@ export function DocumentGenerator({
         letter: letterPdf,
         application: applicationPdf,
       })
-      saveBlob(blob, 'A고등학교_전기요금_변경_문서묶음.zip')
+      saveBlob(
+        blob,
+        `${sanitizeDownloadStem(profile.displaySchoolName)}_전기요금_변경_문서묶음.zip`,
+      )
       setStatus('PDF 3종이 포함된 문서 묶음 ZIP 다운로드를 시작했습니다.')
     } catch {
       setStatus('문서 묶음 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.')
@@ -357,7 +361,11 @@ export function DocumentGenerator({
             id="plan-preview"
             className={selectedId === 'plan-preview' ? 'document-preview official-document visible' : 'document-preview official-document'}
           >
-            {renderTextDocument('예산절감을 위한 전기요금제 변경 계획(안)', bundle.planText)}
+            {renderTextDocument(
+              '예산절감을 위한 전기요금제 변경 계획(안)',
+              bundle.planText,
+              profile.displaySchoolName,
+            )}
             <table className="document-summary-table">
               <tbody>
                 {bundle.calculationBreakdown.map((row) => (
@@ -376,7 +384,11 @@ export function DocumentGenerator({
             id="letter-preview"
             className={selectedId === 'letter-preview' ? 'document-preview official-document visible' : 'document-preview official-document'}
           >
-            {renderTextDocument(`${profile.displaySchoolName} 전기요금 변경 신청`, bundle.kepcoLetterText)}
+            {renderTextDocument(
+              `${profile.displaySchoolName} 전기요금 변경 신청`,
+              bundle.kepcoLetterText,
+              profile.displaySchoolName,
+            )}
             <footer>{rateChangeCaution} 붙임 서류와 원본 청구서 대조 후 제출.</footer>
           </div>
           <div

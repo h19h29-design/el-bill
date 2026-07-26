@@ -218,7 +218,11 @@ function App() {
             />
           )}
           {activeView === 'school' && (
-            <SchoolProfilePanel profile={profile} onProfileChange={setProfile} />
+            <SchoolProfilePanel
+              profile={profile}
+              ratePlans={ratePlans}
+              onProfileChange={setProfile}
+            />
           )}
           {activeView === 'bills' && (
             <BillUpload
@@ -332,11 +336,13 @@ const viewMeta: Record<ViewKey, { step: string; title: string; description: stri
 
 interface SchoolProfilePanelProps {
   profile: SchoolProfile
+  ratePlans: RatePlan[]
   onProfileChange: (profile: SchoolProfile) => void
 }
 
 function SchoolProfilePanel({
   profile,
+  ratePlans,
   onProfileChange,
 }: SchoolProfilePanelProps) {
   const update = (key: keyof SchoolProfile, value: string) => {
@@ -346,6 +352,52 @@ function SchoolProfilePanel({
         ? Number(value)
         : value,
     })
+  }
+
+  const contractTypes = Array.from(new Set(ratePlans.map((plan) => plan.contractType)))
+  const voltageTypes = Array.from(
+    new Set(
+      ratePlans
+        .filter((plan) => plan.contractType === profile.contractType)
+        .map((plan) => plan.voltageType),
+    ),
+  )
+  const currentPlanOptions = ratePlans.filter(
+    (plan) =>
+      plan.contractType === profile.contractType &&
+      plan.voltageType === profile.voltageType,
+  )
+  const hasCurrentPlan = currentPlanOptions.some(
+    (plan) => plan.planName === profile.currentPlan,
+  )
+
+  const setTariffProfile = (
+    contractType: string,
+    voltageType: string,
+    currentPlan?: string,
+  ) => {
+    const compatiblePlans = ratePlans.filter(
+      (plan) =>
+        plan.contractType === contractType && plan.voltageType === voltageType,
+    )
+    const nextPlan = compatiblePlans.find((plan) => plan.planName === currentPlan)
+      ?? compatiblePlans[0]
+    onProfileChange({
+      ...profile,
+      contractType,
+      voltageType,
+      currentPlan: nextPlan?.planName ?? '',
+    })
+  }
+
+  const updateContractType = (contractType: string) => {
+    const compatiblePlans = ratePlans.filter((plan) => plan.contractType === contractType)
+    const voltageType = compatiblePlans.some(
+      (plan) => plan.voltageType === profile.voltageType,
+    )
+      ? profile.voltageType
+      : compatiblePlans[0]?.voltageType ?? ''
+    setTariffProfile(contractType, voltageType)
   }
 
   return (
@@ -384,9 +436,6 @@ function SchoolProfilePanel({
             ['customerNumber', '고객번호'],
             ['address', '전기사용장소'],
             ['kepcoBranch', '한전 지사'],
-            ['contractType', '계약종별'],
-            ['voltageType', '수전전압'],
-            ['currentPlan', '현재 요금제'],
             ['contractPowerKw', '계약전력(kW)'],
             ['appliedPowerKw', '요금적용전력(kW)'],
             ['managerName', '담당자명'],
@@ -402,7 +451,47 @@ function SchoolProfilePanel({
               />
             </label>
           ))}
+          <label>
+            계약종별
+            <select value={profile.contractType} onChange={(event) => updateContractType(event.target.value)}>
+              <option value="">선택</option>
+              {contractTypes.map((contractType) => (
+                <option key={contractType} value={contractType}>{contractType}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            수전전압
+            <select
+              value={profile.voltageType}
+              onChange={(event) => setTariffProfile(profile.contractType, event.target.value)}
+            >
+              <option value="">선택</option>
+              {voltageTypes.map((voltageType) => (
+                <option key={voltageType} value={voltageType}>{voltageType}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            현재 요금제
+            <select
+              value={profile.currentPlan}
+              onChange={(event) =>
+                setTariffProfile(profile.contractType, profile.voltageType, event.target.value)
+              }
+            >
+              <option value="">선택</option>
+              {currentPlanOptions.map((plan) => (
+                <option key={plan.id} value={plan.planName}>{plan.planName}</option>
+              ))}
+            </select>
+          </label>
         </div>
+        {!hasCurrentPlan && (
+          <p className="status-line" role="status">
+            현재 계약종별과 수전전압에 맞는 요금제를 선택해 주세요. 일치하는 요금제가 없으면 설정에서 요금표를 확인해야 합니다.
+          </p>
+        )}
       </section>
 
       <section className="panel muted-panel">

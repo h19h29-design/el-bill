@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { defaultScenario } from '../data/sampleBills'
+import { getPeakRiskLevel } from './peak'
 import { buildPeakOperationPlan } from './peakOperations'
 
 describe('peak operation sequencing', () => {
+  it('never reports a non-positive target peak as safe', () => {
+    expect(getPeakRiskLevel(0, 400)).toBe('위험')
+    expect(getPeakRiskLevel(-1, 400)).toBe('위험')
+  })
+
   it('enumerates every configured EHP group at five-minute intervals', () => {
     const plan = buildPeakOperationPlan({
       ...defaultScenario,

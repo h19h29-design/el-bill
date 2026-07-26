@@ -8,6 +8,7 @@ import {
   comparePlansForDiagnosis,
   findExactRatePlan,
   getDataRecognitionRate,
+  resolveCurrentPlan,
   summarizeWorkbookRecognition,
 } from './diagnosis'
 
@@ -146,6 +147,17 @@ describe('automatic diagnosis harness', () => {
     ).toBeNull()
   })
 
+  it('reports an inexact current-plan resolver result without a fallback plan', () => {
+    const resolution = resolveCurrentPlan(
+      { ...defaultSchoolProfile, currentPlan: '오타 요금제' },
+      defaultRatePlans,
+    )
+
+    expect(resolution.exact).toBe(false)
+    expect(resolution.plan).toBeNull()
+    expect(resolution.issue).toBe('현재 요금제를 요금표에서 확인해 주세요.')
+  })
+
   it('blocks diagnosis and documents when no exact active plan is configured', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills,
@@ -161,6 +173,7 @@ describe('automatic diagnosis harness', () => {
     expect(diagnosis.canGenerateChangeDocuments).toBe(false)
     expect(diagnosis.documentBlockReason).toContain('요금제 설정')
     expect(diagnosis.comparison.savingWon).toBe(0)
+    expect(diagnosis.missingDataNotes).toContain('현재 요금제를 요금표에서 확인해 주세요.')
   })
 
   it('does not calculate a three-year estimate from gapped calendar periods', () => {
