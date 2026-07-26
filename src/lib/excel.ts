@@ -12,6 +12,7 @@ import {
 import {
   parseStrictCalendarValue,
   parseStrictMonth,
+  parseStrictYear,
 } from './calendar'
 
 export interface ParsedSheet {
@@ -785,7 +786,7 @@ export const mapRowsToBills = (
 ): MonthlyBill[] =>
   rows
     .map((row, index) => {
-      const year = asNumber(row[mapping.year])
+      const year = parseStrictYear(row[mapping.year]) ?? 0
       const month = asMonth(row[mapping.month])
       const usageKwh = asNumber(row[mapping.usageKwh])
       const totalBillWon = asNumber(row[mapping.totalBillWon])

@@ -10,6 +10,10 @@ import {
 import { defaultCalculationSettings } from './calculationSettings'
 import { samplePowerPlannerDataSource } from '../data/samplePowerPlanner'
 import {
+  applyPeakScenarioIntent,
+  applyRatePlanIntent,
+} from './persistedIntents'
+import {
   cleanupExpiredStorageSnapshots,
   getNextStorageSnapshotExpiry,
   getNextStorageExpiry,
@@ -372,6 +376,93 @@ describe('storage mutation lock and patch protocol', () => {
     expect(
       readStorageSnapshot(now)?.data.profile.displaySchoolName,
     ).toBe('두 번째')
+  })
+
+  it('applies rapid rate-plan field intents to the latest locked collection', async () => {
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'rate-intent-session')).ok,
+    ).toBe(true)
+    const locks = installManualLock()
+    const planId = defaultRatePlans[0].id
+    const first = updateStorageSnapshot('rate-intent-session', (latest) => ({
+      ratePlans: applyRatePlanIntent(latest.ratePlans, {
+        type: 'patch',
+        planId,
+        patch: { baseRateWonPerKw: 6_111 },
+      }),
+    }))
+    const second = updateStorageSnapshot('rate-intent-session', (latest) => ({
+      ratePlans: applyRatePlanIntent(latest.ratePlans, {
+        type: 'patch',
+        planId,
+        patch: { seasonRates: { summer: 123 } },
+      }),
+    }))
+
+    await locks.run(0)
+    await first
+    await locks.run(1)
+    await second
+
+    expect(readStorageSnapshot(now)?.data.ratePlans[0]).toMatchObject({
+      baseRateWonPerKw: 6_111,
+      seasonRates: expect.objectContaining({ summer: 123 }),
+    })
+  })
+
+  it('applies rapid scenario field intents to the latest locked object', async () => {
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'scenario-intent-session')).ok,
+    ).toBe(true)
+    const locks = installManualLock()
+    const first = updateStorageSnapshot('scenario-intent-session', (latest) => ({
+      scenario: applyPeakScenarioIntent(latest.scenario, {
+        type: 'patch',
+        patch: { targetPeakKw: 611 },
+      }),
+    }))
+    const second = updateStorageSnapshot('scenario-intent-session', (latest) => ({
+      scenario: applyPeakScenarioIntent(latest.scenario, {
+        type: 'patch',
+        patch: { expectedPeakKw: 622 },
+      }),
+    }))
+
+    await locks.run(0)
+    await first
+    await locks.run(1)
+    await second
+
+    expect(readStorageSnapshot(now)?.data.scenario).toMatchObject({
+      targetPeakKw: 611,
+      expectedPeakKw: 622,
+    })
+  })
+
+  it('uses lock order for same-field intent last-writer-wins', async () => {
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'intent-order-session')).ok,
+    ).toBe(true)
+    const locks = installManualLock()
+    const first = updateStorageSnapshot('intent-order-session', (latest) => ({
+      scenario: applyPeakScenarioIntent(latest.scenario, {
+        type: 'patch',
+        patch: { targetPeakKw: 611 },
+      }),
+    }))
+    const second = updateStorageSnapshot('intent-order-session', (latest) => ({
+      scenario: applyPeakScenarioIntent(latest.scenario, {
+        type: 'patch',
+        patch: { targetPeakKw: 633 },
+      }),
+    }))
+
+    await locks.run(0)
+    await first
+    await locks.run(1)
+    await second
+
+    expect(readStorageSnapshot(now)?.data.scenario.targetPeakKw).toBe(633)
   })
 
   it('does not resurrect a session when a stale edit is queued after reset', async () => {

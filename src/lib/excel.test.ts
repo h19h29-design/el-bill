@@ -722,6 +722,44 @@ describe('synthetic workbook parser harness', () => {
   })
 
   it.each([
+    2026.5,
+    '2.026e3',
+    '+2026',
+    '0x7ea',
+    '002026',
+    'x2026',
+    '2026년',
+  ])('rejects malformed standalone mapped year %s', (year) => {
+    expect(
+      mapRowsToBills(
+        [{ 연도: year, 월: 6, 사용량: 42_000, '총 전기요금': 6_420_000 }],
+        {
+          year: '연도',
+          month: '월',
+          usageKwh: '사용량',
+          totalBillWon: '총 전기요금',
+        },
+        { appliedPowerKw: 620, currentPlan },
+      ),
+    ).toEqual([])
+  })
+
+  it.each([2026, '2026'])('accepts strict standalone mapped year %s', (year) => {
+    expect(
+      mapRowsToBills(
+        [{ 연도: year, 월: 6, 사용량: 42_000, '총 전기요금': 6_420_000 }],
+        {
+          year: '연도',
+          month: '월',
+          usageKwh: '사용량',
+          totalBillWon: '총 전기요금',
+        },
+        { appliedPowerKw: 620, currentPlan },
+      )[0]?.year,
+    ).toBe(2026)
+  })
+
+  it.each([
     ['negative usage', { 사용량: -42_000 }],
     ['non-finite total', { '총 전기요금': Number.POSITIVE_INFINITY }],
     ['negative optional charge', { 부가세: -1 }],

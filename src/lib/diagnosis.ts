@@ -25,6 +25,7 @@ import {
   findUniqueRatePlanById,
   isValidMonthlyBill,
   isValidRatePlan,
+  normalizeRatePlanIdentityPart,
   validateSchoolProfile,
   validateRatePlanCollection,
 } from './domainValidation'
@@ -62,7 +63,8 @@ const ancillaryRatioBounds = {
 } as const
 
 const matches = (value: string, expected: string) =>
-  value.trim().replace(/\s/g, '') === expected.trim().replace(/\s/g, '')
+  normalizeRatePlanIdentityPart(value) ===
+  normalizeRatePlanIdentityPart(expected)
 
 const describePeriodIssue = (code: string, period?: string) => {
   const periodLabel = period ? `${period} 고지서 기간` : '고지서 기간'

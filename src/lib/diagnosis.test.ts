@@ -112,6 +112,21 @@ const exactTwelveBills = Array.from({ length: 12 }, (_, index) =>
 )
 
 describe('automatic diagnosis harness', () => {
+  it('resolves Unicode-equivalent profile and tariff tuple text', () => {
+    const plan = makePlan('unicode-plan', '선택요금I', 1_000, 100)
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: ' 교 육 용 ( 갑 ) '.normalize('NFD'),
+      voltageType: '고압Ａ'.normalize('NFD'),
+      currentPlan: '선택요금Ⅰ'.normalize('NFD'),
+    }
+
+    expect(resolveCurrentPlan(profile, [plan])).toMatchObject({
+      exact: true,
+      plan,
+    })
+  })
+
   it.each([
     [1, false, false, false],
     [11, false, false, false],

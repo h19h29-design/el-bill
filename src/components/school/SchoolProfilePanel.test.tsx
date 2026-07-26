@@ -9,6 +9,28 @@ import { defaultSchoolProfile } from '../../data/sampleBills'
 afterEach(cleanup)
 
 describe('school profile validation', () => {
+  it('emits a field intent instead of a stale full profile', async () => {
+    const onProfileChange = vi.fn(async () => true)
+    render(
+      <SchoolProfilePanel
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onProfileChange={onProfileChange}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('화면 표시명'), {
+      target: { value: '변경 학교' },
+    })
+
+    await waitFor(() =>
+      expect(onProfileChange).toHaveBeenCalledWith({
+        type: 'patch',
+        patch: { displaySchoolName: '변경 학교' },
+      }),
+    )
+  })
+
   it.each([
     ['계약전력(kW)', '-1'],
     ['요금적용전력(kW)', '0'],

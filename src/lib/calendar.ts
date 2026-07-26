@@ -30,6 +30,15 @@ export const parseStrictMonth = (value: unknown): number | null => {
   return Number(match[1])
 }
 
+export const parseStrictYear = (value: unknown): number | null => {
+  if (typeof value === 'number') {
+    return isValidYear(value) ? value : null
+  }
+  if (typeof value !== 'string' || !/^\d{4}$/.test(value)) return null
+  const year = Number(value)
+  return isValidYear(year) ? year : null
+}
+
 export const parseStrictCalendarValue = (
   value: unknown,
 ): CalendarParts | null => {

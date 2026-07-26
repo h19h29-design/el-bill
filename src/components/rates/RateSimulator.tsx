@@ -12,6 +12,7 @@ import { formatWon } from '../../lib/calculations'
 import { getCalculationModeLabel } from '../../lib/calculationSettings'
 import { rateChangeCaution } from '../../lib/documentTemplates'
 import { PlanCandidateTable } from '../diagnosis/PlanCandidateTable'
+import type { PeakScenarioIntent } from '../../lib/persistedIntents'
 
 const scenarioSchema = z.object({
   targetPeakKw: z.coerce.number().min(1),
@@ -30,7 +31,7 @@ interface RateSimulatorProps {
   comparison: PlanCandidateComparison
   calculationSettings: CalculationSettings
   scenario: PeakScenario
-  onScenarioChange: (scenario: PeakScenario) => Promise<boolean>
+  onScenarioChange: (intent: PeakScenarioIntent) => Promise<boolean>
 }
 
 const comparisonTabs = [
@@ -58,6 +59,7 @@ export function RateSimulator({
   const form = useForm<PeakScenario>({
     defaultValues: scenario,
   })
+  const dirtyScenarioFields = form.formState.dirtyFields
   const submitScenario = async (values: PeakScenario) => {
     const parsed = scenarioSchema.safeParse(values)
     if (!parsed.success) {
@@ -76,9 +78,15 @@ export function RateSimulator({
       return
     }
     setScenarioErrors({})
+    const patch = Object.fromEntries(
+      (Object.keys(parsed.data) as Array<keyof typeof parsed.data>)
+        .filter((field) => dirtyScenarioFields[field])
+        .map((field) => [field, parsed.data[field]]),
+    ) as Partial<PeakScenario>
+    if (Object.keys(patch).length === 0) return
     await onScenarioChange({
-      ...scenario,
-      ...parsed.data,
+      type: 'patch',
+      patch,
     }).catch(() => undefined)
   }
   const reviewOnlyCandidate = candidates.find(

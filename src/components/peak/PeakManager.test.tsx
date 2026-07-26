@@ -9,6 +9,33 @@ import { PeakManager } from './PeakManager'
 afterEach(cleanup)
 
 describe('peak manager EHP input safety', () => {
+  it('emits independent field intents for rapid scenario edits', () => {
+    const onScenarioChange = vi.fn(async () => true)
+    render(
+      <PeakManager
+        scenario={defaultScenario}
+        onScenarioChange={onScenarioChange}
+        peakOperationPlan={buildPeakOperationPlan(defaultScenario)}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('목표 피크(kW)'), {
+      target: { value: '610' },
+    })
+    fireEvent.change(screen.getByLabelText('예상 피크(kW)'), {
+      target: { value: '620' },
+    })
+
+    expect(onScenarioChange).toHaveBeenNthCalledWith(1, {
+      type: 'patch',
+      patch: { targetPeakKw: 610 },
+    })
+    expect(onScenarioChange).toHaveBeenNthCalledWith(2, {
+      type: 'patch',
+      patch: { expectedPeakKw: 620 },
+    })
+  })
+
   it.each([
     ['본관 EHP 그룹 수', '0'],
     ['별관 EHP 그룹 수', '-1'],

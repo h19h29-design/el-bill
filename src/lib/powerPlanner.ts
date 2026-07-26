@@ -7,10 +7,9 @@ import type {
   PowerPlannerRecord,
 } from '../types'
 import {
-  isValidCalendarDate,
-  isValidCalendarMonth,
   parseStrictCalendarValue,
   parseStrictMonth,
+  parseStrictYear,
   type CalendarParts,
 } from './calendar'
 
@@ -54,33 +53,6 @@ const asDate = (value: unknown) => {
   const month = String(inferred.month).padStart(2, '0')
   if (!inferred.day) return `${inferred.year}-${month}`
   return `${inferred.year}-${month}-${String(inferred.day).padStart(2, '0')}`
-}
-
-const asYear = (...values: unknown[]) => {
-  for (const value of values) {
-    const direct = asNumber(value)
-    if (
-      typeof direct === 'number' &&
-      Number.isInteger(direct) &&
-      direct >= 2000 &&
-      direct <= 2100
-    ) {
-      return direct
-    }
-    const inferred = inferYearMonthDay(value).year
-    if (inferred) return inferred
-  }
-  return undefined
-}
-
-const asMonthValue = (...values: unknown[]) => {
-  for (const value of values) {
-    const inferred = inferYearMonthDay(value).month
-    if (inferred) return inferred
-    const direct = parseStrictMonth(value)
-    if (direct !== null) return direct
-  }
-  return undefined
 }
 
 const inferHour = (value: unknown) => {
@@ -210,6 +182,44 @@ const optionalNumberInRange = (
     value <= maximum &&
     (!integer || Number.isInteger(value)))
 
+const canonicalPeriod = (
+  record: Record<string, unknown>,
+): CalendarParts | null | undefined => {
+  const hasDate = record.date !== undefined
+  const dateParts = hasDate
+    ? parseStrictCalendarValue(record.date)
+    : null
+  if (hasDate && !dateParts) return null
+
+  const hasSplitPeriod =
+    record.year !== undefined ||
+    record.month !== undefined ||
+    record.day !== undefined
+  if (dateParts) {
+    if (
+      (record.year !== undefined && record.year !== dateParts.year) ||
+      (record.month !== undefined && record.month !== dateParts.month) ||
+      (record.day !== undefined && record.day !== dateParts.day)
+    ) {
+      return null
+    }
+    return dateParts
+  }
+  if (!hasSplitPeriod) return undefined
+  if (
+    typeof record.year !== 'number' ||
+    typeof record.month !== 'number'
+  ) {
+    return null
+  }
+  const candidate = `${record.year}-${String(record.month).padStart(2, '0')}${
+    record.day === undefined
+      ? ''
+      : `-${String(record.day).padStart(2, '0')}`
+  }`
+  return parseStrictCalendarValue(candidate)
+}
+
 export const isValidPowerPlannerRecord = (
   value: unknown,
 ): value is PowerPlannerRecord => {
@@ -250,29 +260,25 @@ export const isValidPowerPlannerRecord = (
   ) {
     return false
   }
+  const period = canonicalPeriod(record)
+  if (period === null) return false
 
   switch (record.dataType) {
     case 'hourlyUsage':
       return (
-        isValidCalendarDate(record.date) &&
+        period?.day !== undefined &&
         typeof record.hour === 'number' &&
         typeof record.usageKwh === 'number'
       )
     case 'dailyUsage':
       return (
-        isValidCalendarDate(record.date) &&
+        period?.day !== undefined &&
         typeof record.usageKwh === 'number'
       )
     case 'monthlyUsage':
       return (
         typeof record.usageKwh === 'number' &&
-        (isValidCalendarMonth(record.date) ||
-          (Number.isInteger(record.year) &&
-            Number(record.year) >= 2000 &&
-            Number(record.year) <= 2100 &&
-            Number.isInteger(record.month) &&
-            Number(record.month) >= 1 &&
-            Number(record.month) <= 12))
+        period !== undefined
       )
     case 'maxDemand':
       return typeof record.maxDemandKw === 'number'
@@ -298,14 +304,30 @@ const canonicalCalendarValue = (value: string | undefined) => {
 
 const normalizePowerPlannerRecord = (
   record: PowerPlannerRecord,
-): PowerPlannerRecord => ({
-  ...record,
-  id: record.id.trim(),
-  date: canonicalCalendarValue(record.date),
-  loadType: record.loadType?.trim() || undefined,
-  patternLabel: record.patternLabel?.trim() || undefined,
-  patternSummary: record.patternSummary?.trim() || undefined,
-})
+): PowerPlannerRecord => {
+  const period = canonicalPeriod(record as unknown as Record<string, unknown>)
+  const date =
+    period && period !== null
+      ? canonicalCalendarValue(
+          `${period.year}-${String(period.month).padStart(2, '0')}${
+            period.day === undefined
+              ? ''
+              : `-${String(period.day).padStart(2, '0')}`
+          }`,
+        )
+      : undefined
+  return {
+    ...record,
+    id: record.id.trim(),
+    date,
+    year: undefined,
+    month: undefined,
+    day: undefined,
+    loadType: record.loadType?.trim() || undefined,
+    patternLabel: record.patternLabel?.trim() || undefined,
+    patternSummary: record.patternSummary?.trim() || undefined,
+  }
+}
 
 export const mapRowsToPowerPlannerRecords = (
   rows: Record<string, unknown>[],
@@ -315,13 +337,30 @@ export const mapRowsToPowerPlannerRecords = (
   return rows
     .map((row, index) => {
       const dateValue = row[mapping.date]
+      const dateParts = inferYearMonthDay(dateValue)
+      const yearValue = row[mapping.year]
+      const monthValue = row[mapping.month]
+      const hasYearValue = Boolean(mapping.year && normalize(yearValue))
+      const hasMonthValue = Boolean(mapping.month && normalize(monthValue))
+      const parsedYear = hasYearValue
+        ? parseStrictYear(yearValue)
+        : dateParts.year
+      const parsedMonth = hasMonthValue
+        ? parseStrictMonth(monthValue)
+        : dateParts.month
+      if (
+        (hasYearValue && parsedYear === null) ||
+        (hasMonthValue && parsedMonth === null)
+      ) {
+        return null
+      }
       const record: PowerPlannerRecord = {
         id: `pp-${dataType}-${index}-${Date.now()}`,
         dataType,
         date: asDate(dateValue),
-        year: asYear(row[mapping.year], dateValue),
-        month: asMonthValue(row[mapping.month], dateValue),
-        day: asNumber(row[mapping.day]) ?? inferYearMonthDay(dateValue).day,
+        year: parsedYear ?? undefined,
+        month: parsedMonth ?? undefined,
+        day: asNumber(row[mapping.day]) ?? dateParts.day,
         hour: inferHour(row[mapping.hour]),
         usageKwh: asNumber(row[mapping.usageKwh]),
         maxDemandKw: asNumber(row[mapping.maxDemandKw]),

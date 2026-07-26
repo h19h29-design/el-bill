@@ -152,4 +152,26 @@ describe('rate plan domain validation', () => {
 
     expect(findUniqueRatePlanById(duplicated, defaultRatePlans[0].id)).toBeNull()
   })
+
+  it('collides Unicode-equivalent identifiers and Korean tuples', () => {
+    const original = {
+      ...defaultRatePlans[0],
+      id: 'rate-1',
+      contractType: '교육용(갑)',
+      voltageType: '고압A',
+      planName: '선택요금I',
+    }
+    const equivalent = {
+      ...defaultRatePlans[1],
+      id: 'ｒａｔｅ－１',
+      contractType: ' 교 육 용 ( 갑 ) '.normalize('NFD'),
+      voltageType: '고압Ａ'.normalize('NFD'),
+      planName: '선택요금Ⅰ'.normalize('NFD'),
+    }
+    const validation = validateRatePlanCollection([original, equivalent])
+
+    expect(validation.issues.join(' ')).toContain('식별값')
+    expect(validation.issues.join(' ')).toContain('계약종별')
+    expect(findUniqueRatePlanById([original, equivalent], 'rate-1')).toBeNull()
+  })
 })

@@ -36,6 +36,7 @@ export const billsStorageKey = 'el-bill:bills'
 export const profileStorageKey = 'el-bill:profile'
 export const scenarioStorageKey = 'el-bill:scenario'
 export const ratePlansStorageKey = 'el-bill:rate-plans'
+export const calculationSettingsStorageKey = 'el-bill:calculation-settings'
 
 export interface StorageSession {
   createdAt: string
@@ -137,6 +138,7 @@ const legacyDataKeys = [
   profileStorageKey,
   scenarioStorageKey,
   ratePlansStorageKey,
+  calculationSettingsStorageKey,
   powerPlannerStorageKey,
   dataProvenanceStorageKey,
 ] as const
@@ -312,6 +314,9 @@ const parseStorageSnapshot = (
       rawData?.powerPlanner,
     )
     const normalizedScenario = normalizePeakScenario(rawData?.scenario)
+    const hasValidCalculationSettings = isCalculationSettings(
+      rawData?.calculationSettings,
+    )
     const rawProvenance =
       rawData?.provenance && typeof rawData.provenance === 'object'
         ? (rawData.provenance as DataProvenance)
@@ -320,10 +325,16 @@ const parseStorageSnapshot = (
       ? {
           ...rawData,
           scenario: normalizedScenario.scenario ?? rawData.scenario,
+          calculationSettings: hasValidCalculationSettings
+            ? rawData.calculationSettings
+            : defaultCalculationSettings,
           powerPlanner: normalizedPowerPlanner.dataSource,
           provenance: rawProvenance
             ? {
                 ...rawProvenance,
+                bills: hasValidCalculationSettings
+                  ? rawProvenance.bills
+                  : 'sample',
                 powerPlanner: normalizedPowerPlanner.dataSource
                   ? rawProvenance.powerPlanner
                   : 'none',
@@ -1044,6 +1055,24 @@ const migrateLegacyPerKeyStorage = (
   const profile = payloads.get(profileStorageKey)?.data
   const scenario = payloads.get(scenarioStorageKey)?.data
   const ratePlans = payloads.get(ratePlansStorageKey)?.data
+  const calculationSettings = payloads.get(
+    calculationSettingsStorageKey,
+  )?.data
+  const validProfile = isSchoolProfile(profile)
+  const normalizedScenario = normalizePeakScenario(scenario)
+  const validRatePlans = validateRatePlanCollection(ratePlans).valid
+  const validCalculationSettings = isCalculationSettings(calculationSettings)
+  const usedFallbackDomainData =
+    !validProfile ||
+    !normalizedScenario.scenario ||
+    !validRatePlans ||
+    !validCalculationSettings
+  safeProvenance.bills =
+    bills &&
+    provenance.bills === 'uploaded' &&
+    !usedFallbackDomainData
+      ? 'uploaded'
+      : 'sample'
   const migrationSnapshot: StorageSnapshot = {
     schemaVersion: 1,
     revision: 0,
@@ -1054,13 +1083,15 @@ const migrateLegacyPerKeyStorage = (
     },
     data: {
       bills: bills ?? fallbackData.bills,
-      profile: isSchoolProfile(profile) ? profile : fallbackData.profile,
+      profile: validProfile ? profile : fallbackData.profile,
       scenario:
-        normalizePeakScenario(scenario).scenario ?? fallbackData.scenario,
-      ratePlans: validateRatePlanCollection(ratePlans).valid
+        normalizedScenario.scenario ?? fallbackData.scenario,
+      ratePlans: validRatePlans
         ? (ratePlans as RatePlan[])
         : fallbackData.ratePlans,
-      calculationSettings: fallbackData.calculationSettings,
+      calculationSettings: validCalculationSettings
+        ? calculationSettings
+        : fallbackData.calculationSettings,
       powerPlanner,
       provenance: safeProvenance,
     },

@@ -12,13 +12,20 @@ import {
   defaultCalculationSettings,
   validateCalculationSettings,
 } from '../../lib/calculationSettings'
+import {
+  applyCalculationSettingsIntent,
+  applyRatePlanIntent,
+  type CalculationSettingsIntent,
+  type RatePlanIntent,
+  type RatePlanPatch,
+} from '../../lib/persistedIntents'
 
 interface RatePlanSettingsProps {
   plans: RatePlan[]
-  onPlansChange: (plans: RatePlan[]) => Promise<boolean>
+  onPlansChange: (intent: RatePlanIntent) => Promise<boolean>
   calculationSettings: CalculationSettings
   onCalculationSettingsChange: (
-    settings: CalculationSettings,
+    intent: CalculationSettingsIntent,
   ) => Promise<boolean>
 }
 
@@ -26,25 +33,6 @@ const seasonLabels: Record<Season, string> = {
   springAutumn: '봄·가을',
   summer: '여름',
   winter: '겨울',
-}
-
-const normalizeIdentifier = (value: string) =>
-  value.trim().toLocaleLowerCase('ko-KR')
-
-const createUniquePlanId = (plans: RatePlan[]) => {
-  const existing = new Set(plans.map((plan) => normalizeIdentifier(plan.id)))
-  const randomPart =
-    typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  const base = `custom-${randomPart}`
-  let candidate = base
-  let suffix = 2
-  while (existing.has(normalizeIdentifier(candidate))) {
-    candidate = `${base}-${suffix}`
-    suffix += 1
-  }
-  return candidate
 }
 
 export function RatePlanSettings({
@@ -66,61 +54,70 @@ export function RatePlanSettings({
     useState(false)
   const updatePlan = (
     planId: string,
-    updater: (plan: RatePlan) => RatePlan,
+    patch: RatePlanPatch,
     field: string,
   ) => {
-    const nextPlans = plans.map((plan) => (plan.id === planId ? updater(plan) : plan))
-    const validation = validateRatePlanCollection(nextPlans)
-    if (!validation.valid) {
+    const intent = { type: 'patch', planId, patch } as const
+    try {
+      applyRatePlanIntent(plans, intent)
+    } catch (error) {
       setInvalidPlanField({ planId, field })
-      setValidationMessage(validation.issues[0] ?? '요금제 값을 확인해 주세요.')
+      setValidationMessage(
+        error instanceof Error ? error.message : '요금제 값을 확인해 주세요.',
+      )
       return
     }
     setInvalidPlanField(null)
     setValidationMessage('')
-    void onPlansChange(nextPlans).catch(() => undefined)
+    void onPlansChange(intent)
+      .then((saved) => {
+        if (!saved) {
+          setValidationMessage(
+            '요금제를 저장하지 못해 이전 값으로 유지했습니다.',
+          )
+        }
+      })
+      .catch(() => undefined)
   }
 
   const addPlan = () => {
-    const base = plans[0]
-    if (!base) return
-    const existingNames = new Set(
-      plans
-        .filter(
-          (plan) =>
-            plan.contractType.trim() === base.contractType.trim() &&
-            plan.voltageType.trim() === base.voltageType.trim(),
-        )
-        .map((plan) => plan.planName.trim().replace(/\s+/g, '')),
-    )
-    let suffix = 1
-    let planName = '사용자 요금제'
-    while (existingNames.has(planName.trim().replace(/\s+/g, ''))) {
-      suffix += 1
-      planName = `사용자 요금제 ${suffix}`
-    }
-    const nextPlans = [
-      ...plans,
-      {
-        ...base,
-        id: createUniquePlanId(plans),
-        planName,
-        memo: '설정 화면에서 추가',
-      },
-    ]
-    const validation = validateRatePlanCollection(nextPlans)
-    if (!validation.valid) {
-      setValidationMessage(validation.issues[0] ?? '요금제 값을 확인해 주세요.')
+    const intent = { type: 'add' } as const
+    try {
+      applyRatePlanIntent(plans, intent)
+    } catch (error) {
+      setValidationMessage(
+        error instanceof Error ? error.message : '요금제 값을 확인해 주세요.',
+      )
       return
     }
     setValidationMessage('')
-    void onPlansChange(nextPlans).catch(() => undefined)
+    void onPlansChange(intent)
+      .then((saved) => {
+        if (!saved) {
+          setValidationMessage(
+            '요금제를 저장하지 못해 이전 값으로 유지했습니다.',
+          )
+        }
+      })
+      .catch(() => undefined)
   }
 
   const changeCalculationSettings = async (
-    nextSettings: CalculationSettings,
+    intent: CalculationSettingsIntent,
   ) => {
     if (savingCalculationSettings) return
+    let nextSettings: CalculationSettings
+    try {
+      nextSettings = applyCalculationSettingsIntent(
+        calculationSettings,
+        intent,
+      )
+    } catch {
+      nextSettings =
+        intent.type === 'reset'
+          ? defaultCalculationSettings
+          : { ...calculationSettings, ...intent.patch }
+    }
     const validation = validateCalculationSettings(nextSettings)
     if (!validation.valid) {
       setCalculationErrors(validation.errors)
@@ -130,7 +127,7 @@ export function RatePlanSettings({
     setCalculationErrors({})
     setValidationMessage('')
     setSavingCalculationSettings(true)
-    const saved = await onCalculationSettingsChange(nextSettings)
+    const saved = await onCalculationSettingsChange(intent)
       .catch(() => false)
       .finally(() => setSavingCalculationSettings(false))
     if (!saved) {
@@ -145,13 +142,13 @@ export function RatePlanSettings({
     value: string,
   ) => {
     void changeCalculationSettings({
-      ...calculationSettings,
-      [field]: Number(value),
+      type: 'patch',
+      patch: { [field]: Number(value) },
     })
   }
 
   const updateCalculationMode = (mode: CalculationMode) => {
-    void changeCalculationSettings({ ...calculationSettings, mode })
+    void changeCalculationSettings({ type: 'patch', patch: { mode } })
   }
 
   return (
@@ -170,7 +167,7 @@ export function RatePlanSettings({
             className="secondary-button small"
             disabled={savingCalculationSettings}
             onClick={() =>
-              void changeCalculationSettings(defaultCalculationSettings)
+              void changeCalculationSettings({ type: 'reset' })
             }
           >
             계산 설정 초기화
@@ -359,10 +356,11 @@ export function RatePlanSettings({
                     invalidPlanField.field === 'contractType'
                   }
                   onChange={(event) =>
-                    updatePlan(plan.id, (current) => ({
-                      ...current,
-                      contractType: event.target.value,
-                    }), 'contractType')
+                    updatePlan(
+                      plan.id,
+                      { contractType: event.target.value },
+                      'contractType',
+                    )
                   }
                 />
                 <input
@@ -373,10 +371,11 @@ export function RatePlanSettings({
                     invalidPlanField.field === 'voltageType'
                   }
                   onChange={(event) =>
-                    updatePlan(plan.id, (current) => ({
-                      ...current,
-                      voltageType: event.target.value,
-                    }), 'voltageType')
+                    updatePlan(
+                      plan.id,
+                      { voltageType: event.target.value },
+                      'voltageType',
+                    )
                   }
                 />
                 <input
@@ -387,10 +386,11 @@ export function RatePlanSettings({
                     invalidPlanField.field === 'planName'
                   }
                   onChange={(event) =>
-                    updatePlan(plan.id, (current) => ({
-                      ...current,
-                      planName: event.target.value,
-                    }), 'planName')
+                    updatePlan(
+                      plan.id,
+                      { planName: event.target.value },
+                      'planName',
+                    )
                   }
                 />
                 <label>
@@ -406,10 +406,11 @@ export function RatePlanSettings({
                     }
                     value={plan.baseRateWonPerKw}
                     onChange={(event) =>
-                      updatePlan(plan.id, (current) => ({
-                        ...current,
-                        baseRateWonPerKw: Number(event.target.value),
-                      }), 'baseRateWonPerKw')
+                      updatePlan(
+                        plan.id,
+                        { baseRateWonPerKw: Number(event.target.value) },
+                        'baseRateWonPerKw',
+                      )
                     }
                   />
                 </label>
@@ -430,13 +431,15 @@ export function RatePlanSettings({
                       }
                       value={plan.seasonRates[season]}
                       onChange={(event) =>
-                        updatePlan(plan.id, (current) => ({
-                          ...current,
-                          seasonRates: {
-                            ...current.seasonRates,
-                            [season]: Number(event.target.value),
+                        updatePlan(
+                          plan.id,
+                          {
+                            seasonRates: {
+                              [season]: Number(event.target.value),
+                            },
                           },
-                        }), season)
+                          season,
+                        )
                       }
                     />
                   </label>
@@ -447,10 +450,11 @@ export function RatePlanSettings({
                     type="date"
                     value={plan.effectiveFrom}
                     onChange={(event) =>
-                    updatePlan(plan.id, (current) => ({
-                      ...current,
-                      effectiveFrom: event.target.value,
-                    }), 'effectiveFrom')
+                      updatePlan(
+                        plan.id,
+                        { effectiveFrom: event.target.value },
+                        'effectiveFrom',
+                      )
                     }
                   />
                 </label>
@@ -459,10 +463,7 @@ export function RatePlanSettings({
                 value={plan.memo}
                 aria-label="요금제 메모"
                 onChange={(event) =>
-                  updatePlan(plan.id, (current) => ({
-                    ...current,
-                    memo: event.target.value,
-                  }), 'memo')
+                  updatePlan(plan.id, { memo: event.target.value }, 'memo')
                 }
               />
             </article>

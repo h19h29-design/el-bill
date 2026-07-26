@@ -10,6 +10,10 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RatePlan } from '../../types'
 import { defaultCalculationSettings } from '../../lib/calculationSettings'
+import {
+  applyRatePlanIntent,
+  type RatePlanIntent,
+} from '../../lib/persistedIntents'
 import { RatePlanSettings } from './RatePlanSettings'
 
 const plan = (id: string, planName: string): RatePlan => ({
@@ -26,6 +30,36 @@ const plan = (id: string, planName: string): RatePlan => ({
 afterEach(cleanup)
 
 describe('rate-plan settings validation', () => {
+  it('emits field intents instead of stale full collections for rapid edits', () => {
+    const onPlansChange = vi.fn(async (_intent: RatePlanIntent) => true)
+    render(
+      <RatePlanSettings
+        plans={[plan('first', '선택요금Ⅰ')]}
+        onPlansChange={onPlansChange}
+        calculationSettings={defaultCalculationSettings}
+        onCalculationSettingsChange={vi.fn(async () => true)}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('기본요금'), {
+      target: { value: '6100' },
+    })
+    fireEvent.change(screen.getByLabelText('여름'), {
+      target: { value: '105' },
+    })
+
+    expect(onPlansChange).toHaveBeenNthCalledWith(1, {
+      type: 'patch',
+      planId: 'first',
+      patch: { baseRateWonPerKw: 6100 },
+    })
+    expect(onPlansChange).toHaveBeenNthCalledWith(2, {
+      type: 'patch',
+      planId: 'first',
+      patch: { seasonRates: { summer: 105 } },
+    })
+  })
+
   it('shows accessible guidance for an invalid incoming collection', () => {
     render(
       <RatePlanSettings
@@ -43,7 +77,7 @@ describe('rate-plan settings validation', () => {
   })
 
   it('creates collision-proof identifiers when adding plans', async () => {
-    const onPlansChange = vi.fn(async (_plans: RatePlan[]) => true)
+    const onPlansChange = vi.fn(async (_intent: RatePlanIntent) => true)
     vi.spyOn(crypto, 'randomUUID').mockReturnValue(
       '00000000-0000-4000-8000-000000000000',
     )
@@ -63,7 +97,9 @@ describe('rate-plan settings validation', () => {
     fireEvent.click(screen.getByRole('button', { name: '요금제 추가' }))
 
     await waitFor(() => expect(onPlansChange).toHaveBeenCalledTimes(1))
-    const nextPlans = onPlansChange.mock.calls[0][0]
+    const intent = onPlansChange.mock.calls[0][0]
+    expect(intent).toEqual({ type: 'add' })
+    const nextPlans = applyRatePlanIntent([existing], intent)
     expect(new Set(nextPlans.map((item) => item.id)).size).toBe(
       nextPlans.length,
     )
@@ -128,8 +164,8 @@ describe('rate-plan settings validation', () => {
     )
     await waitFor(() =>
       expect(onCalculationSettingsChange).toHaveBeenCalledWith({
-        ...defaultCalculationSettings,
-        mode: 'tariffFull',
+        type: 'patch',
+        patch: { mode: 'tariffFull' },
       }),
     )
 
@@ -168,16 +204,16 @@ describe('rate-plan settings validation', () => {
     })
     await waitFor(() =>
       expect(onCalculationSettingsChange).toHaveBeenCalledWith({
-        ...tariffSettings,
-        fuelAdjustmentWonPerKwh: -4,
+        type: 'patch',
+        patch: { fuelAdjustmentWonPerKwh: -4 },
       }),
     )
 
     fireEvent.click(screen.getByRole('button', { name: '계산 설정 초기화' }))
     await waitFor(() =>
-      expect(onCalculationSettingsChange).toHaveBeenCalledWith(
-        defaultCalculationSettings,
-      ),
+      expect(onCalculationSettingsChange).toHaveBeenCalledWith({
+        type: 'reset',
+      }),
     )
   })
 

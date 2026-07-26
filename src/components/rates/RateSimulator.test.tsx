@@ -24,7 +24,7 @@ const diagnosis = buildAutoDiagnosis({
 afterEach(cleanup)
 
 describe('rate simulator usability harness', () => {
-  it('preserves peak operation fields when saving scenario settings', async () => {
+  it('emits a scenario patch without copying stale peak operation fields', async () => {
     const scenario: PeakScenario = {
       ...defaultScenario,
       mainBuildingEhpGroups: 8,
@@ -54,17 +54,12 @@ describe('rate simulator usability harness', () => {
     fireEvent.click(screen.getByRole('button', { name: '시뮬레이션 설정' }))
 
     await waitFor(() =>
-      expect(onScenarioChange).toHaveBeenCalledWith(
-        expect.objectContaining({
+      expect(onScenarioChange).toHaveBeenCalledWith({
+        type: 'patch',
+        patch: {
           expectedPeakKw: 650,
-          mainBuildingEhpGroups: 8,
-          annexEhpGroups: 3,
-          auditoriumCooling: false,
-          cafeteriaHighPowerTime: '10:30~12:30',
-          specialRoomTime: '15:00~16:00',
-          exemptSpaces: '보건실, 서버실',
-        }),
-      ),
+        },
+      }),
     )
   })
 

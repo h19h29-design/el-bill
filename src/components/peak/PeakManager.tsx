@@ -28,10 +28,11 @@ import {
   EHP_GROUP_MIN,
   type PeakOperationPlan,
 } from '../../lib/peakOperations'
+import type { PeakScenarioIntent } from '../../lib/persistedIntents'
 
 interface PeakManagerProps {
   scenario: PeakScenario
-  onScenarioChange: (scenario: PeakScenario) => Promise<boolean>
+  onScenarioChange: (intent: PeakScenarioIntent) => Promise<boolean>
   powerPlannerDataSource?: PowerPlannerDataSource | null
   peakOperationPlan: PeakOperationPlan
 }
@@ -107,8 +108,9 @@ export function PeakManager({
     }
 
     void onScenarioChange({
-      ...scenario,
-      [key]:
+      type: 'patch',
+      patch: {
+        [key]:
         key === 'memo' ||
         key === 'cafeteriaHighPowerTime' ||
         key === 'specialRoomTime' ||
@@ -119,6 +121,7 @@ export function PeakManager({
           : Number.isFinite(numericValue)
             ? numericValue
             : 0,
+      },
     }).catch(() => undefined)
   }
 

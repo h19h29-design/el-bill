@@ -400,8 +400,11 @@ export const validateRatePlan = (value: unknown): DomainValidationResult => {
 export const isValidRatePlan = (value: unknown): value is RatePlan =>
   validateRatePlan(value).valid
 
-const normalizeRatePlanKeyPart = (value: string) =>
-  value.trim().replace(/\s+/g, '').toLocaleLowerCase('ko-KR')
+export const normalizeRatePlanIdentityPart = (value: string) =>
+  value
+    .normalize('NFKC')
+    .toLocaleLowerCase('ko-KR')
+    .replace(/\s+/gu, '')
 
 export const validateRatePlanCollection = (
   value: unknown,
@@ -423,7 +426,7 @@ export const validateRatePlanCollection = (
     if (!candidate || typeof candidate !== 'object') continue
     const plan = candidate as Record<string, unknown>
     if (typeof plan.id === 'string' && plan.id.trim()) {
-      const id = normalizeRatePlanKeyPart(plan.id)
+      const id = normalizeRatePlanIdentityPart(plan.id)
       if (identifiers.has(id)) {
         issues.push('요금제 식별값이 중복됩니다.')
       }
@@ -439,7 +442,7 @@ export const validateRatePlanCollection = (
         plan.voltageType,
         plan.planName,
       ]
-        .map(normalizeRatePlanKeyPart)
+        .map(normalizeRatePlanIdentityPart)
         .join('|')
       if (tuples.has(tuple)) {
         issues.push(
@@ -456,9 +459,9 @@ export const findUniqueRatePlanById = (
   plans: RatePlan[],
   id: string,
 ): RatePlan | null => {
-  const normalizedId = normalizeRatePlanKeyPart(id)
+  const normalizedId = normalizeRatePlanIdentityPart(id)
   const matches = plans.filter(
-    (plan) => normalizeRatePlanKeyPart(plan.id) === normalizedId,
+    (plan) => normalizeRatePlanIdentityPart(plan.id) === normalizedId,
   )
   return matches.length === 1 ? matches[0] : null
 }

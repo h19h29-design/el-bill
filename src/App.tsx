@@ -25,7 +25,16 @@ import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import { defaultCalculationSettings } from './lib/calculationSettings'
-import { validateSchoolProfile } from './lib/domainValidation'
+import {
+  applyCalculationSettingsIntent,
+  applyPeakScenarioIntent,
+  applyRatePlanIntent,
+  applySchoolProfileIntent,
+  type CalculationSettingsIntent,
+  type PeakScenarioIntent,
+  type RatePlanIntent,
+  type SchoolProfileIntent,
+} from './lib/persistedIntents'
 import {
   cleanupExpiredStorageSnapshots,
   getNextStorageSnapshotExpiry,
@@ -461,11 +470,14 @@ function App() {
     )
   }, [applySnapshot, resetInMemoryToSamples])
 
-  const persistControlledPatch = useCallback(async (
-    patch: Partial<StorageSnapshotData>,
+  const persistControlledUpdate = useCallback(async (
+    updater: StorageSnapshotUpdater,
   ) => {
     if (!storageSession) return true
-    const result = await updateStorageSnapshot(storageSession.sessionId, patch)
+    const result = await updateStorageSnapshot(
+      storageSession.sessionId,
+      updater,
+    )
     if (!result.ok) {
       handleStorageWriteFailure(result)
       return false
@@ -474,40 +486,73 @@ function App() {
     return true
   }, [applySnapshot, handleStorageWriteFailure, storageSession])
 
-  const changeProfile = async (nextProfile: SchoolProfile) => {
+  const changeProfile = async (intent: SchoolProfileIntent) => {
     if (!storageSession) {
-      setProfile(nextProfile)
+      setProfile((latest) => {
+        try {
+          return applySchoolProfileIntent(latest, intent)
+        } catch {
+          return latest
+        }
+      })
       return true
     }
-    return persistControlledPatch({ profile: nextProfile })
+    return persistControlledUpdate((latest) => ({
+      profile: applySchoolProfileIntent(latest.profile, intent),
+    }))
   }
 
-  const changeScenario = async (nextScenario: PeakScenario) => {
+  const changeScenario = async (intent: PeakScenarioIntent) => {
     if (!storageSession) {
-      setScenario(nextScenario)
+      setScenario((latest) => {
+        try {
+          return applyPeakScenarioIntent(latest, intent)
+        } catch {
+          return latest
+        }
+      })
       return true
     }
-    return persistControlledPatch({ scenario: nextScenario })
+    return persistControlledUpdate((latest) => ({
+      scenario: applyPeakScenarioIntent(latest.scenario, intent),
+    }))
   }
 
-  const changeRatePlans = async (nextRatePlans: RatePlan[]) => {
+  const changeRatePlans = async (intent: RatePlanIntent) => {
     if (!storageSession) {
-      setRatePlans(nextRatePlans)
+      setRatePlans((latest) => {
+        try {
+          return applyRatePlanIntent(latest, intent)
+        } catch {
+          return latest
+        }
+      })
       return true
     }
-    return persistControlledPatch({ ratePlans: nextRatePlans })
+    return persistControlledUpdate((latest) => ({
+      ratePlans: applyRatePlanIntent(latest.ratePlans, intent),
+    }))
   }
 
   const changeCalculationSettings = async (
-    nextCalculationSettings: CalculationSettings,
+    intent: CalculationSettingsIntent,
   ) => {
     if (!storageSession) {
-      setCalculationSettings(nextCalculationSettings)
+      setCalculationSettings((latest) => {
+        try {
+          return applyCalculationSettingsIntent(latest, intent)
+        } catch {
+          return latest
+        }
+      })
       return true
     }
-    return persistControlledPatch({
-      calculationSettings: nextCalculationSettings,
-    })
+    return persistControlledUpdate((latest) => ({
+      calculationSettings: applyCalculationSettingsIntent(
+        latest.calculationSettings,
+        intent,
+      ),
+    }))
   }
 
   const startUploadSession = async (updater: StorageSnapshotUpdater) => {
@@ -550,10 +595,6 @@ function App() {
     nextDataSource: PowerPlannerDataSource | null,
     origin: DataProvenance['powerPlanner'],
   ) => {
-    const nextProvenance: DataProvenance = {
-      ...dataProvenance,
-      powerPlanner: origin,
-    }
     if (nextDataSource && origin === 'uploaded') {
       if (!(await startUploadSession((latest) => ({
         powerPlanner: nextDataSource,
@@ -566,15 +607,21 @@ function App() {
       }
     } else {
       if (storageSession) {
-        if (!(await persistControlledPatch({
+        if (!(await persistControlledUpdate((latest) => ({
           powerPlanner: nextDataSource,
-          provenance: nextProvenance,
-        }))) {
+          provenance: {
+            ...latest.provenance,
+            powerPlanner: origin,
+          },
+        })))) {
           return false
         }
       } else {
-        setPowerPlannerDataSource(nextDataSource)
-        setDataProvenance(nextProvenance)
+        setPowerPlannerDataSource(() => nextDataSource)
+        setDataProvenance((latest) => ({
+          ...latest,
+          powerPlanner: origin,
+        }))
       }
     }
     if (nextDataSource) {
@@ -764,7 +811,7 @@ const viewMeta: Record<ViewKey, { step: string; title: string; description: stri
 interface SchoolProfilePanelProps {
   profile: SchoolProfile
   ratePlans: RatePlan[]
-  onProfileChange: (profile: SchoolProfile) => Promise<boolean>
+  onProfileChange: (intent: SchoolProfileIntent) => Promise<boolean>
 }
 
 export function SchoolProfilePanel({
@@ -778,22 +825,25 @@ export function SchoolProfilePanel({
   const [saving, setSaving] = useState(false)
 
   const saveProfile = async (
-    nextProfile: SchoolProfile,
+    intent: SchoolProfileIntent,
     field: keyof SchoolProfile,
   ) => {
     if (saving) return
-    const validation = validateSchoolProfile(nextProfile)
-    if (!validation.valid) {
+    try {
+      applySchoolProfileIntent(profile, intent)
+    } catch (error) {
       setInvalidField(field)
       setProfileError(
-        validation.issues[0] ?? '학교 프로필 값을 확인해 주세요.',
+        error instanceof Error
+          ? error.message
+          : '학교 프로필 값을 확인해 주세요.',
       )
       return
     }
     setInvalidField(null)
     setProfileError('')
     setSaving(true)
-    const saved = await onProfileChange(nextProfile)
+    const saved = await onProfileChange(intent)
       .catch(() => false)
       .finally(() => setSaving(false))
     if (!saved) {
@@ -804,12 +854,17 @@ export function SchoolProfilePanel({
   }
 
   const update = (key: keyof SchoolProfile, value: string) => {
-    void saveProfile({
-      ...profile,
-      [key]: ['contractPowerKw', 'appliedPowerKw'].includes(key)
-        ? Number(value)
-        : value,
-    }, key)
+    void saveProfile(
+      {
+        type: 'patch',
+        patch: {
+          [key]: ['contractPowerKw', 'appliedPowerKw'].includes(key)
+            ? Number(value)
+            : value,
+        },
+      },
+      key,
+    )
   }
 
   const contractTypes = Array.from(new Set(ratePlans.map((plan) => plan.contractType)))
@@ -842,12 +897,17 @@ export function SchoolProfilePanel({
     )
     const nextPlan = compatiblePlans.find((plan) => plan.id === currentPlanId)
       ?? compatiblePlans[0]
-    void saveProfile({
-      ...profile,
-      contractType,
-      voltageType,
-      currentPlan: nextPlan?.planName ?? '',
-    }, 'currentPlan')
+    void saveProfile(
+      {
+        type: 'patch',
+        patch: {
+          contractType,
+          voltageType,
+          currentPlan: nextPlan?.planName ?? '',
+        },
+      },
+      'currentPlan',
+    )
   }
 
   const updateContractType = (contractType: string) => {

@@ -61,6 +61,138 @@ describe('power planner data source harness', () => {
     expect(normalized.changed).toBe(true)
   })
 
+  it('deduplicates equivalent monthly date and split period records', () => {
+    const normalized = normalizePowerPlannerRecords([
+      record({
+        id: 'date-period',
+        dataType: 'monthlyUsage',
+        date: '2026-01',
+        hour: undefined,
+      }),
+      record({
+        id: 'split-period',
+        dataType: 'monthlyUsage',
+        date: undefined,
+        year: 2026,
+        month: 1,
+        hour: undefined,
+        sourceRowIndex: 1,
+      }),
+    ])
+
+    expect(normalized.records).toHaveLength(1)
+    expect(normalized.records?.[0]).toMatchObject({
+      date: '2026-01',
+    })
+    expect(normalized.records?.[0].year).toBeUndefined()
+    expect(normalized.records?.[0].month).toBeUndefined()
+  })
+
+  it('rejects conflicting date and split period values', () => {
+    expect(
+      isValidPowerPlannerRecord(
+        record({
+          dataType: 'monthlyUsage',
+          date: '2026-01',
+          year: 2026,
+          month: 2,
+          hour: undefined,
+        }),
+      ),
+    ).toBe(false)
+  })
+
+  it('accepts matching date and split period values', () => {
+    expect(
+      isValidPowerPlannerRecord(
+        record({
+          dataType: 'dailyUsage',
+          date: '2026-01-31',
+          year: 2026,
+          month: 1,
+          day: 31,
+          hour: undefined,
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  it.each([
+    'monthlyUsage',
+    'dailyUsage',
+    'hourlyUsage',
+    'maxDemand',
+    'estimatedBill',
+    'patternAnalysis',
+  ] as const)('rejects malformed optional date for %s', (dataType) => {
+    const values: Record<string, unknown> = {
+      monthlyUsage: { usageKwh: 100, hour: undefined },
+      dailyUsage: { usageKwh: 100, hour: undefined },
+      hourlyUsage: { usageKwh: 100, hour: 13 },
+      maxDemand: { maxDemandKw: 500, hour: undefined, usageKwh: undefined },
+      estimatedBill: {
+        estimatedBillWon: 5_000_000,
+        hour: undefined,
+        usageKwh: undefined,
+      },
+      patternAnalysis: {
+        patternSummary: '피크',
+        hour: undefined,
+        usageKwh: undefined,
+      },
+    }
+    expect(
+      isValidPowerPlannerRecord(
+        record({
+          dataType,
+          date: 'x2026-01',
+          ...(values[dataType] as Record<string, unknown>),
+        }),
+      ),
+    ).toBe(false)
+  })
+
+  it.each([2026, '2026'])('maps strict standalone year %s', (year) => {
+    const records = mapRowsToPowerPlannerRecords(
+      [{ 연도: year, 월: 1, 사용량: 100 }],
+      'monthlyUsage',
+      { year: '연도', month: '월', usageKwh: '사용량' },
+    )
+
+    expect(records[0]).toMatchObject({ date: '2026-01' })
+  })
+
+  it.each([2026.5, '2.026e3', '+2026', '0x7ea', '002026', 'x2026', '2026년'])(
+    'rejects malformed standalone PowerPlanner year %s',
+    (year) => {
+      expect(
+        mapRowsToPowerPlannerRecords(
+          [{ 연도: year, 월: 1, 사용량: 100 }],
+          'monthlyUsage',
+          { year: '연도', month: '월', usageKwh: '사용량' },
+        ),
+      ).toEqual([])
+    },
+  )
+
+  it.each(['2.026e3', '+2026', '0x7ea', '002026', 'x2026'])(
+    'does not hide malformed split year %s behind a valid date',
+    (year) => {
+      expect(
+        mapRowsToPowerPlannerRecords(
+          [{ 일자: '2026-01-01', 연도: year, 시간: 13, 사용량: 100 }],
+          'hourlyUsage',
+          {
+            date: '일자',
+            year: '연도',
+            hour: '시간',
+            usageKwh: '사용량',
+          },
+        ),
+      ).toEqual([])
+    },
+  )
+
   it('maps hourly usage rows from a user-uploaded table', () => {
     const rows = [
       { 일자: '2026-06-01', 시간대: '10시', 사용량: '120' },
@@ -76,9 +208,6 @@ describe('power planner data source harness', () => {
     expect(records).toHaveLength(3)
     expect(records[1]).toMatchObject({
       date: '2026-06-01',
-      year: 2026,
-      month: 6,
-      day: 1,
       hour: 11,
       usageKwh: 186,
       dataType: 'hourlyUsage',
@@ -108,8 +237,6 @@ describe('power planner data source harness', () => {
     expect(records[0]).toMatchObject({
       dataType: 'monthlyUsage',
       date: '2026-06',
-      year: 2026,
-      month: 6,
       usageKwh: 48365,
       estimatedBillWon: 7138790,
       contractPowerKw: 700,
