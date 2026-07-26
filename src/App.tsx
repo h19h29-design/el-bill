@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Building2, CalendarDays, ClipboardCheck } from 'lucide-react'
 import { Sidebar } from './components/layout/Sidebar'
 import { TopNotice } from './components/layout/TopNotice'
+import { ViewErrorBoundary } from './components/layout/ViewErrorBoundary'
 import { AutoDiagnosis } from './components/diagnosis/AutoDiagnosis'
 import { RatePlanSettings } from './components/settings/RatePlanSettings'
 import { defaultRatePlans } from './data/ratePlans'
@@ -435,86 +436,88 @@ function App() {
             </div>
           </div>
 
-          <Suspense fallback={<ViewLoadingFallback />}>
-            {activeView === 'dashboard' && (
-              <Dashboard
-                bills={bills}
-                currentPlan={currentPlan}
-                candidatePlan={candidatePlan}
-                scenario={scenario}
-                diagnosis={diagnosis}
-                dataProvenance={dataProvenance}
-                onStartDiagnosis={() => setActiveView('diagnosis')}
-              />
-            )}
-            {activeView === 'diagnosis' && (
-              <AutoDiagnosis
-                diagnosis={diagnosis}
-                dataProvenance={dataProvenance}
-                onNavigate={setActiveView}
-              />
-            )}
-            {activeView === 'school' && (
-              <SchoolProfilePanel
-                profile={profile}
-                ratePlans={ratePlans}
-                onProfileChange={setProfile}
-              />
-            )}
-            {activeView === 'bills' && (
-              <BillUpload
-                bills={bills}
-                profile={profile}
-                ratePlans={ratePlans}
-                onBillsChange={applyBillsAndOpenDiagnosis}
-              />
-            )}
-            {activeView === 'powerPlanner' && (
-              <PowerPlannerUpload
-                dataSource={powerPlannerDataSource}
-                dataOrigin={dataProvenance.powerPlanner}
-                onDataSourceChange={applyPowerPlannerAndOpenDiagnosis}
-              />
-            )}
-            {activeView === 'rates' && (
-              currentPlan && candidatePlan ? (
-                <RateSimulator
+          <ViewErrorBoundary>
+            <Suspense fallback={<ViewLoadingFallback />}>
+              {activeView === 'dashboard' && (
+                <Dashboard
                   bills={bills}
                   currentPlan={currentPlan}
                   candidatePlan={candidatePlan}
-                  candidates={diagnosis.topCandidates}
+                  scenario={scenario}
+                  diagnosis={diagnosis}
+                  dataProvenance={dataProvenance}
+                  onStartDiagnosis={() => setActiveView('diagnosis')}
+                />
+              )}
+              {activeView === 'diagnosis' && (
+                <AutoDiagnosis
+                  diagnosis={diagnosis}
+                  dataProvenance={dataProvenance}
+                  onNavigate={setActiveView}
+                />
+              )}
+              {activeView === 'school' && (
+                <SchoolProfilePanel
+                  profile={profile}
+                  ratePlans={ratePlans}
+                  onProfileChange={setProfile}
+                />
+              )}
+              {activeView === 'bills' && (
+                <BillUpload
+                  bills={bills}
+                  profile={profile}
+                  ratePlans={ratePlans}
+                  onBillsChange={applyBillsAndOpenDiagnosis}
+                />
+              )}
+              {activeView === 'powerPlanner' && (
+                <PowerPlannerUpload
+                  dataSource={powerPlannerDataSource}
+                  dataOrigin={dataProvenance.powerPlanner}
+                  onDataSourceChange={applyPowerPlannerAndOpenDiagnosis}
+                />
+              )}
+              {activeView === 'rates' && (
+                currentPlan && candidatePlan ? (
+                  <RateSimulator
+                    bills={bills}
+                    currentPlan={currentPlan}
+                    candidatePlan={candidatePlan}
+                    candidates={diagnosis.topCandidates}
+                    scenario={scenario}
+                    onScenarioChange={setScenario}
+                  />
+                ) : (
+                  <section className="document-block-notice" role="status">
+                    <AlertCircle size={22} />
+                    <div>
+                      <strong>요금제 비교 보류</strong>
+                      <p>{diagnosis.judgementBasis}</p>
+                    </div>
+                  </section>
+                )
+              )}
+              {activeView === 'peak' && (
+                <PeakManager
                   scenario={scenario}
                   onScenarioChange={setScenario}
+                  powerPlannerDataSource={powerPlannerDataSource}
+                  peakOperationPlan={peakOperationPlan}
                 />
-              ) : (
-                <section className="document-block-notice" role="status">
-                  <AlertCircle size={22} />
-                  <div>
-                    <strong>요금제 비교 보류</strong>
-                    <p>{diagnosis.judgementBasis}</p>
-                  </div>
-                </section>
-              )
-            )}
-            {activeView === 'peak' && (
-              <PeakManager
-                scenario={scenario}
-                onScenarioChange={setScenario}
-                powerPlannerDataSource={powerPlannerDataSource}
-                peakOperationPlan={peakOperationPlan}
-              />
-            )}
-            {activeView === 'docs' && (
-              <DocumentGenerator
-                profile={profile}
-                latestBill={latestBill}
-                comparison={comparison}
-                scenario={scenario}
-                diagnosis={diagnosis}
-                peakOperationPlan={peakOperationPlan}
-              />
-            )}
-          </Suspense>
+              )}
+              {activeView === 'docs' && (
+                <DocumentGenerator
+                  profile={profile}
+                  latestBill={latestBill}
+                  comparison={comparison}
+                  scenario={scenario}
+                  diagnosis={diagnosis}
+                  peakOperationPlan={peakOperationPlan}
+                />
+              )}
+            </Suspense>
+          </ViewErrorBoundary>
           {activeView === 'settings' && (
             <RatePlanSettings plans={ratePlans} onPlansChange={setRatePlans} />
           )}

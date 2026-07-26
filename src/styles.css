@@ -304,6 +304,37 @@ button:disabled {
   font-weight: 700;
 }
 
+.view-error {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 520px;
+  padding: 24px;
+  color: #9f360f;
+  border: 1px solid #efbb9e;
+  background: #fff8f3;
+}
+
+.view-error h3,
+.view-error p {
+  margin: 0;
+}
+
+.view-error p {
+  margin-top: 4px;
+  color: #75412a;
+}
+
+.view-error button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #ffffff;
+  background: #b9471a;
+  border: 1px solid #b9471a;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(150px, 1fr));
@@ -2036,6 +2067,15 @@ textarea:focus {
 
   .view-heading {
     align-items: flex-start;
+  }
+
+  .view-error {
+    grid-template-columns: 1fr;
+    min-height: 360px;
+  }
+
+  .view-error button {
+    justify-content: center;
   }
 
   .chart-box {

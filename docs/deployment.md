@@ -1,6 +1,6 @@
 # Deployment
 
-이 MVP는 정적 Vite 앱이다. 현재 운영 배포는 NAS의 정적 파일 경로를 Cloudflare를 통해 공개하는 방식이며, `vercel.json`은 대체 정적 호스팅 설정으로만 유지한다. 배포 비밀값, NAS 접속 정보, Cloudflare API 토큰은 repo에 저장하지 않는다.
+이 MVP의 현재 운영 경로는 NAS 정적 사이트를 Cloudflare로 공개하는 구성이고, 운영 도메인은 [https://el-bill.h19h19.com/](https://el-bill.h19h19.com/)이다. 이 NAS+Cloudflare 경로만 이 repo의 현재 운영 배포와 롤백 절차에 해당한다. 배포 비밀값, NAS 접속 정보, Cloudflare API 토큰은 repo에 저장하지 않는다.
 
 ## 배포 전 필수 검증
 
@@ -13,7 +13,7 @@ npm run build
 npm run test:e2e
 ```
 
-빌드 후에는 `dist/assets/index-*.js`의 가장 큰 초기 `index` 청크가 700 kB 미만인지 확인한다. 문서 PDF 라이브러리와 대시보드·요금제 비교·피크·문서 생성 화면은 지연 로드되어 초기 진입 청크에 포함되지 않아야 한다.
+`npm run build`는 Vite 빌드 뒤 `npm run verify:bundle`을 자동 실행한다. 이 검사는 `dist/assets/index-*.js`의 가장 큰 초기 `index` 청크가 700,000 bytes를 넘으면 실패한다. 문서 PDF 라이브러리와 대시보드·요금제 비교·피크·문서 생성 화면은 지연 로드되어 초기 진입 청크에 포함되지 않아야 한다. 지연 청크 로딩 자체가 실패하면 앱 셸과 사이드바는 유지하고, 뷰 영역에서 한국어 복구 패널과 페이지 새로고침 버튼을 제공해야 한다.
 
 ## 운영 배포와 롤백
 
@@ -24,9 +24,9 @@ npm run test:e2e
 
 NAS 또는 Cloudflare를 변경하기 전에는 대상 경로, 현재 백업, 공개 도메인을 운영 담당자가 다시 확인해야 한다. 이 문서는 배포 명령을 자동 실행하지 않는다.
 
-## 운영 스모크
+## 운영 스모크: 부모 배포 대기
 
-배포 후 [https://el-bill.h19h19.com/](https://el-bill.h19h19.com/)에서 체크인된 합성 XLSX와 파워플래너 CSV를 사용해 다음을 확인한다.
+이 저장소 상태에서는 운영 배포와 공개 URL 스모크를 실행하지 않았다. 부모 배포가 NAS+Cloudflare에 완료된 뒤 [https://el-bill.h19h19.com/](https://el-bill.h19h19.com/)에서 체크인된 합성 XLSX와 파워플래너 CSV를 사용해 다음을 확인한다.
 
 1. 고지서 XLSX가 연속 12개월로 인식되고 자동진단이 사용자 고지서 상태로 전환된다.
 2. 파워플래너 파일만 올리면 고지서는 시연 샘플 상태를 유지하고 변경신청 ZIP은 비활성화된다.
@@ -35,14 +35,18 @@ NAS 또는 Cloudflare를 변경하기 전에는 대상 경로, 현재 백업, �
 5. 390x844 모바일에서 메뉴, TOP 3 표의 가로 스크롤, 문서 미리보기 가로 스크롤이 동작한다.
 6. 페이지 및 콘솔 오류는 0건이어야 한다. Cloudflare Analytics/Telemetry 같은 외부 관측 요청 실패는 앱 오류와 분리해 기록한다.
 
-## 대체 Vercel 설정
+## 선택 대안: Hermes/Vercel
+
+아래 항목은 현재 운영 경로가 아니다. NAS+Cloudflare 배포의 롤아웃, 롤백, 공개 URL 검증에 Hermes나 Vercel을 섞어 사용하지 않는다. 별도의 Vercel 프로젝트를 명시적으로 선택한 경우에만 적용한다.
+
+### Vercel 설정
 
 - Framework: Vite
 - Build Command: `npm run build`
 - Output Directory: `dist`
 - SPA rewrite: `vercel.json`에서 모든 경로를 `/index.html`로 연결
 
-## Hermes 배포 지시문
+### Hermes 지시문
 
 Hermes에 배포를 맡길 때는 아래 지시를 사용한다.
 
@@ -55,6 +59,6 @@ ZIP 내부에 PDF 3종이 포함됐는지 확인하고, PDF를 이미지로 렌�
 모바일 390x844에서 메뉴가 접힌 상태로 시작하며 TOP 3 표와 문서 미리보기를 좌우 스크롤할 수 있는지 확인해.
 ```
 
-## 현재 차단 조건
+### 대안 경로의 차단 조건
 
 로컬에는 `hermes` CLI가 있지만, 실제 Vercel 프로젝트 연결과 배포 토큰은 repo에 저장하지 않는다. 운영 배포를 자동화하려면 Vercel 프로젝트 연결 또는 GitHub Actions용 Vercel secrets가 필요하다.

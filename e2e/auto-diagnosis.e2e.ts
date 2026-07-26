@@ -219,15 +219,22 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
       `${documentStem}_변경신청서_자동입력항목.json`,
     ]),
   )
-  const zippedPlanPdf = await zip.file(`${documentStem}_전기요금제_변경계획안.pdf`)?.async('uint8array')
-  expect(new TextDecoder().decode(zippedPlanPdf?.slice(0, 4))).toBe('%PDF')
-  expect(zippedPlanPdf?.byteLength).toBeGreaterThan(100_000)
-
   const expectedPdfNames = [
     `${documentStem}_전기요금제_변경계획안.pdf`,
     `${documentStem}_한전_제출공문.pdf`,
     `${documentStem}_전기사용계약_변경신청서_미리보기.pdf`,
   ]
+  const zipPdfNames = Object.keys(zip.files).filter((name) => name.endsWith('.pdf'))
+  expect(zipPdfNames).toHaveLength(3)
+  expect(zipPdfNames).toEqual(expect.arrayContaining(expectedPdfNames))
+  for (const expectedPdfName of expectedPdfNames) {
+    const entry = zip.file(expectedPdfName)
+    expect(entry).toBeTruthy()
+    const bytes = await entry!.async('uint8array')
+    expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe('%PDF')
+    expect(bytes.byteLength).toBeGreaterThan(100_000)
+  }
+
   for (const [index, expectedPdfName] of expectedPdfNames.entries()) {
     const pdfDownload = page.waitForEvent('download')
     await page.getByRole('button', { name: '다운로드' }).nth(index).click()
