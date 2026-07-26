@@ -19,8 +19,19 @@ export interface WorkbookParseResult {
 
 const maxUploadFileBytes = 10 * 1024 * 1024
 const maxWorkbookRows = 10_000
+const maxWorksheetColumns = 256
+const maxZipEntries = 200
+const maxZipUncompressedBytes = 50 * 1024 * 1024
 const legacyXlsMessage =
   '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.'
+const rowLimitMessage =
+  '전체 데이터가 10,000행을 초과하여 브라우저 분석을 중단했습니다. 기간이나 시트를 나눠 업로드해 주세요.'
+const columnLimitMessage =
+  '시트 열 수가 256개를 초과하여 브라우저 분석을 중단했습니다. 필요한 열만 남겨 다시 저장해 주세요.'
+const zipEntryLimitMessage =
+  'XLSX 내부 파일 수가 200개를 초과하여 브라우저 분석을 중단했습니다. 필요한 시트와 이미지만 남겨 다시 저장해 주세요.'
+const zipUncompressedLimitMessage =
+  '압축 해제 예상 크기가 50MB를 초과하여 브라우저 분석을 중단했습니다. 기간이나 시트를 나눠 업로드해 주세요.'
 
 export const validateUploadFile = (
   file: Pick<File, 'name' | 'size'>,
@@ -39,7 +50,7 @@ export const getWorkbookLimitMessage = (
 ): string | null => {
   const totalRows = result.sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0)
   return totalRows > maxWorkbookRows
-    ? '전체 데이터가 10,000행을 초과하여 브라우저 분석을 중단했습니다. 기간이나 시트를 나눠 업로드해 주세요.'
+    ? rowLimitMessage
     : null
 }
 
@@ -113,6 +124,107 @@ const decodeSpreadsheetText = (buffer: ArrayBuffer) => {
     return new TextDecoder('euc-kr').decode(buffer)
   } catch {
     return utf8
+  }
+}
+
+const isCfbfBinary = (buffer: ArrayBuffer) => {
+  if (buffer.byteLength < 4) return false
+  const bytes = new Uint8Array(buffer, 0, 4)
+  return bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0
+}
+
+const findZipEndOfCentralDirectory = (view: DataView) => {
+  const minimumOffset = Math.max(0, view.byteLength - 65_557)
+  for (let offset = view.byteLength - 22; offset >= minimumOffset; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) return offset
+  }
+  return -1
+}
+
+const assertXlsxArchiveLimits = (buffer: ArrayBuffer) => {
+  const view = new DataView(buffer)
+  const eocdOffset = findZipEndOfCentralDirectory(view)
+  if (eocdOffset < 0) throw new Error(legacyXlsMessage)
+
+  const entryCount = view.getUint16(eocdOffset + 10, true)
+  const centralDirectorySize = view.getUint32(eocdOffset + 12, true)
+  const centralDirectoryOffset = view.getUint32(eocdOffset + 16, true)
+  if (
+    entryCount === 0xffff ||
+    centralDirectorySize === 0xffffffff ||
+    centralDirectoryOffset === 0xffffffff ||
+    centralDirectoryOffset + centralDirectorySize > eocdOffset
+  ) {
+    throw new Error(legacyXlsMessage)
+  }
+  if (entryCount > maxZipEntries) throw new Error(zipEntryLimitMessage)
+
+  let offset = centralDirectoryOffset
+  const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize
+  let uncompressedBytes = 0
+  for (let index = 0; index < entryCount; index += 1) {
+    if (offset + 46 > centralDirectoryEnd || view.getUint32(offset, true) !== 0x02014b50) {
+      throw new Error(legacyXlsMessage)
+    }
+    const compressedSize = view.getUint32(offset + 20, true)
+    const uncompressedSize = view.getUint32(offset + 24, true)
+    const fileNameLength = view.getUint16(offset + 28, true)
+    const extraLength = view.getUint16(offset + 30, true)
+    const commentLength = view.getUint16(offset + 32, true)
+    if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff) {
+      throw new Error(legacyXlsMessage)
+    }
+
+    uncompressedBytes += uncompressedSize
+    if (uncompressedBytes > maxZipUncompressedBytes) {
+      throw new Error(zipUncompressedLimitMessage)
+    }
+    offset += 46 + fileNameLength + extraLength + commentLength
+  }
+
+  if (offset > centralDirectoryEnd) throw new Error(legacyXlsMessage)
+}
+
+const assertCsvRowLimit = (text: string) => {
+  let logicalRows = 0
+  let quoted = false
+  let rowHasContent = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    const next = text[index + 1]
+    if (char === '"') {
+      if (quoted && next === '"') {
+        rowHasContent = true
+        index += 1
+      } else {
+        quoted = !quoted
+      }
+      continue
+    }
+    if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && next === '\n') index += 1
+      if (rowHasContent) logicalRows += 1
+      if (logicalRows > maxWorkbookRows + 1) throw new Error(rowLimitMessage)
+      rowHasContent = false
+      continue
+    }
+    if (!/\s/.test(char)) rowHasContent = true
+  }
+
+  if (rowHasContent && logicalRows + 1 > maxWorkbookRows + 1) {
+    throw new Error(rowLimitMessage)
+  }
+}
+
+const assertPowerPlannerHtmlRowLimit = (text: string) => {
+  const rowRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
+  let dataRows = 0
+  let match: RegExpExecArray | null
+  while ((match = rowRegex.exec(text))) {
+    if (!/<td\b[^>]*aria-describedby=["']grid_/i.test(match[1])) continue
+    dataRows += 1
+    if (dataRows > maxWorkbookRows) throw new Error(rowLimitMessage)
   }
 }
 
@@ -218,6 +330,17 @@ const getRowLimitMessageForSheets = (sheets: ParsedSheet[]) =>
 const assertWorkbookRowsWithinLimit = (sheets: ParsedSheet[]) => {
   const message = getRowLimitMessageForSheets(sheets)
   if (message) throw new Error(message)
+}
+
+const assertLoadedWorkbookLimits = (workbook: ExcelJS.Workbook) => {
+  let actualRows = 0
+  for (const sheet of workbook.worksheets) {
+    if (sheet.actualColumnCount > maxWorksheetColumns) {
+      throw new Error(columnLimitMessage)
+    }
+    actualRows += sheet.actualRowCount
+    if (actualRows > maxWorkbookRows) throw new Error(rowLimitMessage)
+  }
 }
 
 const makeImportedBill = (
@@ -399,8 +522,10 @@ const parseWorkbookContents = async (
   if (buffer.byteLength > maxUploadFileBytes) {
     throw new Error('파일 크기는 10MB 이하만 분석할 수 있습니다.')
   }
+  if (isCfbfBinary(buffer)) throw new Error(legacyXlsMessage)
   const decodedText = decodeSpreadsheetText(buffer)
   if (file instanceof File && file.name.toLowerCase().endsWith('.csv')) {
+    assertCsvRowLimit(decodedText)
     return {
       sheets: [parseCsvSheet(decodedText, file.name)],
       autoRows: [],
@@ -408,9 +533,13 @@ const parseWorkbookContents = async (
     }
   }
 
-  const powerPlannerSheet = parsePowerPlannerHtmlSheet(decodedText)
-
-  if (powerPlannerSheet) {
+  const isPowerPlannerHtml =
+    decodedText.includes('ui-jqgrid') &&
+    decodedText.includes('aria-describedby="grid_')
+  if (isPowerPlannerHtml) {
+    assertPowerPlannerHtmlRowLimit(decodedText)
+    const powerPlannerSheet = parsePowerPlannerHtmlSheet(decodedText)
+    if (!powerPlannerSheet) throw new Error(legacyXlsMessage)
     assertWorkbookRowsWithinLimit([powerPlannerSheet])
     const autoRows = parsePowerPlannerMonthlyBills(powerPlannerSheet, context)
     return {
@@ -429,8 +558,14 @@ const parseWorkbookContents = async (
     throw new Error(legacyXlsMessage)
   }
 
+  assertXlsxArchiveLimits(buffer)
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(buffer)
+  try {
+    await workbook.xlsx.load(buffer)
+  } catch {
+    throw new Error(legacyXlsMessage)
+  }
+  assertLoadedWorkbookLimits(workbook)
   const sheets = workbook.worksheets.map((sheet) =>
     matrixToParsedSheet(sheet.name, workbookSheetToMatrix(sheet)),
   )

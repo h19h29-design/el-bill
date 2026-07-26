@@ -57,6 +57,45 @@ const createFormulaWorkbook = async () => {
   return toArrayBuffer(await workbook.xlsx.writeBuffer())
 }
 
+const createWorkbookWithShape = async (rows: number, columns: number) => {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('2026 시연')
+  sheet.addRow(Array.from({ length: columns }, (_, index) => `열${index + 1}`))
+  for (let index = 1; index < rows; index += 1) {
+    sheet.addRow(Array.from({ length: columns }, () => index))
+  }
+  return toArrayBuffer(await workbook.xlsx.writeBuffer())
+}
+
+const createZipCentralDirectory = ({
+  entries,
+  uncompressedBytes,
+}: {
+  entries: number
+  uncompressedBytes: number
+}) => {
+  const entrySize = 47
+  const centralDirectorySize = entries * entrySize
+  const output = new Uint8Array(centralDirectorySize + 22)
+  const view = new DataView(output.buffer)
+
+  for (let index = 0; index < entries; index += 1) {
+    const offset = index * entrySize
+    view.setUint32(offset, 0x02014b50, true)
+    view.setUint32(offset + 20, 1, true)
+    view.setUint32(offset + 24, uncompressedBytes, true)
+    view.setUint16(offset + 28, 1, true)
+    output[offset + 46] = 97
+  }
+
+  const eocdOffset = centralDirectorySize
+  view.setUint32(eocdOffset, 0x06054b50, true)
+  view.setUint16(eocdOffset + 8, entries, true)
+  view.setUint16(eocdOffset + 10, entries, true)
+  view.setUint32(eocdOffset + 12, centralDirectorySize, true)
+  return output.buffer
+}
+
 const powerPlannerHtmlFixture = `
 <html xmlns:x="urn:schemas-microsoft-com:office:excel">
   <body>
@@ -117,6 +156,34 @@ describe('synthetic workbook parser harness', () => {
     )
   })
 
+  it('rejects a CFBF binary renamed as XLSX', async () => {
+    const file = new File([new Uint8Array([0xd0, 0xcf, 0x11, 0xe0])], 'renamed.xlsx')
+
+    await expect(parseWorkbook(file)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
+  it('wraps malformed XLSX errors in a conversion instruction', async () => {
+    const file = new File(['not a zip file'], 'broken.xlsx')
+
+    await expect(parseWorkbook(file)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
+  it('rejects XLSX metadata with excessive uncompressed bytes before loading', async () => {
+    await expect(
+      parseWorkbook(createZipCentralDirectory({ entries: 1, uncompressedBytes: 50 * 1024 * 1024 + 1 })),
+    ).rejects.toThrow('압축 해제 예상 크기가 50MB를 초과')
+  })
+
+  it('rejects XLSX metadata with too many ZIP entries before loading', async () => {
+    await expect(
+      parseWorkbook(createZipCentralDirectory({ entries: 201, uncompressedBytes: 1 })),
+    ).rejects.toThrow('XLSX 내부 파일 수가 200개를 초과')
+  })
+
   it('rejects an oversized browser upload before parsing', () => {
     const message = validateUploadFile({
       name: 'oversized.xlsx',
@@ -124,6 +191,17 @@ describe('synthetic workbook parser harness', () => {
     })
 
     expect(message).toContain('10MB')
+  })
+
+  it('rejects a compressed XLSX upload larger than 10MB before parsing', async () => {
+    const file = new File(
+      [new Uint8Array(10 * 1024 * 1024 + 1)],
+      'large-compressed.xlsx',
+    )
+
+    await expect(parseWorkbook(file)).rejects.toThrow(
+      '파일 크기는 10MB 이하만 분석할 수 있습니다.',
+    )
   })
 
   it('rejects an oversized ArrayBuffer before parsing', async () => {
@@ -146,6 +224,44 @@ describe('synthetic workbook parser harness', () => {
     })
 
     expect(message).toContain('10,000행')
+  })
+
+  it('rejects an XLSX with more than 10,000 actual rows before cell extraction', async () => {
+    await expect(parseWorkbook(await createWorkbookWithShape(10_001, 1))).rejects.toThrow(
+      '전체 데이터가 10,000행을 초과',
+    )
+  })
+
+  it('rejects an XLSX with more than 256 columns before cell extraction', async () => {
+    await expect(parseWorkbook(await createWorkbookWithShape(1, 257))).rejects.toThrow(
+      '시트 열 수가 256개를 초과',
+    )
+  })
+
+  it('rejects CSV rows over the 10,000-row limit with quoted newlines', async () => {
+    const rows = Array.from(
+      { length: 10_001 },
+      (_, index) => `2026,${index + 1},"42,000\ncontinued",6420000`,
+    )
+    const file = new File(
+      [['연도,월,사용량,총 전기요금', ...rows].join('\n')],
+      'large.csv',
+    )
+
+    await expect(parseWorkbook(file)).rejects.toThrow('전체 데이터가 10,000행을 초과')
+  })
+
+  it('rejects PowerPlanner HTML rows over the 10,000-row limit', async () => {
+    const rows = Array.from(
+      { length: 10_001 },
+      () => '<tr><td aria-describedby="grid_YEAR_ROW">2026년 6월</td></tr>',
+    ).join('')
+    const file = new File(
+      [`<table class="ui-jqgrid"><tbody>${rows}</tbody></table>`],
+      'large-power-planner.xls',
+    )
+
+    await expect(parseWorkbook(file)).rejects.toThrow('전체 데이터가 10,000행을 초과')
   })
 
   it('auto-merges a deterministic in-memory yearly workbook', async () => {

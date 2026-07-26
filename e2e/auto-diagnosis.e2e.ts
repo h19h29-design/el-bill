@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import JSZip from 'jszip'
 
 const billMonths = Array.from({ length: 36 }, (_, index) => {
@@ -40,6 +41,29 @@ const powerPlannerHtmlFixture = `
     </table>
   </body>
 </html>`
+
+test('checked-in synthetic XLSX reaches recognized mapping and analysis state', async ({ page }) => {
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+
+  await page.getByRole('button', { name: '전기요금 자동진단 시작' }).click()
+  await page.getByRole('button', { name: '자료 업로드부터 시작' }).click()
+  await page
+    .locator('input[type="file"][accept=".xlsx,.xls"]')
+    .first()
+    .setInputFiles(resolve('e2e/fixtures/monthly-bills.xlsx'))
+
+  await expect(page.getByRole('heading', { name: '자동 인식 결과' })).toBeVisible()
+  await expect(
+    page.locator('.recognition-grid article').filter({ hasText: '필수 컬럼' }),
+  ).toContainText('연도, 월, 사용량, 총 전기요금')
+  await expect(page.getByRole('heading', { name: '새 파일 분석 미리보기' })).toBeVisible()
+
+  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+  await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
+  await expect(page.getByText('사용자 고지서 분석', { exact: false })).toBeVisible()
+})
 
 test('PowerPlanner-only upload does not claim uploaded-bill diagnosis', async ({ page }, testInfo) => {
   const powerPlannerCsv = testInfo.outputPath('power-planner-hourly.csv')

@@ -8,7 +8,7 @@
 | React | UI 프레임워크 | 19.2.7 | MIT | 선택. Vite 템플릿 기본값 | https://react.dev, https://github.com/facebook/react |
 | Tailwind CSS | 유틸리티 CSS 및 디자인 토큰 보조 | 4.3.2 | MIT | 선택. `@tailwindcss/vite`로 Vite 연동 | https://tailwindcss.com, https://github.com/tailwindlabs/tailwindcss |
 | Recharts | 대시보드 차트 | 3.9.0 | MIT | 선택. React 컴포넌트 기반 라인/바/도넛 차트 구현이 빠름 | https://recharts.org, https://github.com/recharts/recharts |
-| SheetJS/xlsx | 엑셀 업로드 파싱 | 0.18.5 | Apache-2.0 | 선택하되 리스크 문서화. 요구 스택이고 브라우저 로컬 파싱에 적합하지만 npm audit 취약점 fix 없음 | https://sheetjs.com, https://github.com/SheetJS/sheetjs |
+| ExcelJS | 엑셀 업로드 파싱 | 4.4.0 | MIT | 선택. 브라우저에서 XLSX 표시값을 읽고 수식을 실행하지 않으며, ZIP 메타데이터·행·열 제한과 함께 사용 | https://github.com/exceljs/exceljs |
 | TanStack Table | 고지서 입력 테이블 | 8.21.3 | MIT | 선택. 컬럼 확장과 표 렌더링 제어가 좋음 | https://tanstack.com/table, https://github.com/TanStack/table |
 | React Hook Form | 시나리오 입력 폼 | 7.80.0 | MIT | 선택. 입력 상태 관리가 가볍고 Zod와 함께 사용 가능 | https://react-hook-form.com, https://github.com/react-hook-form/react-hook-form |
 | Zod | 폼 입력 검증 | 4.4.3 | MIT | 선택. 피크/사용량 숫자 범위 검증 | https://zod.dev, https://github.com/colinhacks/zod |
@@ -27,7 +27,7 @@
 
 ## 보안/유지보수 메모
 
-- `npm audit --omit=dev` 결과 `xlsx`에서 Prototype Pollution, ReDoS 고위험 취약점이 보고됨.
-- 현재 npm 기준 fix 없음. 원격 서버 파싱을 만들지 않고 브라우저 로컬 파일 처리로 범위를 제한.
-- 실제 운영 전에는 SheetJS 대체 패키지 또는 샌드박스 파서 검토 필요.
+- 취약한 SheetJS/xlsx는 제거했고 `npm ls xlsx`가 빈 트리를 반환한다.
+- `npm audit --omit=dev`는 npm 10.9.8에서 retired quick endpoint의 HTTP 400 `Invalid package tree`로 완료되지 않았다. 따라서 깨끗한 audit 결과를 주장하지 않는다.
+- 원격 서버 파싱을 만들지 않고 브라우저 로컬 파일 처리로 범위를 제한한다. 실제 운영 전에는 ExcelJS 파싱을 Web Worker 또는 샌드박스 파서로 격리하는 방안을 검토한다.
 - 라이선스 불명 또는 저활성 GitHub 예제 코드는 포함하지 않음.
