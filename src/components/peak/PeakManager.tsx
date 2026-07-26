@@ -32,7 +32,9 @@ import type { PeakScenarioIntent } from '../../lib/persistedIntents'
 
 interface PeakManagerProps {
   scenario: PeakScenario
-  onScenarioChange: (intent: PeakScenarioIntent) => Promise<boolean>
+  onScenarioChange: (
+    intent: PeakScenarioIntent,
+  ) => Promise<boolean | PeakScenario>
   powerPlannerDataSource?: PowerPlannerDataSource | null
   peakOperationPlan: PeakOperationPlan
 }

@@ -509,8 +509,10 @@ describe('App session-scoped storage integration', () => {
     fireEvent.click(await screen.findByRole('button', { name: '시연 샘플 적용' }))
 
     expect(
-      await screen.findByText(/브라우저 저장소에 자료를 저장하지 못했습니다/),
-    ).toBeTruthy()
+      await screen.findAllByText(
+        /브라우저 저장소에 자료를 저장하지 못했습니다/,
+      ),
+    ).toHaveLength(2)
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '파워플래너: 미사용',
     )

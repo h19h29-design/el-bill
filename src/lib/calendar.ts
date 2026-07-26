@@ -30,6 +30,17 @@ export const parseStrictMonth = (value: unknown): number | null => {
   return Number(match[1])
 }
 
+export const parseStrictDay = (value: unknown): number | null => {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value >= 1 && value <= 31
+      ? value
+      : null
+  }
+  if (typeof value !== 'string') return null
+  const match = value.match(/^(0?[1-9]|[12]\d|3[01])$/)
+  return match ? Number(match[1]) : null
+}
+
 export const parseStrictYear = (value: unknown): number | null => {
   if (typeof value === 'number') {
     return isValidYear(value) ? value : null

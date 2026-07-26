@@ -29,6 +29,7 @@ import {
   validateSchoolProfile,
   validateRatePlanCollection,
 } from './domainValidation'
+import { parseStrictMonth, parseStrictYear } from './calendar'
 
 const optionalBillColumns = [
   '요금적용전력',
@@ -852,11 +853,22 @@ export const summarizeWorkbookRecognition = (
   if (!result) return null
   const rows = result.sheets.flatMap((sheet) => sheet.rows)
   const headers = Array.from(new Set(result.sheets.flatMap((sheet) => sheet.headers)))
+  const mappedPeriods = rows.map((row) => ({
+    year: parseStrictYear(row[mapping.year]),
+    month: parseStrictMonth(row[mapping.month]),
+  }))
+  const mappedPeriodsAreValid =
+    rows.length > 0 &&
+    mappedPeriods.every(
+      (period) => period.year !== null && period.month !== null,
+    )
   const mappedYears = Array.from(
     new Set(
-      rows
-        .map((row) => Number(row[mapping.year]))
-        .filter((year) => Number.isFinite(year) && year > 1900),
+      mappedPeriods
+        .filter(
+          (period) => period.year !== null && period.month !== null,
+        )
+        .map((period) => period.year as number),
     ),
   ).sort((a, b) => a - b)
   const requiredMap = [
@@ -868,6 +880,15 @@ export const summarizeWorkbookRecognition = (
   const missingRequiredColumns = requiredMap
     .filter(([, key]) => !key)
     .map(([label]) => label)
+  if (mapping.year && !mappedPeriodsAreValid) {
+    missingRequiredColumns.push('연도')
+  }
+  if (mapping.month && !mappedPeriodsAreValid) {
+    missingRequiredColumns.push('월')
+  }
+  const uniqueMissingRequiredColumns = Array.from(
+    new Set(missingRequiredColumns),
+  )
   const mappedOptionalColumns = optionalBillColumns.filter((label) =>
     headers.some((header) => header.includes(label) || label.includes(header)),
   )
@@ -887,7 +908,9 @@ export const summarizeWorkbookRecognition = (
     : requiredMap
         .filter(([, key]) => Boolean(key))
         .map(([label]) => label)
-  const normalizedMissingRequiredColumns = hasAutoRows ? [] : missingRequiredColumns
+  const normalizedMissingRequiredColumns = hasAutoRows
+    ? []
+    : uniqueMissingRequiredColumns
   const mappingConfidence = hasAutoRows
     ? Math.min(
         99,
@@ -897,7 +920,9 @@ export const summarizeWorkbookRecognition = (
         ),
       )
     : Math.round(
-        ((requiredMap.length - missingRequiredColumns.length) / requiredMap.length) * 100,
+        ((requiredMap.length - normalizedMissingRequiredColumns.length) /
+          requiredMap.length) *
+          100,
       )
 
   return {
@@ -912,7 +937,7 @@ export const summarizeWorkbookRecognition = (
     guidance:
       hasAutoRows
         ? '파일 구조가 자동 인식되었습니다. 이 매핑으로 자동진단을 시작할 수 있습니다.'
-        : missingRequiredColumns.length > 0
+        : normalizedMissingRequiredColumns.length > 0
         ? '총 전기요금 또는 사용량 컬럼을 찾지 못했습니다. 컬럼을 직접 지정해주세요.'
         : '필수 컬럼이 인식되었습니다. 이 매핑으로 자동진단을 시작할 수 있습니다.',
   }

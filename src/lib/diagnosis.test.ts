@@ -1061,6 +1061,82 @@ describe('automatic diagnosis harness', () => {
     expect(recognition?.missingRequiredColumns).toContain('총 전기요금')
   })
 
+  it.each([
+    ['2.026e3', 1],
+    ['+2026', 1],
+    ['002026', 1],
+    ['x2026', 1],
+    ['2026', '1e0'],
+    ['2026', 1.5],
+  ])(
+    'does not recognize malformed mapped period values %s / %s',
+    (year, month) => {
+      const recognition = summarizeWorkbookRecognition(
+        {
+          sheets: [
+            {
+              name: 'strict-period',
+              headers: ['연도', '월', '사용량', '총 전기요금'],
+              rows: [
+                {
+                  연도: year,
+                  월: month,
+                  사용량: 1000,
+                  '총 전기요금': 100_000,
+                },
+              ],
+            },
+          ],
+          autoRows: [],
+          diagnostics: [],
+        },
+        {
+          year: '연도',
+          month: '월',
+          usageKwh: '사용량',
+          totalBillWon: '총 전기요금',
+        },
+      )
+
+      expect(recognition?.recognizedYears).toEqual([])
+      expect(recognition?.mappingConfidence).toBeLessThan(100)
+      expect(recognition?.canAnalyze).toBe(false)
+    },
+  )
+
+  it('recognizes strict common year and month values consistently with mapping', () => {
+    const recognition = summarizeWorkbookRecognition(
+      {
+        sheets: [
+          {
+            name: 'strict-period',
+            headers: ['연도', '월', '사용량', '총 전기요금'],
+            rows: [
+              {
+                연도: '2026',
+                월: '01',
+                사용량: 1000,
+                '총 전기요금': 100_000,
+              },
+            ],
+          },
+        ],
+        autoRows: [],
+        diagnostics: [],
+      },
+      {
+        year: '연도',
+        month: '월',
+        usageKwh: '사용량',
+        totalBillWon: '총 전기요금',
+      },
+    )
+
+    expect(recognition?.recognizedYears).toEqual([2026])
+    expect(recognition?.mappingConfidence).toBe(100)
+    expect(recognition?.canAnalyze).toBe(true)
+  })
+
   it('summarizes normalized auto rows as complete recognized data', () => {
     const recognition = summarizeWorkbookRecognition(
       {

@@ -9,6 +9,7 @@ import type { PeakScenario, PlanCandidateComparison } from '../../types'
 import { defaultCalculationSettings } from '../../lib/calculationSettings'
 import { buildAutoDiagnosis } from '../../lib/diagnosis'
 import { defaultSchoolProfile } from '../../data/sampleBills'
+import { applyPeakScenarioIntent } from '../../lib/persistedIntents'
 import { RateSimulator } from './RateSimulator'
 
 const currentPlan = defaultRatePlans.find((plan) => plan.id === 'edu-a-high-a-2')!
@@ -61,6 +62,125 @@ describe('rate simulator usability harness', () => {
         },
       }),
     )
+  })
+
+  it('reconciles a successful usage-only save with a newer remote peak value', async () => {
+    const remoteScenario = {
+      ...defaultScenario,
+      expectedPeakKw: 777,
+    }
+    const onScenarioChange = vi.fn(async (intent) =>
+      applyPeakScenarioIntent(remoteScenario, intent),
+    )
+    const { rerender } = render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={onScenarioChange}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('사용량 증가율(%)'), {
+      target: { value: '17' },
+    })
+    rerender(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={remoteScenario}
+        onScenarioChange={onScenarioChange}
+      />,
+    )
+
+    expect(
+      (screen.getByLabelText('예상 최대수요전력(kW)') as HTMLInputElement).value,
+    ).toBe('777')
+    expect(
+      (screen.getByLabelText('사용량 증가율(%)') as HTMLInputElement).value,
+    ).toBe('17')
+
+    fireEvent.click(screen.getByRole('button', { name: '시뮬레이션 설정' }))
+
+    await waitFor(() =>
+      expect(onScenarioChange).toHaveBeenCalledWith({
+        type: 'patch',
+        patch: { usageIncreasePercent: 17 },
+      }),
+    )
+
+    const savedScenario = {
+      ...remoteScenario,
+      usageIncreasePercent: 17,
+    }
+    rerender(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={{ ...savedScenario, usageIncreasePercent: 19 }}
+        onScenarioChange={onScenarioChange}
+      />,
+    )
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('사용량 증가율(%)') as HTMLInputElement).value,
+      ).toBe('19'),
+    )
+  })
+
+  it('keeps a dirty edit after save failure while adopting non-dirty remote fields', async () => {
+    const onScenarioChange = vi.fn(async () => false)
+    const { rerender } = render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={onScenarioChange}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('사용량 증가율(%)'), {
+      target: { value: '23' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '시뮬레이션 설정' }))
+    await waitFor(() => expect(onScenarioChange).toHaveBeenCalledTimes(1))
+
+    rerender(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={{
+          ...defaultScenario,
+          expectedPeakKw: 811,
+          usageIncreasePercent: 4,
+        }}
+        onScenarioChange={onScenarioChange}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('예상 최대수요전력(kW)') as HTMLInputElement).value,
+      ).toBe('811'),
+    )
+    expect(
+      (screen.getByLabelText('사용량 증가율(%)') as HTMLInputElement).value,
+    ).toBe('23')
   })
 
   it.each([

@@ -7,10 +7,7 @@ import type {
   RatePlan,
   SchoolProfile,
 } from '../types'
-import {
-  defaultCalculationSettings,
-  isCalculationSettings,
-} from './calculationSettings'
+import { isCalculationSettings } from './calculationSettings'
 import {
   isValidPeakScenario,
   isValidSchoolProfile,
@@ -273,7 +270,6 @@ const isValidPowerPlannerDataSource = (
 
 const isStorageSnapshotData = (
   value: unknown,
-  allowMissingCalculationSettings = false,
 ): value is StorageSnapshotData => {
   if (!value || typeof value !== 'object') return false
   const data = value as Record<string, unknown>
@@ -286,9 +282,7 @@ const isStorageSnapshotData = (
     isSchoolProfile(data.profile) &&
     isPeakScenario(data.scenario) &&
     validateRatePlanCollection(data.ratePlans).valid &&
-    (isCalculationSettings(data.calculationSettings) ||
-      (allowMissingCalculationSettings &&
-        data.calculationSettings === undefined)) &&
+    isCalculationSettings(data.calculationSettings) &&
     (data.powerPlanner === null || hasPowerPlanner) &&
     isDataProvenance(provenance) &&
     (provenance.powerPlanner === 'none'
@@ -317,6 +311,14 @@ const parseStorageSnapshot = (
     const hasValidCalculationSettings = isCalculationSettings(
       rawData?.calculationSettings,
     )
+    if (
+      !rawData ||
+      !normalizedScenario.scenario ||
+      normalizedScenario.changed ||
+      !hasValidCalculationSettings
+    ) {
+      return null
+    }
     const rawProvenance =
       rawData?.provenance && typeof rawData.provenance === 'object'
         ? (rawData.provenance as DataProvenance)
@@ -324,17 +326,12 @@ const parseStorageSnapshot = (
     const sanitizedData = rawData
       ? {
           ...rawData,
-          scenario: normalizedScenario.scenario ?? rawData.scenario,
-          calculationSettings: hasValidCalculationSettings
-            ? rawData.calculationSettings
-            : defaultCalculationSettings,
+          scenario: normalizedScenario.scenario,
+          calculationSettings: rawData.calculationSettings,
           powerPlanner: normalizedPowerPlanner.dataSource,
           provenance: rawProvenance
             ? {
                 ...rawProvenance,
-                bills: hasValidCalculationSettings
-                  ? rawProvenance.bills
-                  : 'sample',
                 powerPlanner: normalizedPowerPlanner.dataSource
                   ? rawProvenance.powerPlanner
                   : 'none',
@@ -345,7 +342,7 @@ const parseStorageSnapshot = (
     if (
       candidate.schemaVersion !== 1 ||
       !isStorageSession(candidate.session) ||
-      !isStorageSnapshotData(sanitizedData, true) ||
+      !isStorageSnapshotData(sanitizedData) ||
       (candidate.revision !== undefined &&
         (!Number.isInteger(candidate.revision) ||
           Number(candidate.revision) < 0))
@@ -355,15 +352,7 @@ const parseStorageSnapshot = (
     const parsed = {
       ...candidate,
       revision: candidate.revision ?? 0,
-      data: {
-        ...(sanitizedData as StorageSnapshotData),
-        calculationSettings: isCalculationSettings(
-          (sanitizedData as unknown as Record<string, unknown>)
-            .calculationSettings,
-        )
-          ? (sanitizedData as StorageSnapshotData).calculationSettings
-          : defaultCalculationSettings,
-      },
+      data: sanitizedData as StorageSnapshotData,
     } as unknown as StorageSnapshot
     if (
       expectedSessionId &&
@@ -932,11 +921,43 @@ const parseLegacyPayload = (raw: string | null): LegacyPayload | null => {
 
 const migrateLegacyFixedRoot = (
   now: number,
+  fallbackData: StorageSnapshotData,
 ): { attempted: boolean; snapshot: StorageSnapshot | null } => {
   const raw = localStorage.getItem(legacyAtomicStorageSnapshotKey)
   if (!raw) return { attempted: false, snapshot: null }
   const candidate = parseStorageSnapshot(raw)
-  if (!candidate || isSessionExpired(candidate.session, now)) {
+  if (!candidate) {
+    let legacySession: StorageSession | null = null
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      legacySession = isStorageSession(parsed.session)
+        ? parsed.session
+        : null
+    } catch {
+      legacySession = null
+    }
+    if (legacySession && !isSessionExpired(legacySession, now)) {
+      const fallbackResult = commitNewActiveSnapshotUnlocked({
+        schemaVersion: 1,
+        revision: 0,
+        session: createStorageSession(now),
+        data: {
+          ...fallbackData,
+          powerPlanner: null,
+          provenance: { bills: 'sample', powerPlanner: 'none' },
+        },
+      })
+      if (!fallbackResult.ok) {
+        return { attempted: true, snapshot: null }
+      }
+      localStorage.removeItem(legacyAtomicStorageSnapshotKey)
+      removeLegacyPerKeyStorage()
+      return { attempted: true, snapshot: fallbackResult.snapshot }
+    }
+    localStorage.removeItem(legacyAtomicStorageSnapshotKey)
+    return { attempted: true, snapshot: null }
+  }
+  if (isSessionExpired(candidate.session, now)) {
     localStorage.removeItem(legacyAtomicStorageSnapshotKey)
     return { attempted: true, snapshot: null }
   }
@@ -1063,16 +1084,27 @@ const migrateLegacyPerKeyStorage = (
   const validRatePlans = validateRatePlanCollection(ratePlans).valid
   const validCalculationSettings = isCalculationSettings(calculationSettings)
   const usedFallbackDomainData =
+    !bills ||
     !validProfile ||
     !normalizedScenario.scenario ||
+    normalizedScenario.changed ||
     !validRatePlans ||
     !validCalculationSettings
-  safeProvenance.bills =
-    bills &&
-    provenance.bills === 'uploaded' &&
-    !usedFallbackDomainData
-      ? 'uploaded'
-      : 'sample'
+  const migratedData: StorageSnapshotData = usedFallbackDomainData
+    ? {
+        ...fallbackData,
+        powerPlanner: null,
+        provenance: { bills: 'sample', powerPlanner: 'none' },
+      }
+    : {
+        bills: bills as MonthlyBill[],
+        profile: profile as SchoolProfile,
+        scenario: normalizedScenario.scenario as PeakScenario,
+        ratePlans: ratePlans as RatePlan[],
+        calculationSettings: calculationSettings as CalculationSettings,
+        powerPlanner,
+        provenance: safeProvenance,
+      }
   const migrationSnapshot: StorageSnapshot = {
     schemaVersion: 1,
     revision: 0,
@@ -1081,20 +1113,7 @@ const migrateLegacyPerKeyStorage = (
       createdAt: new Date(createdAt).toISOString(),
       expiresAt: new Date(expiresAt).toISOString(),
     },
-    data: {
-      bills: bills ?? fallbackData.bills,
-      profile: validProfile ? profile : fallbackData.profile,
-      scenario:
-        normalizedScenario.scenario ?? fallbackData.scenario,
-      ratePlans: validRatePlans
-        ? (ratePlans as RatePlan[])
-        : fallbackData.ratePlans,
-      calculationSettings: validCalculationSettings
-        ? calculationSettings
-        : fallbackData.calculationSettings,
-      powerPlanner,
-      provenance: safeProvenance,
-    },
+    data: migratedData,
   }
   const winner = readStorageSnapshot(now)
   if (winner) {
@@ -1113,6 +1132,53 @@ export const initializeStorageAfterMount = (
 ) =>
   withStorageMutationLock(() => {
     const currentTime = now ?? Date.now()
+    const activeBeforeCleanup = readStorageActivePointer()
+    if (activeBeforeCleanup) {
+      const invalidActiveKey = storageSnapshotKeyFor(
+        activeBeforeCleanup.sessionId,
+      )
+      const invalidActiveRaw = localStorage.getItem(invalidActiveKey)
+      let invalidActiveHasValidSession = false
+      try {
+        const candidate = JSON.parse(invalidActiveRaw ?? 'null') as
+          | Record<string, unknown>
+          | null
+        invalidActiveHasValidSession = Boolean(
+          candidate && isStorageSession(candidate.session),
+        )
+      } catch {
+        invalidActiveHasValidSession = false
+      }
+      if (
+        invalidActiveRaw &&
+        invalidActiveHasValidSession &&
+        !parseStorageSnapshot(
+          invalidActiveRaw,
+          activeBeforeCleanup.sessionId,
+        )
+      ) {
+        const safeFallbackData: StorageSnapshotData = {
+          ...fallbackData,
+          powerPlanner: null,
+          provenance: { bills: 'sample', powerPlanner: 'none' },
+        }
+        const fallbackResult = commitNewActiveSnapshotUnlocked({
+          schemaVersion: 1,
+          revision: 0,
+          session: createStorageSession(currentTime),
+          data: safeFallbackData,
+        })
+        if (!fallbackResult.ok) return null
+        try {
+          localStorage.removeItem(invalidActiveKey)
+          localStorage.removeItem(legacyAtomicStorageSnapshotKey)
+        } catch {
+          // The active fallback is already safe; cleanup retries later.
+        }
+        removeLegacyPerKeyStorage()
+        return fallbackResult.snapshot
+      }
+    }
     cleanupExpiredStorageSnapshotsUnlocked(currentTime)
     const active = readStorageSnapshot(currentTime)
     if (active) {
@@ -1133,7 +1199,7 @@ export const initializeStorageAfterMount = (
       return active
     }
 
-    const fixed = migrateLegacyFixedRoot(currentTime)
+    const fixed = migrateLegacyFixedRoot(currentTime, fallbackData)
     if (fixed.snapshot) return fixed.snapshot
     const fixedRaceWinner = readStorageSnapshot(currentTime)
     if (fixedRaceWinner) return fixedRaceWinner

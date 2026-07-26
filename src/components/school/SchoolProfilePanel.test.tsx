@@ -72,4 +72,35 @@ describe('school profile validation', () => {
     expect((input as HTMLInputElement).value).toBe('900')
     expect(screen.getByRole('status').textContent).toContain('저장')
   })
+
+  it('selects NFKC-equivalent tariff values without a false warning', () => {
+    const currentPlan = defaultRatePlans.find(
+      (plan) => plan.id === 'edu-a-high-a-2',
+    )!
+    render(
+      <SchoolProfilePanel
+        profile={{
+          ...defaultSchoolProfile,
+          contractType: ` ${currentPlan.contractType.normalize('NFD')} `,
+          voltageType: '고압Ａ',
+          currentPlan: ` ${currentPlan.planName.normalize('NFD')} `,
+        }}
+        ratePlans={defaultRatePlans}
+        onProfileChange={async () => true}
+      />,
+    )
+
+    expect(
+      (screen.getByLabelText('계약종별') as HTMLSelectElement).value,
+    ).toBe(currentPlan.contractType)
+    expect(
+      (screen.getByLabelText('수전전압') as HTMLSelectElement).value,
+    ).toBe(currentPlan.voltageType)
+    expect(
+      (screen.getByLabelText('현재 요금제') as HTMLSelectElement).value,
+    ).toBe(currentPlan.id)
+    expect(
+      screen.queryByText(/현재 요금제 조합이 없거나 중복됩니다/),
+    ).toBeNull()
+  })
 })

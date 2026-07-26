@@ -25,6 +25,12 @@ import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import { defaultCalculationSettings } from './lib/calculationSettings'
+import { normalizeRatePlanIdentityPart } from './lib/domainValidation'
+import {
+  applyPowerPlannerStorageIntent,
+  type PowerPlannerSaveResult,
+  type PowerPlannerStorageIntent,
+} from './lib/powerPlanner'
 import {
   applyCalculationSettingsIntent,
   applyPeakScenarioIntent,
@@ -513,9 +519,18 @@ function App() {
       })
       return true
     }
-    return persistControlledUpdate((latest) => ({
+    const result = await updateStorageSnapshot(
+      storageSession.sessionId,
+      (latest) => ({
       scenario: applyPeakScenarioIntent(latest.scenario, intent),
-    }))
+      }),
+    )
+    if (!result.ok) {
+      handleStorageWriteFailure(result)
+      return false
+    }
+    applySnapshot(result.snapshot)
+    return result.snapshot.data.scenario
   }
 
   const changeRatePlans = async (intent: RatePlanIntent) => {
@@ -592,42 +607,112 @@ function App() {
   }
 
   const applyPowerPlannerAndOpenDiagnosis = async (
-    nextDataSource: PowerPlannerDataSource | null,
-    origin: DataProvenance['powerPlanner'],
-  ) => {
-    if (nextDataSource && origin === 'uploaded') {
-      if (!(await startUploadSession((latest) => ({
-        powerPlanner: nextDataSource,
+    intent: PowerPlannerStorageIntent,
+  ): Promise<PowerPlannerSaveResult> => {
+    if (intent.type === 'merge-upload') {
+      const mergeState: {
+        result: ReturnType<typeof applyPowerPlannerStorageIntent> | null
+      } = { result: null }
+      const result = await rotateNewStorageSnapshot(
+        {
+          bills,
+          profile,
+          scenario,
+          ratePlans,
+          calculationSettings,
+          powerPlanner: powerPlannerDataSource,
+          provenance: dataProvenance,
+        },
+        (latest) => {
+          mergeState.result = applyPowerPlannerStorageIntent(
+            latest.powerPlanner,
+            latest.provenance.powerPlanner,
+            intent,
+          )
+          if (!mergeState.result.ok) {
+            throw new Error(
+              mergeState.result.message ??
+                '파워플래너 자료를 반영하지 못했습니다.',
+            )
+          }
+          return {
+            powerPlanner: mergeState.result.dataSource,
+            provenance: {
+              ...latest.provenance,
+              powerPlanner: 'uploaded',
+            },
+          }
+        },
+      )
+      if (!result.ok) {
+        handleStorageWriteFailure(result)
+        return {
+          ok: false,
+          message:
+            mergeState.result && !mergeState.result.ok
+              ? mergeState.result.message
+              : undefined,
+        }
+      }
+      if (result.cleanupPendingSessionIds?.length) {
+        setStorageCleanupRetryAttempt(0)
+      }
+      applySnapshot(result.snapshot)
+      setExpiryMessage('')
+      setActiveView('diagnosis')
+      return {
+        ok: true,
+        dataSource: result.snapshot.data.powerPlanner,
+        duplicateCount:
+          mergeState.result && mergeState.result.ok
+            ? mergeState.result.duplicateCount
+            : 0,
+      }
+    }
+
+    const applyReplacement = (latest: StorageSnapshotData) => {
+      const replacement = applyPowerPlannerStorageIntent(
+        latest.powerPlanner,
+        latest.provenance.powerPlanner,
+        intent,
+      )
+      if (!replacement.ok) throw new Error(replacement.message)
+      return {
+        powerPlanner: replacement.dataSource,
         provenance: {
           ...latest.provenance,
-          powerPlanner: origin,
+          powerPlanner: intent.origin,
         },
-      })))) {
-        return false
-      }
-    } else {
-      if (storageSession) {
-        if (!(await persistControlledUpdate((latest) => ({
-          powerPlanner: nextDataSource,
-          provenance: {
-            ...latest.provenance,
-            powerPlanner: origin,
-          },
-        })))) {
-          return false
-        }
-      } else {
-        setPowerPlannerDataSource(() => nextDataSource)
-        setDataProvenance((latest) => ({
-          ...latest,
-          powerPlanner: origin,
-        }))
       }
     }
-    if (nextDataSource) {
-      setActiveView('diagnosis')
+    if (storageSession) {
+      const result = await updateStorageSnapshot(
+        storageSession.sessionId,
+        applyReplacement,
+      )
+      if (!result.ok) {
+        handleStorageWriteFailure(result)
+        return { ok: false }
+      }
+      applySnapshot(result.snapshot)
+      if (intent.dataSource) setActiveView('diagnosis')
+      return {
+        ok: true,
+        dataSource: result.snapshot.data.powerPlanner,
+        duplicateCount: 0,
+      }
     }
-    return true
+    setPowerPlannerDataSource(() => intent.dataSource)
+    setDataProvenance((latest) => ({
+      ...latest,
+      powerPlanner: intent.origin,
+    }))
+    if (intent.dataSource) setActiveView('diagnosis')
+    return {
+      ok: true,
+      dataSource: intent.dataSource,
+      duplicateCount: 0,
+    }
   }
 
   return (
@@ -867,21 +952,45 @@ export function SchoolProfilePanel({
     )
   }
 
-  const contractTypes = Array.from(new Set(ratePlans.map((plan) => plan.contractType)))
+  const sameTariffIdentity = (left: string, right: string) =>
+    normalizeRatePlanIdentityPart(left) ===
+    normalizeRatePlanIdentityPart(right)
+  const uniqueTariffValues = (values: string[]) => {
+    const seen = new Set<string>()
+    return values.filter((value) => {
+      const normalized = normalizeRatePlanIdentityPart(value)
+      if (seen.has(normalized)) return false
+      seen.add(normalized)
+      return true
+    })
+  }
+  const contractTypes = uniqueTariffValues(
+    ratePlans.map((plan) => plan.contractType),
+  )
+  const selectedContractType =
+    contractTypes.find((value) =>
+      sameTariffIdentity(value, profile.contractType),
+    ) ?? ''
   const voltageTypes = Array.from(
-    new Set(
+    uniqueTariffValues(
       ratePlans
-        .filter((plan) => plan.contractType === profile.contractType)
+        .filter((plan) =>
+          sameTariffIdentity(plan.contractType, profile.contractType),
+        )
         .map((plan) => plan.voltageType),
     ),
   )
+  const selectedVoltageType =
+    voltageTypes.find((value) =>
+      sameTariffIdentity(value, profile.voltageType),
+    ) ?? ''
   const currentPlanOptions = ratePlans.filter(
     (plan) =>
-      plan.contractType === profile.contractType &&
-      plan.voltageType === profile.voltageType,
+      sameTariffIdentity(plan.contractType, profile.contractType) &&
+      sameTariffIdentity(plan.voltageType, profile.voltageType),
   )
   const matchingCurrentPlans = currentPlanOptions.filter(
-    (plan) => plan.planName === profile.currentPlan,
+    (plan) => sameTariffIdentity(plan.planName, profile.currentPlan),
   )
   const hasCurrentPlan = matchingCurrentPlans.length === 1
   const selectedCurrentPlanId = hasCurrentPlan ? matchingCurrentPlans[0].id : ''
@@ -893,9 +1002,14 @@ export function SchoolProfilePanel({
   ) => {
     const compatiblePlans = ratePlans.filter(
       (plan) =>
-        plan.contractType === contractType && plan.voltageType === voltageType,
+        sameTariffIdentity(plan.contractType, contractType) &&
+        sameTariffIdentity(plan.voltageType, voltageType),
     )
-    const nextPlan = compatiblePlans.find((plan) => plan.id === currentPlanId)
+    const nextPlan = compatiblePlans.find((plan) =>
+      currentPlanId
+        ? sameTariffIdentity(plan.id, currentPlanId)
+        : false,
+    )
       ?? compatiblePlans[0]
     void saveProfile(
       {
@@ -911,11 +1025,15 @@ export function SchoolProfilePanel({
   }
 
   const updateContractType = (contractType: string) => {
-    const compatiblePlans = ratePlans.filter((plan) => plan.contractType === contractType)
-    const voltageType = compatiblePlans.some(
-      (plan) => plan.voltageType === profile.voltageType,
+    const compatiblePlans = ratePlans.filter((plan) =>
+      sameTariffIdentity(plan.contractType, contractType),
     )
-      ? profile.voltageType
+    const voltageType = compatiblePlans.some(
+      (plan) => sameTariffIdentity(plan.voltageType, profile.voltageType),
+    )
+      ? compatiblePlans.find((plan) =>
+          sameTariffIdentity(plan.voltageType, profile.voltageType),
+        )?.voltageType ?? ''
       : compatiblePlans[0]?.voltageType ?? ''
     setTariffProfile(contractType, voltageType)
   }
@@ -994,7 +1112,7 @@ export function SchoolProfilePanel({
           <label>
             계약종별
             <select
-              value={profile.contractType}
+              value={selectedContractType}
               disabled={saving}
               aria-invalid={invalidField === 'contractType'}
               onChange={(event) => updateContractType(event.target.value)}
@@ -1008,10 +1126,10 @@ export function SchoolProfilePanel({
           <label>
             수전전압
             <select
-              value={profile.voltageType}
+              value={selectedVoltageType}
               disabled={saving}
               aria-invalid={invalidField === 'voltageType'}
-              onChange={(event) => setTariffProfile(profile.contractType, event.target.value)}
+              onChange={(event) => setTariffProfile(selectedContractType, event.target.value)}
             >
               <option value="">선택</option>
               {voltageTypes.map((voltageType) => (
@@ -1026,7 +1144,7 @@ export function SchoolProfilePanel({
               disabled={saving}
               aria-invalid={invalidField === 'currentPlan'}
               onChange={(event) =>
-                setTariffProfile(profile.contractType, profile.voltageType, event.target.value)
+                setTariffProfile(selectedContractType, selectedVoltageType, event.target.value)
               }
             >
               <option value="">선택</option>

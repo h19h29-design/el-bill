@@ -10,6 +10,11 @@ import {
 import { defaultCalculationSettings } from './calculationSettings'
 import { samplePowerPlannerDataSource } from '../data/samplePowerPlanner'
 import {
+  applyPowerPlannerStorageIntent,
+  type PowerPlannerSaveResult,
+  type PowerPlannerStorageIntent,
+} from './powerPlanner'
+import {
   applyPeakScenarioIntent,
   applyRatePlanIntent,
 } from './persistedIntents'
@@ -293,6 +298,110 @@ describe('storage mutation lock and patch protocol', () => {
       ...latestData,
       powerPlanner: samplePowerPlannerDataSource,
       provenance: { bills: 'uploaded', powerPlanner: 'uploaded' },
+    })
+  })
+
+  it('merges concurrent PowerPlanner upload intents into the latest locked snapshot', async () => {
+    const latestData = {
+      ...makeData(),
+      profile: {
+        ...defaultSchoolProfile,
+        displaySchoolName: '최신 잠금 학교',
+      },
+      calculationSettings: {
+        ...defaultCalculationSettings,
+        vatPercent: 7,
+      },
+    }
+    expect(
+      (await startNewStorageSnapshot(latestData, now, 'planner-intent-base')).ok,
+    ).toBe(true)
+    const locks = installManualLock()
+    const upload = (
+      intent: PowerPlannerStorageIntent,
+      sessionId: string,
+    ): Promise<PowerPlannerSaveResult> =>
+      rotateNewStorageSnapshot(
+        makeData(),
+        (latest) => {
+          const merged = applyPowerPlannerStorageIntent(
+            latest.powerPlanner,
+            latest.provenance.powerPlanner,
+            intent,
+          )
+          if (!merged.ok) throw new Error(merged.message)
+          return {
+            powerPlanner: merged.dataSource,
+            provenance: {
+              ...latest.provenance,
+              powerPlanner: 'uploaded',
+            },
+          }
+        },
+        now + 1,
+        sessionId,
+      ).then((result) =>
+        result.ok
+          ? {
+              ok: true,
+              dataSource: result.snapshot.data.powerPlanner,
+              duplicateCount: 0,
+            }
+          : { ok: false },
+      )
+    const makeIntent = (
+      id: string,
+      hour: number,
+    ): PowerPlannerStorageIntent => ({
+      type: 'merge-upload',
+      sourceName: `${id}.csv`,
+      memo: id,
+      records: [
+        {
+          id,
+          dataType: 'hourlyUsage',
+          date: '2026-07-01',
+          hour,
+          usageKwh: 400 + hour,
+          sourceRowIndex: 0,
+        },
+      ],
+    })
+
+    const uploadA = upload(makeIntent('upload-a', 13), 'planner-upload-a')
+    const uploadB = upload(makeIntent('upload-b', 14), 'planner-upload-b')
+
+    await locks.run(0)
+    await expect(uploadA).resolves.toMatchObject({
+      ok: true,
+      dataSource: { records: [expect.objectContaining({ id: 'upload-a' })] },
+    })
+    await locks.run(1)
+    await expect(uploadB).resolves.toMatchObject({
+      ok: true,
+      dataSource: {
+        records: [
+          expect.objectContaining({ id: 'upload-a' }),
+          expect.objectContaining({ id: 'upload-b' }),
+        ],
+      },
+    })
+
+    expect(readStorageSnapshot(now + 2)?.data).toMatchObject({
+      profile: { displaySchoolName: '최신 잠금 학교' },
+      calculationSettings: {
+        vatPercent: 7,
+      },
+      powerPlanner: {
+        records: [
+          expect.objectContaining({ id: 'upload-a' }),
+          expect.objectContaining({ id: 'upload-b' }),
+        ],
+      },
+      provenance: {
+        bills: 'uploaded',
+        powerPlanner: 'uploaded',
+      },
     })
   })
 

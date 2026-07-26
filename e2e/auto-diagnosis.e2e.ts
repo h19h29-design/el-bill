@@ -319,6 +319,156 @@ test('two tabs merge different active-session edits under Web Locks', async ({ p
   await secondPage.close()
 })
 
+test('two tabs merge concurrent PowerPlanner uploads without losing bill or profile data', async ({
+  page,
+}, testInfo) => {
+  const uploadA = testInfo.outputPath('power-planner-a.csv')
+  const uploadB = testInfo.outputPath('power-planner-b.csv')
+  await writeFile(
+    uploadA,
+    ['일자,시간,사용량(kWh)', '2026-07-01,13,420'].join('\n'),
+  )
+  await writeFile(
+    uploadB,
+    ['일자,시간,사용량(kWh)', '2026-07-01,14,460'].join('\n'),
+  )
+
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '고지서 입력',
+    exact: true,
+  }).click()
+  await page
+    .locator('input[type="file"][accept=".xlsx,.xls"]')
+    .first()
+    .setInputFiles(resolve('e2e/fixtures/monthly-bills.xlsx'))
+  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '학교정보',
+    exact: true,
+  }).click()
+  await page.getByLabel('화면 표시명').fill('동시 업로드 학교')
+  const billCountBeforeUploads = await page.evaluate(() => {
+    const pointer = JSON.parse(
+      localStorage.getItem('el-bill:storage-active') ?? 'null',
+    ) as { sessionId: string } | null
+    if (!pointer) return 0
+    const snapshot = JSON.parse(
+      localStorage.getItem(
+        `el-bill:storage-snapshot:${encodeURIComponent(pointer.sessionId)}`,
+      ) ?? 'null',
+    ) as { data: { bills: unknown[] } } | null
+    return snapshot?.data.bills.length ?? 0
+  })
+  expect(billCountBeforeUploads).toBeGreaterThan(0)
+
+  const secondPage = await page.context().newPage()
+  await secondPage.goto('/')
+  for (const currentPage of [page, secondPage]) {
+    await currentPage.locator('.sidebar-nav').getByRole('button', {
+      name: '파워플래너',
+      exact: true,
+    }).click()
+  }
+  await page
+    .locator('input[type="file"][accept=".xlsx,.xls,.csv"]')
+    .setInputFiles(uploadA)
+  await secondPage
+    .locator('input[type="file"][accept=".xlsx,.xls,.csv"]')
+    .setInputFiles(uploadB)
+
+  await page.evaluate((lockName) => {
+    const testWindow = window as typeof window & {
+      __plannerLockRelease?: () => void
+      __plannerLockPromise?: Promise<void>
+    }
+    testWindow.__plannerLockPromise = navigator.locks.request(
+      lockName,
+      { mode: 'exclusive' },
+      async () =>
+        new Promise<void>((resolve) => {
+          testWindow.__plannerLockRelease = resolve
+        }),
+    )
+  }, storageMutationLockName)
+  await expect
+    .poll(() =>
+      page.evaluate(async (lockName) => {
+        const state = await navigator.locks.query()
+        return state.held?.some((lock) => lock.name === lockName) ?? false
+      }, storageMutationLockName),
+    )
+    .toBe(true)
+
+  await page.getByRole('button', { name: '매핑 적용' }).click()
+  await secondPage.getByRole('button', { name: '매핑 적용' }).click()
+  await expect
+    .poll(() =>
+      page.evaluate(async (lockName) => {
+        const state = await navigator.locks.query()
+        return state.pending?.filter((lock) => lock.name === lockName).length ?? 0
+      }, storageMutationLockName),
+    )
+    .toBe(2)
+
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __plannerLockRelease?: () => void
+    }
+    testWindow.__plannerLockRelease?.()
+  })
+  await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
+  await expect(secondPage.locator('.view-heading h2')).toHaveText('자동진단')
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const pointer = JSON.parse(
+          localStorage.getItem('el-bill:storage-active') ?? 'null',
+        ) as { sessionId: string } | null
+        if (!pointer) return null
+        const snapshot = JSON.parse(
+          localStorage.getItem(
+            `el-bill:storage-snapshot:${encodeURIComponent(pointer.sessionId)}`,
+          ) ?? 'null',
+        ) as {
+          data: {
+            bills: unknown[]
+            profile: { displaySchoolName: string }
+            powerPlanner: { records: Array<{ hour: number }> }
+            provenance: { bills: string; powerPlanner: string }
+          }
+        } | null
+        if (!snapshot) return null
+        return {
+          billCount: snapshot.data.bills.length,
+          schoolName: snapshot.data.profile.displaySchoolName,
+          hours: snapshot.data.powerPlanner.records
+            .map((record) => record.hour)
+            .sort(),
+          provenance: snapshot.data.provenance,
+        }
+      }),
+    )
+    .toEqual({
+      billCount: billCountBeforeUploads,
+      schoolName: '동시 업로드 학교',
+      hours: [13, 14],
+      provenance: {
+        bills: 'uploaded',
+        powerPlanner: 'uploaded',
+      },
+    })
+  await page.evaluate(async () => {
+    const testWindow = window as typeof window & {
+      __plannerLockPromise?: Promise<void>
+    }
+    await testWindow.__plannerLockPromise
+  })
+  await secondPage.close()
+})
+
 test('PowerPlanner-only upload stays sample-bill mode', async ({ page }, testInfo) => {
   const powerPlannerCsv = testInfo.outputPath('power-planner-hourly.csv')
   await writeFile(

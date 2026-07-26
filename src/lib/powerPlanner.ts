@@ -2,12 +2,14 @@ import type {
   ParsedSheet,
 } from './excel'
 import type {
+  DataProvenance,
   PowerPlannerDataSource,
   PowerPlannerDataType,
   PowerPlannerRecord,
 } from '../types'
 import {
   parseStrictCalendarValue,
+  parseStrictDay,
   parseStrictMonth,
   parseStrictYear,
   type CalendarParts,
@@ -185,7 +187,9 @@ const optionalNumberInRange = (
 const canonicalPeriod = (
   record: Record<string, unknown>,
 ): CalendarParts | null | undefined => {
-  const hasDate = record.date !== undefined
+  const hasDate =
+    record.date !== undefined &&
+    (typeof record.date !== 'string' || Boolean(record.date.trim()))
   const dateParts = hasDate
     ? parseStrictCalendarValue(record.date)
     : null
@@ -340,17 +344,26 @@ export const mapRowsToPowerPlannerRecords = (
       const dateParts = inferYearMonthDay(dateValue)
       const yearValue = row[mapping.year]
       const monthValue = row[mapping.month]
+      const dayValue = row[mapping.day]
       const hasYearValue = Boolean(mapping.year && normalize(yearValue))
       const hasMonthValue = Boolean(mapping.month && normalize(monthValue))
+      const hasDayCell = Boolean(
+        mapping.day &&
+          Object.prototype.hasOwnProperty.call(row, mapping.day),
+      )
       const parsedYear = hasYearValue
         ? parseStrictYear(yearValue)
         : dateParts.year
       const parsedMonth = hasMonthValue
         ? parseStrictMonth(monthValue)
         : dateParts.month
+      const parsedDay = hasDayCell
+        ? parseStrictDay(dayValue)
+        : dateParts.day
       if (
         (hasYearValue && parsedYear === null) ||
-        (hasMonthValue && parsedMonth === null)
+        (hasMonthValue && parsedMonth === null) ||
+        (hasDayCell && parsedDay === null)
       ) {
         return null
       }
@@ -360,7 +373,7 @@ export const mapRowsToPowerPlannerRecords = (
         date: asDate(dateValue),
         year: parsedYear ?? undefined,
         month: parsedMonth ?? undefined,
-        day: asNumber(row[mapping.day]) ?? dateParts.day,
+        day: parsedDay ?? undefined,
         hour: inferHour(row[mapping.hour]),
         usageKwh: asNumber(row[mapping.usageKwh]),
         maxDemandKw: asNumber(row[mapping.maxDemandKw]),
@@ -521,6 +534,71 @@ export const createPowerPlannerDataSource = (
   records,
   memo,
 })
+
+export type PowerPlannerStorageIntent =
+  | {
+      type: 'merge-upload'
+      records: PowerPlannerRecord[]
+      sourceName: string
+      memo: string
+    }
+  | {
+      type: 'replace'
+      dataSource: PowerPlannerDataSource | null
+      origin: DataProvenance['powerPlanner']
+    }
+
+export type PowerPlannerSaveResult =
+  | {
+      ok: true
+      dataSource: PowerPlannerDataSource | null
+      duplicateCount: number
+    }
+  | {
+      ok: false
+      message?: string
+    }
+
+export const applyPowerPlannerStorageIntent = (
+  currentDataSource: PowerPlannerDataSource | null,
+  currentOrigin: DataProvenance['powerPlanner'],
+  intent: PowerPlannerStorageIntent,
+): PowerPlannerSaveResult & {
+  origin?: DataProvenance['powerPlanner']
+} => {
+  if (intent.type === 'replace') {
+    return {
+      ok: true,
+      dataSource: intent.dataSource,
+      duplicateCount: 0,
+      origin: intent.origin,
+    }
+  }
+
+  const normalizedIncoming = normalizePowerPlannerRecords(intent.records)
+  if (!normalizedIncoming.records) {
+    return {
+      ok: false,
+      message: '업로드한 파워플래너 자료에 유효하지 않은 행이 있습니다.',
+    }
+  }
+  const existing =
+    currentOrigin === 'uploaded' ? currentDataSource?.records ?? [] : []
+  const merged = mergePowerPlannerRecords(existing, normalizedIncoming.records)
+  if (!merged.accepted) {
+    return { ok: false, message: merged.message }
+  }
+  return {
+    ok: true,
+    dataSource: createPowerPlannerDataSource(
+      merged.records,
+      intent.sourceName,
+      intent.memo,
+    ),
+    duplicateCount: merged.duplicateCount,
+    origin: 'uploaded',
+  }
+}
 
 export const getPowerPlannerSheetLabel = (sheet?: ParsedSheet) =>
   sheet ? `${sheet.name} (${sheet.rows.length.toLocaleString('ko-KR')}행)` : '시트 없음'

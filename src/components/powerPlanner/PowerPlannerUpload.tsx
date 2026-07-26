@@ -11,11 +11,7 @@ import {
   ShieldCheck,
   UploadCloud,
 } from 'lucide-react'
-import type {
-  DataProvenance,
-  PowerPlannerDataSource,
-  PowerPlannerDataType,
-} from '../../types'
+import type { PowerPlannerDataSource, PowerPlannerDataType } from '../../types'
 import {
   parseWorkbook,
   validateUploadFile,
@@ -23,29 +19,28 @@ import {
   type WorkbookParseResult,
 } from '../../lib/excel'
 import {
-  createPowerPlannerDataSource,
   getMissingPowerPlannerMappings,
   getPowerPlannerSheetLabel,
   getPowerPlannerSummary,
   guessPowerPlannerDataType,
   guessPowerPlannerMapping,
   mapRowsToPowerPlannerRecords,
-  mergePowerPlannerRecords,
   powerPlannerDataTypeLabels,
   powerPlannerMappingFields,
   powerPlannerMvpGuardrail,
   powerPlannerUploadNotice,
   requiredPowerPlannerMapping,
+  type PowerPlannerSaveResult,
+  type PowerPlannerStorageIntent,
 } from '../../lib/powerPlanner'
 import { samplePowerPlannerDataSource } from '../../data/samplePowerPlanner'
 
 interface PowerPlannerUploadProps {
   dataSource: PowerPlannerDataSource | null
-  dataOrigin: DataProvenance['powerPlanner']
+  dataOrigin: 'sample' | 'uploaded' | 'none'
   onDataSourceChange: (
-    dataSource: PowerPlannerDataSource | null,
-    origin: DataProvenance['powerPlanner'],
-  ) => Promise<boolean>
+    intent: PowerPlannerStorageIntent,
+  ) => Promise<PowerPlannerSaveResult>
 }
 
 const dataTypes = Object.entries(powerPlannerDataTypeLabels) as Array<
@@ -54,7 +49,6 @@ const dataTypes = Object.entries(powerPlannerDataTypeLabels) as Array<
 
 export function PowerPlannerUpload({
   dataSource,
-  dataOrigin,
   onDataSourceChange,
 }: PowerPlannerUploadProps) {
   const [dataType, setDataType] = useState<PowerPlannerDataType>(
@@ -136,34 +130,29 @@ export function PowerPlannerUpload({
       return
     }
 
-    const existing = dataOrigin === 'uploaded' ? dataSource?.records ?? [] : []
-    const merged = mergePowerPlannerRecords(existing, records)
-    if (!merged.accepted) {
-      setMessage(merged.message ?? '파워플래너 자료를 반영하지 못했습니다.')
-      return
-    }
-    const next = createPowerPlannerDataSource(
-      merged.records,
-      sourceName,
-      `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건 반영`,
-    )
-    let saved = false
+    let result: PowerPlannerSaveResult
     try {
-      saved = await onDataSourceChange(next, 'uploaded')
+      result = await onDataSourceChange({
+        type: 'merge-upload',
+        records,
+        sourceName,
+        memo: `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건 반영`,
+      })
     } catch {
-      saved = false
+      result = { ok: false }
     }
-    if (!saved) {
+    if (!result.ok) {
       setMessage(
-        '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+        result.message ??
+          '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
       )
       return
     }
-    const duplicateNotice = merged.duplicateCount
-      ? ` 중복 ${merged.duplicateCount.toLocaleString('ko-KR')}건은 제외했습니다.`
+    const duplicateNotice = result.duplicateCount
+      ? ` 중복 ${result.duplicateCount.toLocaleString('ko-KR')}건은 제외했습니다.`
       : ''
     setMessage(
-      `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건을 반영했습니다. 기존 자료와 합쳐 총 ${next.records.length.toLocaleString('ko-KR')}건입니다.${duplicateNotice}`,
+      `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건을 반영했습니다. 기존 자료와 합쳐 총 ${(result.dataSource?.records.length ?? 0).toLocaleString('ko-KR')}건입니다.${duplicateNotice}`,
     )
   }
 
@@ -245,12 +234,19 @@ export function PowerPlannerUpload({
             type="button"
             className="ghost-button"
             onClick={() => {
-              void onDataSourceChange(
-                samplePowerPlannerDataSource,
-                'sample',
-              )
-                .then((saved) => {
-                  if (!saved) return
+              void onDataSourceChange({
+                type: 'replace',
+                dataSource: samplePowerPlannerDataSource,
+                origin: 'sample',
+              })
+                .then((result) => {
+                  if (!result.ok) {
+                    setMessage(
+                      result.message ??
+                        '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+                    )
+                    return
+                  }
                   setMessage(
                     '시연용 시간대별 파워플래너 샘플을 적용했습니다.',
                   )
@@ -372,9 +368,19 @@ export function PowerPlannerUpload({
             type="button"
             className="ghost-button"
             onClick={() => {
-              void onDataSourceChange(null, 'none')
-                .then((saved) => {
-                  if (!saved) return
+              void onDataSourceChange({
+                type: 'replace',
+                dataSource: null,
+                origin: 'none',
+              })
+                .then((result) => {
+                  if (!result.ok) {
+                    setMessage(
+                      result.message ??
+                        '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+                    )
+                    return
+                  }
                   setMessage('파워플래너 업로드 자료를 초기화했습니다.')
                 })
                 .catch(() => {

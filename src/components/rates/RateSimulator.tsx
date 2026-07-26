@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { AlertTriangle, CheckCircle2, TrendingDown } from 'lucide-react'
@@ -31,7 +31,9 @@ interface RateSimulatorProps {
   comparison: PlanCandidateComparison
   calculationSettings: CalculationSettings
   scenario: PeakScenario
-  onScenarioChange: (intent: PeakScenarioIntent) => Promise<boolean>
+  onScenarioChange: (
+    intent: PeakScenarioIntent,
+  ) => Promise<boolean | PeakScenario>
 }
 
 const comparisonTabs = [
@@ -59,6 +61,12 @@ export function RateSimulator({
   const form = useForm<PeakScenario>({
     defaultValues: scenario,
   })
+  useEffect(() => {
+    form.reset(scenario, {
+      keepDirtyValues: true,
+      keepDirty: true,
+    })
+  }, [form, scenario])
   const dirtyScenarioFields = form.formState.dirtyFields
   const submitScenario = async (values: PeakScenario) => {
     const parsed = scenarioSchema.safeParse(values)
@@ -84,10 +92,16 @@ export function RateSimulator({
         .map((field) => [field, parsed.data[field]]),
     ) as Partial<PeakScenario>
     if (Object.keys(patch).length === 0) return
-    await onScenarioChange({
+    const saved = await onScenarioChange({
       type: 'patch',
       patch,
-    }).catch(() => undefined)
+    }).catch(() => false)
+    if (!saved) return
+    form.reset(
+      typeof saved === 'object'
+        ? saved
+        : { ...scenario, ...patch },
+    )
   }
   const reviewOnlyCandidate = candidates.find(
     (candidate) => candidate.candidatePlanId === candidatePlan.id,

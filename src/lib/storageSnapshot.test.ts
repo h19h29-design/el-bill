@@ -13,6 +13,7 @@ import {
   cleanupExpiredStorageSnapshots,
   initializeStorageAfterMount,
   legacyAtomicStorageSnapshotKey,
+  readStorageActivePointer,
   readStorageSnapshot,
   startNewStorageSnapshot,
   storageActivePointerKey,
@@ -62,6 +63,15 @@ const legacyPayload = (
   createdAt = '2026-07-26T00:00:00.000Z',
 ) => JSON.stringify({ createdAt, expiresAt, data })
 
+const uploadedLegacyBills = sampleBills.map((bill) => ({
+  ...bill,
+  id: `uploaded-${bill.id}`,
+  usageKwh: bill.usageKwh + 123,
+}))
+
+const sampleFallbackData = () =>
+  makeData({ bills: 'sample', powerPlanner: 'none' })
+
 describe('locked session-scoped snapshots', () => {
   it('restores custom calculation settings without changing the session expiry', async () => {
     const now = Date.parse('2026-07-26T00:00:00.000Z')
@@ -87,9 +97,16 @@ describe('locked session-scoped snapshots', () => {
     )
   })
 
-  it('defaults calculation settings in an old atomic snapshot without extending TTL', async () => {
+  it('abandons an old atomic snapshot with missing calculation settings', async () => {
     const now = Date.parse('2026-07-26T00:00:00.000Z')
-    const oldRoot = snapshot('old-calculation-settings', makeData(), now)
+    const oldRoot = snapshot(
+      'old-calculation-settings',
+      {
+        ...makeData(),
+        bills: uploadedLegacyBills,
+      },
+      now,
+    )
     const oldData = { ...oldRoot.data } as Partial<StorageSnapshotData>
     delete oldData.calculationSettings
     localStorage.setItem(
@@ -104,12 +121,15 @@ describe('locked session-scoped snapshots', () => {
       }),
     )
 
-    const restored = readStorageSnapshot(now + 1_000)
-    expect(restored?.data.calculationSettings).toEqual(
-      defaultCalculationSettings,
+    const restored = await initializeStorageAfterMount(
+      sampleFallbackData(),
+      now + 1_000,
     )
-    expect(restored?.data.provenance.bills).toBe('sample')
-    expect(restored?.session.expiresAt).toBe(oldRoot.session.expiresAt)
+    expect(restored?.data).toEqual(sampleFallbackData())
+    expect(restored?.data.bills).not.toEqual(uploadedLegacyBills)
+    expect(
+      localStorage.getItem(storageSnapshotKeyFor(oldRoot.session.sessionId)),
+    ).toBeNull()
   })
 
   beforeEach(() => {
@@ -310,7 +330,7 @@ describe('locked session-scoped snapshots', () => {
     expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
   })
 
-  it('purely ignores then effect-purges an incomplete snapshot', async () => {
+  it('purely ignores then replaces an incomplete snapshot with safe samples', async () => {
     const key = storageSnapshotKeyFor('invalid-root')
     const raw = JSON.stringify({
       ...snapshot('invalid-root'),
@@ -322,9 +342,15 @@ describe('locked session-scoped snapshots', () => {
     expect(readStorageSnapshot(now)).toBeNull()
     expect(localStorage.getItem(key)).toBe(raw)
 
-    await initializeStorageAfterMount(makeData(), now)
+    const initialized = await initializeStorageAfterMount(
+      sampleFallbackData(),
+      now,
+    )
     expect(localStorage.getItem(key)).toBeNull()
-    expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
+    expect(initialized?.data).toEqual(sampleFallbackData())
+    expect(readStorageActivePointer()?.sessionId).toBe(
+      initialized?.session.sessionId,
+    )
   })
 
   it('normalizes legacy PowerPlanner duplicates and persists the sanitized snapshot', async () => {
@@ -489,7 +515,7 @@ describe('locked session-scoped snapshots', () => {
     expect(readStorageSnapshot(now)).toBeNull()
   })
 
-  it('normalizes restored EHP groups and persists the sanitized snapshot', async () => {
+  it('replaces a restored scenario that requires EHP normalization', async () => {
     const sessionId = 'normalized-peak-scenario'
     const restored = snapshot(sessionId, {
       ...makeData(),
@@ -505,19 +531,13 @@ describe('locked session-scoped snapshots', () => {
     )
     localStorage.setItem(storageActivePointerKey, pointer(sessionId))
 
-    const initialized = await initializeStorageAfterMount(makeData(), now)
-
-    expect(initialized?.data.scenario).toMatchObject({
-      mainBuildingEhpGroups: 100,
-      annexEhpGroups: 2,
-    })
-    const persisted = JSON.parse(
-      localStorage.getItem(storageSnapshotKeyFor(sessionId)) ?? '{}',
+    const initialized = await initializeStorageAfterMount(
+      sampleFallbackData(),
+      now,
     )
-    expect(persisted.data.scenario).toMatchObject({
-      mainBuildingEhpGroups: 100,
-      annexEhpGroups: 2,
-    })
+
+    expect(initialized?.data).toEqual(sampleFallbackData())
+    expect(localStorage.getItem(storageSnapshotKeyFor(sessionId))).toBeNull()
   })
 
   it('purges a malformed active pointer only after the mount initializer runs', async () => {
@@ -573,8 +593,8 @@ describe('locked one-time migration', () => {
     expect(localStorage.getItem('el-bill:bills')).toBeNull()
   })
 
-  it('downgrades uploaded bill provenance when legacy calculation settings are missing', async () => {
-    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+  it('replaces uploaded legacy bills with the complete sample fallback when settings are missing', async () => {
+    localStorage.setItem('el-bill:bills', legacyPayload(uploadedLegacyBills))
     localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
     localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
     localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
@@ -583,10 +603,12 @@ describe('locked one-time migration', () => {
       legacyPayload({ bills: 'uploaded', powerPlanner: 'none' }),
     )
 
-    const migrated = await initializeStorageAfterMount(makeData(), now)
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
 
     expect(migrated?.data.bills).toEqual(sampleBills)
-    expect(migrated?.data.provenance.bills).toBe('sample')
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
   })
 
   it('normalizes duplicate legacy PowerPlanner records without losing bills', async () => {
@@ -642,8 +664,8 @@ describe('locked one-time migration', () => {
     expect(migrated?.data.powerPlanner?.records).toHaveLength(1)
   })
 
-  it('normalizes legacy EHP groups before restoring and persists the sanitized snapshot', async () => {
-    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+  it('abandons legacy user data when EHP groups require normalization', async () => {
+    localStorage.setItem('el-bill:bills', legacyPayload(uploadedLegacyBills))
     localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
     localStorage.setItem(
       'el-bill:scenario',
@@ -654,22 +676,20 @@ describe('locked one-time migration', () => {
       }),
     )
     localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
-
-    const migrated = await initializeStorageAfterMount(makeData(), now)
-
-    expect(migrated?.data.scenario).toMatchObject({
-      mainBuildingEhpGroups: 100,
-      annexEhpGroups: 2,
-    })
-    const persisted = JSON.parse(
-      localStorage.getItem(
-        storageSnapshotKeyFor(migrated?.session.sessionId ?? ''),
-      ) ?? '{}',
+    localStorage.setItem(
+      'el-bill:calculation-settings',
+      legacyPayload(defaultCalculationSettings),
     )
-    expect(persisted.data.scenario).toMatchObject({
-      mainBuildingEhpGroups: 100,
-      annexEhpGroups: 2,
-    })
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      legacyPayload({ bills: 'uploaded', powerPlanner: 'none' }),
+    )
+
+    const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
+
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+    expect(localStorage.getItem('el-bill:scenario')).toBeNull()
   })
 
   it('drops invalid legacy PowerPlanner data only and preserves uploaded bills', async () => {
@@ -782,9 +802,9 @@ describe('locked one-time migration', () => {
       },
     ],
   ])(
-    'downgrades uploaded bill provenance when legacy %s uses fallback defaults',
+    'replaces the entire legacy snapshot when %s requires fallback defaults',
     async (_label, legacy) => {
-      localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+      localStorage.setItem('el-bill:bills', legacyPayload(uploadedLegacyBills))
       localStorage.setItem('el-bill:profile', legacyPayload(legacy.profile))
       localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
       localStorage.setItem(
@@ -800,10 +820,12 @@ describe('locked one-time migration', () => {
         legacyPayload({ bills: 'uploaded', powerPlanner: 'none' }),
       )
 
-      const migrated = await initializeStorageAfterMount(makeData(), now)
+      const migrated = await initializeStorageAfterMount(sampleFallbackData(), now)
 
       expect(migrated?.data.bills).toEqual(sampleBills)
-      expect(migrated?.data.provenance.bills).toBe('sample')
+      expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+      expect(migrated?.data).toEqual(sampleFallbackData())
+      expect(localStorage.getItem('el-bill:bills')).toBeNull()
     },
   )
 
@@ -822,8 +844,35 @@ describe('locked one-time migration', () => {
     expect(
       JSON.parse(
         localStorage.getItem(storageSnapshotKeyFor('fixed-root-session'))!,
-      ).revision,
+    ).revision,
     ).toBe(0)
+  })
+
+  it('replaces an invalid fixed legacy root with the complete sample fallback', async () => {
+    const legacyRoot = snapshot('invalid-fixed-root', {
+      ...makeData(),
+      bills: uploadedLegacyBills,
+    })
+    const invalidData = {
+      ...legacyRoot.data,
+    } as Partial<StorageSnapshotData>
+    delete invalidData.calculationSettings
+    localStorage.setItem(
+      legacyAtomicStorageSnapshotKey,
+      JSON.stringify({
+        ...legacyRoot,
+        data: invalidData,
+      }),
+    )
+
+    const migrated = await initializeStorageAfterMount(
+      sampleFallbackData(),
+      now,
+    )
+
+    expect(migrated?.data).toEqual(sampleFallbackData())
+    expect(migrated?.data.bills).not.toEqual(uploadedLegacyBills)
+    expect(localStorage.getItem(legacyAtomicStorageSnapshotKey)).toBeNull()
   })
 
   it('preserves valid legacy data when migration snapshot storage fails', async () => {

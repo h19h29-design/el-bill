@@ -193,6 +193,61 @@ describe('power planner data source harness', () => {
     },
   )
 
+  it.each([0, -1, 1.5, 32, '1e1', '+1', '0x1', '1.5', 'x1'])(
+    'rejects explicit malformed day %s instead of falling back to the date',
+    (day) => {
+      expect(
+        mapRowsToPowerPlannerRecords(
+          [
+            {
+              일자: '2026-01-01',
+              일: day,
+              시간: 13,
+              사용량: 100,
+            },
+          ],
+          'hourlyUsage',
+          {
+            date: '일자',
+            day: '일',
+            hour: '시간',
+            usageKwh: '사용량',
+          },
+        ),
+      ).toEqual([])
+    },
+  )
+
+  it.each([1, '1', '01'])('accepts strict explicit day %s', (day) => {
+    expect(
+      mapRowsToPowerPlannerRecords(
+        [{ 일자: '2026-01-01', 일: day, 시간: 13, 사용량: 100 }],
+        'hourlyUsage',
+        {
+          date: '일자',
+          day: '일',
+          hour: '시간',
+          usageKwh: '사용량',
+        },
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('treats a whitespace-only optional stored date as absent', () => {
+    const normalized = normalizePowerPlannerRecords([
+      record({
+        dataType: 'maxDemand',
+        date: '   ',
+        hour: undefined,
+        usageKwh: undefined,
+        maxDemandKw: 500,
+      }),
+    ])
+
+    expect(normalized.records).toHaveLength(1)
+    expect(normalized.records?.[0].date).toBeUndefined()
+  })
+
   it('maps hourly usage rows from a user-uploaded table', () => {
     const rows = [
       { 일자: '2026-06-01', 시간대: '10시', 사용량: '120' },
