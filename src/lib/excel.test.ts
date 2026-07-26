@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { deflateRawSync } from 'node:zlib'
 import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
 import {
   getWorkbookLimitMessage,
@@ -66,6 +67,38 @@ const createWorkbookWithShape = async (rows: number, columns: number) => {
     sheet.addRow(Array.from({ length: columns }, () => index))
   }
   return toArrayBuffer(await workbook.xlsx.writeBuffer())
+}
+
+const findCentralDirectoryEntry = (buffer: ArrayBuffer, method: number) => {
+  const view = new DataView(buffer)
+  for (let offset = buffer.byteLength - 22; offset >= Math.max(0, buffer.byteLength - 65_557); offset -= 1) {
+    if (view.getUint32(offset, true) !== 0x06054b50) continue
+    const entries = view.getUint16(offset + 10, true)
+    let entryOffset = view.getUint32(offset + 16, true)
+    for (let index = 0; index < entries; index += 1) {
+      if (view.getUint32(entryOffset, true) !== 0x02014b50) break
+      if (view.getUint16(entryOffset + 10, true) === method) return entryOffset
+      entryOffset +=
+        46 +
+        view.getUint16(entryOffset + 28, true) +
+        view.getUint16(entryOffset + 30, true) +
+        view.getUint16(entryOffset + 32, true)
+    }
+  }
+  throw new Error(`ZIP method ${method} entry was not found`)
+}
+
+const corruptCentralDirectoryCrc = (buffer: ArrayBuffer, method: number) => {
+  const copy = buffer.slice(0)
+  const view = new DataView(copy)
+  const entryOffset = findCentralDirectoryEntry(copy, method)
+  view.setUint32(entryOffset + 16, view.getUint32(entryOffset + 16, true) ^ 0xffffffff, true)
+  return copy
+}
+
+const createStoredSyntheticWorkbook = async () => {
+  const zip = await JSZip.loadAsync(await createSyntheticWorkbook())
+  return toArrayBuffer(await zip.generateAsync({ type: 'uint8array', compression: 'STORE' }))
 }
 
 const createZipCentralDirectory = ({
@@ -219,7 +252,7 @@ describe('synthetic workbook parser harness', () => {
   it('rejects XLSX metadata with excessive uncompressed bytes before loading', async () => {
     await expect(
       parseWorkbook(createZipCentralDirectory({ entries: 1, uncompressedBytes: 50 * 1024 * 1024 + 1 })),
-    ).rejects.toThrow('압축 해제 예상 크기가 50MB를 초과')
+    ).rejects.toThrow('실제 압축 해제 출력이 50MB를 초과')
   })
 
   it('rejects XLSX metadata with too many ZIP entries before loading', async () => {
@@ -236,7 +269,23 @@ describe('synthetic workbook parser harness', () => {
     })
 
     await expect(parseWorkbook(forgedZip)).rejects.toThrow(
-      '압축 해제 예상 크기가 50MB를 초과',
+      '실제 압축 해제 출력이 50MB를 초과',
+    )
+  })
+
+  it('rejects a corrupt central CRC for a deflated XLSX entry before ExcelJS load', async () => {
+    const corrupted = corruptCentralDirectoryCrc(await createSyntheticWorkbook(), 8)
+
+    await expect(parseWorkbook(corrupted)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
+    )
+  })
+
+  it('rejects a corrupt central CRC for a stored XLSX entry before ExcelJS load', async () => {
+    const corrupted = corruptCentralDirectoryCrc(await createStoredSyntheticWorkbook(), 0)
+
+    await expect(parseWorkbook(corrupted)).rejects.toThrow(
+      '이 형식은 지원하지 않습니다. 한전/Excel에서 XLSX 또는 CSV로 다시 저장해 주세요.',
     )
   })
 

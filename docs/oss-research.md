@@ -29,6 +29,6 @@
 ## 보안/유지보수 메모
 
 - 취약한 SheetJS/xlsx는 제거했고 `npm ls xlsx`가 빈 트리를 반환한다.
-- `npm audit --omit=dev`는 npm 10.9.8에서 retired quick endpoint의 HTTP 400 `Invalid package tree`로 완료되지 않았다. 따라서 깨끗한 audit 결과를 주장하지 않는다.
+- 초기 `npm audit --omit=dev` 재시도는 npm 10.9.8에서 retired quick endpoint의 HTTP 400 `Invalid package tree`로 완료되지 않았다. 2026-07-26 최신 재시도는 완료됐고 운영 의존성 기준 high 10, moderate 1, low 1, 총 12건을 보고했다. ExcelJS의 `archiver`·`uuid` 전이 의존성을 포함하므로 깨끗한 audit 결과를 주장하지 않는다.
 - 원격 서버 파싱을 만들지 않고 브라우저 로컬 파일 처리로 범위를 제한한다. 실제 운영 전에는 ExcelJS 파싱을 Web Worker 또는 샌드박스 파서로 격리하는 방안을 검토한다.
 - 라이선스 불명 또는 저활성 GitHub 예제 코드는 포함하지 않음.

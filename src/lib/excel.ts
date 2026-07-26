@@ -32,18 +32,39 @@ const columnLimitMessage =
 const zipEntryLimitMessage =
   'XLSX 내부 파일 수가 200개를 초과하여 브라우저 분석을 중단했습니다. 필요한 시트와 이미지만 남겨 다시 저장해 주세요.'
 const zipUncompressedLimitMessage =
-  '압축 해제 예상 크기가 50MB를 초과하여 브라우저 분석을 중단했습니다. 기간이나 시트를 나눠 업로드해 주세요.'
+  '실제 압축 해제 출력이 50MB를 초과하여 브라우저 분석을 중단했습니다. 기간이나 시트를 나눠 업로드해 주세요.'
 const csvColumnLimitMessage =
   'CSV 열 수가 256개를 초과하여 브라우저 분석을 중단했습니다. 필요한 열만 남겨 다시 저장해 주세요.'
 const htmlColumnLimitMessage =
   'HTML 열 수가 256개를 초과하여 브라우저 분석을 중단했습니다. 필요한 열만 남겨 다시 저장해 주세요.'
 
 interface ZipEntryMetadata {
+  crc32: number
   flags: number
   method: number
   compressedSize: number
   uncompressedSize: number
   localHeaderOffset: number
+}
+
+const crc32Table = (() => {
+  const table = new Uint32Array(256)
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
+    }
+    table[index] = value >>> 0
+  }
+  return table
+})()
+
+const updateCrc32 = (crc32: number, chunk: Uint8Array) => {
+  let value = crc32
+  for (let index = 0; index < chunk.byteLength; index += 1) {
+    value = crc32Table[(value ^ chunk[index]) & 0xff] ^ (value >>> 8)
+  }
+  return value >>> 0
 }
 
 export const validateUploadFile = (
@@ -182,6 +203,7 @@ const inspectXlsxArchive = (buffer: ArrayBuffer): ZipEntryMetadata[] => {
     }
     const compressedSize = view.getUint32(offset + 20, true)
     const uncompressedSize = view.getUint32(offset + 24, true)
+    const crc32 = view.getUint32(offset + 16, true)
     const fileNameLength = view.getUint16(offset + 28, true)
     const extraLength = view.getUint16(offset + 30, true)
     const commentLength = view.getUint16(offset + 32, true)
@@ -197,6 +219,7 @@ const inspectXlsxArchive = (buffer: ArrayBuffer): ZipEntryMetadata[] => {
       throw new Error(zipUncompressedLimitMessage)
     }
     entries.push({
+      crc32,
       flags,
       method,
       compressedSize,
@@ -264,26 +287,37 @@ const assertXlsxInflatedBytesWithinLimit = (buffer: ArrayBuffer, entries: ZipEnt
 
   for (const entry of entries) {
     const payload = getZipEntryPayload(view, centralDirectoryOffset, entry)
+    let crc32 = 0xffffffff
     if (entry.method === 0) {
       if (entry.compressedSize !== entry.uncompressedSize) throw new Error(legacyXlsMessage)
       addInflatedBytes(payload.byteLength)
-      continue
-    }
-
-    const inflater = new Inflate({ raw: true, chunkSize: 64 * 1024 })
-    inflater.onData = (chunk) => addInflatedBytes(chunk.byteLength)
-    try {
-      for (let offset = 0; offset < payload.byteLength; offset += 64 * 1024) {
-        inflater.push(
-          payload.subarray(offset, Math.min(offset + 64 * 1024, payload.byteLength)),
-          offset + 64 * 1024 >= payload.byteLength,
-        )
+      crc32 = updateCrc32(crc32, payload)
+    } else {
+      const inflater = new Inflate({ raw: true, chunkSize: 64 * 1024 })
+      inflater.onData = (chunk) => {
+        const bytes = chunk instanceof Uint8Array
+          ? chunk
+          : chunk instanceof ArrayBuffer
+            ? new Uint8Array(chunk)
+            : null
+        if (!bytes) throw new Error(legacyXlsMessage)
+        addInflatedBytes(bytes.byteLength)
+        crc32 = updateCrc32(crc32, bytes)
       }
-    } catch (error) {
-      if (error instanceof Error && error.message === zipUncompressedLimitMessage) throw error
-      throw new Error(legacyXlsMessage)
+      try {
+        for (let offset = 0; offset < payload.byteLength; offset += 64 * 1024) {
+          inflater.push(
+            payload.subarray(offset, Math.min(offset + 64 * 1024, payload.byteLength)),
+            offset + 64 * 1024 >= payload.byteLength,
+          )
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message === zipUncompressedLimitMessage) throw error
+        throw new Error(legacyXlsMessage)
+      }
+      if (inflater.err) throw new Error(legacyXlsMessage)
     }
-    if (inflater.err) throw new Error(legacyXlsMessage)
+    if (((crc32 ^ 0xffffffff) >>> 0) !== entry.crc32) throw new Error(legacyXlsMessage)
   }
 }
 
