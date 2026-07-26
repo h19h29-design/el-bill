@@ -22,8 +22,11 @@ import {
 import { validateBillPeriods } from './billPeriods'
 import { rateChangeCaution } from './documentTemplates'
 import {
+  findUniqueRatePlanById,
   isValidMonthlyBill,
   isValidRatePlan,
+  validateSchoolProfile,
+  validateRatePlanCollection,
 } from './domainValidation'
 
 const optionalBillColumns = [
@@ -78,6 +81,16 @@ export const resolveCurrentPlan = (
   profile: SchoolProfile,
   ratePlans: RatePlan[],
 ): CurrentPlanResolution => {
+  const collectionValidation = validateRatePlanCollection(ratePlans)
+  if (!collectionValidation.valid) {
+    return {
+      plan: null,
+      exact: false,
+      issue:
+        collectionValidation.issues[0] ??
+        '요금제 설정의 중복 또는 잘못된 값을 확인해 주세요.',
+    }
+  }
   const tupleMatches = ratePlans.filter(
     (candidate) =>
       matches(candidate.contractType, profile.contractType) &&
@@ -585,6 +598,75 @@ export const buildAutoDiagnosis = ({
       missingDataNotes: [reason, rateChangeCaution],
     }
   }
+  const profileValidation = validateSchoolProfile(profile)
+  if (!profileValidation.valid) {
+    const reason =
+      `학교 프로필이 올바르지 않습니다. ${
+        profileValidation.issues[0] ??
+        '학교명과 계약전력 정보를 확인해 주세요.'
+      }`
+    const comparison = {
+      ...createConfigurationBlockedComparison(profile, mode),
+      basis: reason,
+      reviewReason: reason,
+    }
+    return {
+      completed: false,
+      configurationRequired: true,
+      currentPlan: null,
+      recommendedPlan: null,
+      topCandidates: [],
+      additionalCandidates: [],
+      comparison,
+      calculationMode: mode,
+      calculationSettings,
+      dataConfidence: '낮음',
+      dataRecognitionRate: 0,
+      recognizedMonths: 0,
+      lastUploadLabel: '학교 프로필 확인 필요',
+      availableDocumentCount: 0,
+      canGenerateChangeDocuments: false,
+      documentBlockReason: reason,
+      finalJudgement: '추가 검토 필요',
+      judgementBasis: reason,
+      missingDataNotes: [reason, rateChangeCaution],
+    }
+  }
+  const ratePlanCollectionValidation =
+    validateRatePlanCollection(ratePlans)
+  if (!ratePlanCollectionValidation.valid) {
+    const reason =
+      `요금제 설정이 올바르지 않습니다. ${
+        ratePlanCollectionValidation.issues[0] ??
+        '중복 식별값과 계약 조합을 확인해 주세요.'
+      }`
+    const comparison = {
+      ...createConfigurationBlockedComparison(profile, mode),
+      basis: reason,
+      reviewReason: reason,
+    }
+    return {
+      completed: false,
+      configurationRequired: true,
+      currentPlan: null,
+      recommendedPlan: null,
+      topCandidates: [],
+      additionalCandidates: [],
+      comparison,
+      calculationMode: mode,
+      calculationSettings,
+      dataConfidence: '낮음',
+      dataRecognitionRate: 0,
+      recognizedMonths: 0,
+      lastUploadLabel: '요금제 설정 확인 필요',
+      availableDocumentCount: 0,
+      canGenerateChangeDocuments: false,
+      documentBlockReason: reason,
+      finalJudgement: '추가 검토 필요',
+      judgementBasis: reason,
+      missingDataNotes: [reason, rateChangeCaution],
+    }
+  }
   const periodValidation = validateBillPeriods(bills, 12)
   const normalizedBills = periodValidation.normalizedBills
   const currentPlanResolution = resolveCurrentPlan(profile, ratePlans)
@@ -701,8 +783,10 @@ export const buildAutoDiagnosis = ({
     !comparison.annualDataAvailable ||
     topCandidates.length === 0
       ? null
-      : ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ??
-        currentPlan
+      : findUniqueRatePlanById(
+          ratePlans,
+          comparison.candidatePlanId,
+        ) ?? currentPlan
   const hasValidRequiredPeriods =
     periodValidation.hasRequiredConsecutiveMonths && !hasPeriodIssues
   const canGenerateChangeDocuments =

@@ -8,7 +8,9 @@ import {
   getPowerPlannerSummary,
   guessPowerPlannerDataType,
   guessPowerPlannerMapping,
+  isValidPowerPlannerRecord,
   mapRowsToPowerPlannerRecords,
+  normalizePowerPlannerRecords,
   POWER_PLANNER_AGGREGATE_RECORD_LIMIT,
   mergePowerPlannerRecords,
   powerPlannerMvpGuardrail,
@@ -16,6 +18,49 @@ import {
 } from './powerPlanner'
 
 describe('power planner data source harness', () => {
+  const record = (
+    patch: Partial<PowerPlannerRecord>,
+  ): PowerPlannerRecord => ({
+    id: 'record',
+    dataType: 'hourlyUsage',
+    date: '2026-06-01',
+    hour: 13,
+    usageKwh: 100,
+    sourceRowIndex: 0,
+    ...patch,
+  })
+
+  it.each([
+    ['hourly without date', record({ date: undefined })],
+    ['hourly with invalid date', record({ date: '2026-02-30' })],
+    ['hourly with negative usage', record({ usageKwh: -1 })],
+    ['daily with month-only date', record({ dataType: 'dailyUsage', date: '2026-06' })],
+    ['monthly without period', record({ dataType: 'monthlyUsage', date: undefined, year: undefined, month: undefined })],
+    ['blank pattern', record({ dataType: 'patternAnalysis', date: undefined, hour: undefined, usageKwh: undefined, patternLabel: ' ', patternSummary: '' })],
+  ])('rejects semantic record error %s', (_label, value) => {
+    expect(isValidPowerPlannerRecord(value)).toBe(false)
+  })
+
+  it.each([
+    record({}),
+    record({ dataType: 'dailyUsage', hour: undefined }),
+    record({ dataType: 'monthlyUsage', date: '2026-06', hour: undefined }),
+    record({ dataType: 'monthlyUsage', date: undefined, year: 2026, month: 6, hour: undefined }),
+    record({ dataType: 'patternAnalysis', date: undefined, hour: undefined, usageKwh: undefined, patternLabel: ' 피크 ' }),
+  ])('accepts semantically complete %s record', (value) => {
+    expect(isValidPowerPlannerRecord(value)).toBe(true)
+  })
+
+  it('normalizes semantic duplicates before applying the record cap', () => {
+    const normalized = normalizePowerPlannerRecords([
+      record({ id: 'first', date: '2026-06-01' }),
+      record({ id: 'second', date: '2026/06/01', sourceRowIndex: 1 }),
+    ])
+
+    expect(normalized.records).toHaveLength(1)
+    expect(normalized.changed).toBe(true)
+  })
+
   it('maps hourly usage rows from a user-uploaded table', () => {
     const rows = [
       { 일자: '2026-06-01', 시간대: '10시', 사용량: '120' },

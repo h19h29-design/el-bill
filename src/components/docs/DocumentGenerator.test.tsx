@@ -219,4 +219,35 @@ describe('document generation eligibility', () => {
     expect(screen.queryByRole('button', { name: 'PDF 미리보기' })).toBeNull()
     expect(screen.queryByText('추천 요금제')).toBeNull()
   })
+
+  it('does not expose invalid school power or construct documents', () => {
+    const invalidProfile = {
+      ...defaultSchoolProfile,
+      contractPowerKw: -1,
+      appliedPowerKw: -1,
+    }
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: invalidProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+    })
+
+    const { container } = render(
+      <DocumentGenerator
+        profile={invalidProfile}
+        latestBill={sampleBills.at(-1)}
+        comparison={diagnosis.comparison}
+        scenario={defaultScenario}
+        diagnosis={diagnosis}
+        peakOperationPlan={buildPeakOperationPlan(defaultScenario)}
+      />,
+    )
+
+    expect(container.textContent).not.toContain('-1kW')
+    expect(screen.getByText('변경신청 문서 생성 보류')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'PDF 미리보기' })).toBeNull()
+    expect(screen.queryByText('추천 요금제')).toBeNull()
+  })
 })

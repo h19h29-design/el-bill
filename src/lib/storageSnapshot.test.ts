@@ -435,6 +435,10 @@ describe('locked session-scoped snapshots', () => {
     ['negative bill usage', { bills: sampleBills.map((bill) => ({ ...bill, usageKwh: -1 })) }],
     ['non-finite bill total', { bills: sampleBills.map((bill) => ({ ...bill, totalBillWon: Number.POSITIVE_INFINITY })) }],
     ['negative tariff', { ratePlans: defaultRatePlans.map((plan, index) => index === 0 ? { ...plan, baseRateWonPerKw: -1 } : plan) }],
+    ['duplicate tariff id', { ratePlans: [defaultRatePlans[0], { ...defaultRatePlans[1], id: defaultRatePlans[0].id }] }],
+    ['duplicate tariff tuple', { ratePlans: [defaultRatePlans[0], { ...defaultRatePlans[1], id: 'unique', contractType: ` ${defaultRatePlans[0].contractType} `, voltageType: defaultRatePlans[0].voltageType, planName: ` ${defaultRatePlans[0].planName} ` }] }],
+    ['invalid school power', { profile: { ...defaultSchoolProfile, contractPowerKw: -1 } }],
+    ['invalid required scenario', { scenario: { ...defaultScenario, expectedPeakKw: -1 } }],
   ])('does not restore a snapshot containing %s', (_label, patch) => {
     const sessionId = 'invalid-domain-data'
     const invalid = snapshot(sessionId, { ...makeData(), ...patch })
@@ -442,6 +446,37 @@ describe('locked session-scoped snapshots', () => {
     localStorage.setItem(storageActivePointerKey, pointer(sessionId))
 
     expect(readStorageSnapshot(now)).toBeNull()
+  })
+
+  it('normalizes restored EHP groups and persists the sanitized snapshot', async () => {
+    const sessionId = 'normalized-peak-scenario'
+    const restored = snapshot(sessionId, {
+      ...makeData(),
+      scenario: {
+        ...defaultScenario,
+        mainBuildingEhpGroups: 1_000_000_000,
+        annexEhpGroups: 0,
+      },
+    })
+    localStorage.setItem(
+      storageSnapshotKeyFor(sessionId),
+      JSON.stringify(restored),
+    )
+    localStorage.setItem(storageActivePointerKey, pointer(sessionId))
+
+    const initialized = await initializeStorageAfterMount(makeData(), now)
+
+    expect(initialized?.data.scenario).toMatchObject({
+      mainBuildingEhpGroups: 100,
+      annexEhpGroups: 2,
+    })
+    const persisted = JSON.parse(
+      localStorage.getItem(storageSnapshotKeyFor(sessionId)) ?? '{}',
+    )
+    expect(persisted.data.scenario).toMatchObject({
+      mainBuildingEhpGroups: 100,
+      annexEhpGroups: 2,
+    })
   })
 
   it('purges a malformed active pointer only after the mount initializer runs', async () => {
@@ -491,6 +526,169 @@ describe('locked one-time migration', () => {
     expect(migrated?.session.expiresAt).toBe('2026-07-26T12:00:00.000Z')
     expect(migrated?.data.provenance.bills).toBe('uploaded')
     expect(localStorage.getItem('el-bill:bills')).toBeNull()
+  })
+
+  it('normalizes duplicate legacy PowerPlanner records without losing bills', async () => {
+    const powerPlanner = {
+      id: 'legacy-power-planner',
+      provider: 'kepco-power-planner' as const,
+      sourceName: 'legacy.csv',
+      sourceLabel: '한전 파워플래너 사용자 업로드',
+      importedAt: '2026-07-26T01:00:00.000Z',
+      memo: '레거시',
+      records: [
+        {
+          id: 'first',
+          dataType: 'hourlyUsage' as const,
+          date: '2026-06-01',
+          hour: 13,
+          usageKwh: 100,
+          sourceRowIndex: 0,
+        },
+        {
+          id: 'duplicate',
+          dataType: 'hourlyUsage' as const,
+          date: '2026/06/01',
+          hour: 13,
+          usageKwh: 100,
+          sourceRowIndex: 1,
+        },
+      ],
+    }
+    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+    localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
+    localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
+    localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
+    localStorage.setItem(
+      'el-bill:power-planner',
+      legacyPayload(powerPlanner),
+    )
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      legacyPayload({ bills: 'uploaded', powerPlanner: 'uploaded' }),
+    )
+
+    const migrated = await initializeStorageAfterMount(makeData(), now)
+
+    expect(migrated?.data.bills).toEqual(sampleBills)
+    expect(migrated?.data.provenance).toEqual({
+      bills: 'uploaded',
+      powerPlanner: 'uploaded',
+    })
+    expect(migrated?.data.powerPlanner?.records).toHaveLength(1)
+  })
+
+  it('normalizes legacy EHP groups before restoring and persists the sanitized snapshot', async () => {
+    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+    localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
+    localStorage.setItem(
+      'el-bill:scenario',
+      legacyPayload({
+        ...defaultScenario,
+        mainBuildingEhpGroups: 1_000_000_000,
+        annexEhpGroups: 0,
+      }),
+    )
+    localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
+
+    const migrated = await initializeStorageAfterMount(makeData(), now)
+
+    expect(migrated?.data.scenario).toMatchObject({
+      mainBuildingEhpGroups: 100,
+      annexEhpGroups: 2,
+    })
+    const persisted = JSON.parse(
+      localStorage.getItem(
+        storageSnapshotKeyFor(migrated?.session.sessionId ?? ''),
+      ) ?? '{}',
+    )
+    expect(persisted.data.scenario).toMatchObject({
+      mainBuildingEhpGroups: 100,
+      annexEhpGroups: 2,
+    })
+  })
+
+  it('drops invalid legacy PowerPlanner data only and preserves uploaded bills', async () => {
+    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+    localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
+    localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
+    localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
+    localStorage.setItem(
+      'el-bill:power-planner',
+      legacyPayload({
+        id: 'invalid-power-planner',
+        provider: 'kepco-power-planner',
+        sourceName: 'invalid.csv',
+        sourceLabel: '한전 파워플래너 사용자 업로드',
+        importedAt: '2026-07-26T01:00:00.000Z',
+        memo: '잘못된 레거시',
+        records: [
+          {
+            id: 'invalid-date',
+            dataType: 'hourlyUsage',
+            date: '2026-02-30',
+            hour: 13,
+            usageKwh: 100,
+            sourceRowIndex: 0,
+          },
+        ],
+      }),
+    )
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      legacyPayload({ bills: 'uploaded', powerPlanner: 'uploaded' }),
+    )
+
+    const migrated = await initializeStorageAfterMount(makeData(), now)
+
+    expect(migrated?.data.bills).toEqual(sampleBills)
+    expect(migrated?.data.profile).toEqual(defaultSchoolProfile)
+    expect(migrated?.data.powerPlanner).toBeNull()
+    expect(migrated?.data.provenance).toEqual({
+      bills: 'uploaded',
+      powerPlanner: 'none',
+    })
+  })
+
+  it('drops over-limit legacy PowerPlanner data only and preserves uploaded bills', async () => {
+    const records = Array.from({ length: 10_001 }, (_, index) => ({
+      id: `legacy-hourly-${index}`,
+      dataType: 'hourlyUsage',
+      date: '2026-07-01',
+      hour: 13,
+      usageKwh: index + 1,
+      sourceRowIndex: index,
+    }))
+    localStorage.setItem('el-bill:bills', legacyPayload(sampleBills))
+    localStorage.setItem('el-bill:profile', legacyPayload(defaultSchoolProfile))
+    localStorage.setItem('el-bill:scenario', legacyPayload(defaultScenario))
+    localStorage.setItem('el-bill:rate-plans', legacyPayload(defaultRatePlans))
+    localStorage.setItem(
+      'el-bill:power-planner',
+      legacyPayload({
+        id: 'oversized-power-planner',
+        provider: 'kepco-power-planner',
+        sourceName: 'oversized.csv',
+        sourceLabel: '한전 파워플래너 사용자 업로드',
+        importedAt: '2026-07-26T01:00:00.000Z',
+        memo: '초과 레거시',
+        records,
+      }),
+    )
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      legacyPayload({ bills: 'uploaded', powerPlanner: 'uploaded' }),
+    )
+
+    const migrated = await initializeStorageAfterMount(makeData(), now)
+
+    expect(migrated?.data.bills).toEqual(sampleBills)
+    expect(migrated?.data.profile).toEqual(defaultSchoolProfile)
+    expect(migrated?.data.powerPlanner).toBeNull()
+    expect(migrated?.data.provenance).toEqual({
+      bills: 'uploaded',
+      powerPlanner: 'none',
+    })
   })
 
   it('upgrades the former revisionless fixed root', async () => {

@@ -6,6 +6,13 @@ import type {
   PowerPlannerDataType,
   PowerPlannerRecord,
 } from '../types'
+import {
+  isValidCalendarDate,
+  isValidCalendarMonth,
+  parseStrictCalendarValue,
+  parseStrictMonth,
+  type CalendarParts,
+} from './calendar'
 
 export const powerPlannerDataTypeLabels: Record<PowerPlannerDataType, string> = {
   monthlyUsage: '월별 사용량',
@@ -34,25 +41,8 @@ const asNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
-const inferYearMonthDay = (value: unknown) => {
-  if (value instanceof Date) {
-    return {
-      year: value.getFullYear(),
-      month: value.getMonth() + 1,
-      day: value.getDate(),
-    }
-  }
-  const raw = normalize(value)
-  if (!raw) return {}
-  const normalized = raw.replace(/[./]/g, '-')
-  const match = normalized.match(/(\d{4})\D+(\d{1,2})(?:\D+(\d{1,2}))?/)
-  if (!match) return {}
-  const [, year, month, day] = match
-  return {
-    year: Number(year),
-    month: Number(month),
-    day: day ? Number(day) : undefined,
-  }
+const inferYearMonthDay = (value: unknown): Partial<CalendarParts> => {
+  return parseStrictCalendarValue(value) ?? {}
 }
 
 const asDate = (value: unknown) => {
@@ -69,7 +59,14 @@ const asDate = (value: unknown) => {
 const asYear = (...values: unknown[]) => {
   for (const value of values) {
     const direct = asNumber(value)
-    if (direct && direct >= 2000) return direct
+    if (
+      typeof direct === 'number' &&
+      Number.isInteger(direct) &&
+      direct >= 2000 &&
+      direct <= 2100
+    ) {
+      return direct
+    }
     const inferred = inferYearMonthDay(value).year
     if (inferred) return inferred
   }
@@ -80,17 +77,22 @@ const asMonthValue = (...values: unknown[]) => {
   for (const value of values) {
     const inferred = inferYearMonthDay(value).month
     if (inferred) return inferred
-    const direct = asNumber(value)
-    if (direct && direct >= 1 && direct <= 12) return direct
+    const direct = parseStrictMonth(value)
+    if (direct !== null) return direct
   }
   return undefined
 }
 
 const inferHour = (value: unknown) => {
-  const match = normalize(value).match(/(\d{1,2})/)
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value >= 0 && value <= 23
+      ? value
+      : undefined
+  }
+  const match = normalize(value).match(/^([01]?\d|2[0-3])(?:\s*시|:00)?$/)
   if (!match) return undefined
   const hour = Number(match[1])
-  return hour >= 0 && hour <= 23 ? hour : undefined
+  return hour
 }
 
 export const powerPlannerMappingFields = [
@@ -186,26 +188,124 @@ export const guessPowerPlannerDataType = (
   return 'hourlyUsage'
 }
 
-const hasPowerPlannerRequiredValues = (
-  record: PowerPlannerRecord,
-  dataType: PowerPlannerDataType,
-) => {
-  if (dataType === 'monthlyUsage') {
-    return (
-      record.usageKwh !== undefined &&
-      (Boolean(record.date) || Boolean(record.year && record.month))
-    )
+const powerPlannerDataTypes = new Set<PowerPlannerDataType>([
+  'monthlyUsage',
+  'dailyUsage',
+  'hourlyUsage',
+  'maxDemand',
+  'estimatedBill',
+  'patternAnalysis',
+])
+
+const optionalNumberInRange = (
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  integer = false,
+) =>
+  value === undefined ||
+  (typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= minimum &&
+    value <= maximum &&
+    (!integer || Number.isInteger(value)))
+
+export const isValidPowerPlannerRecord = (
+  value: unknown,
+): value is PowerPlannerRecord => {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.id !== 'string' ||
+    !record.id.trim() ||
+    !powerPlannerDataTypes.has(record.dataType as PowerPlannerDataType) ||
+    !Number.isInteger(record.sourceRowIndex) ||
+    Number(record.sourceRowIndex) < 0
+  ) {
+    return false
   }
-  if (dataType === 'dailyUsage') return Boolean(record.date && record.usageKwh)
-  if (dataType === 'hourlyUsage') {
-    return Boolean(
-      record.date && record.hour !== undefined && record.usageKwh !== undefined,
-    )
+
+  if (
+    !optionalNumberInRange(record.year, 2000, 2100, true) ||
+    !optionalNumberInRange(record.month, 1, 12, true) ||
+    !optionalNumberInRange(record.day, 1, 31, true) ||
+    !optionalNumberInRange(record.hour, 0, 23, true) ||
+    !optionalNumberInRange(record.usageKwh, 0, 1_000_000_000) ||
+    !optionalNumberInRange(record.maxDemandKw, 0, 10_000_000) ||
+    !optionalNumberInRange(record.estimatedBillWon, 0, 1_000_000_000_000) ||
+    !optionalNumberInRange(record.contractPowerKw, 0, 10_000_000) ||
+    !optionalNumberInRange(record.appliedPowerKw, 0, 10_000_000) ||
+    !optionalNumberInRange(record.usageDays, 0, 366, true) ||
+    !optionalNumberInRange(record.laggingPowerFactorPercent, 0, 100) ||
+    !optionalNumberInRange(record.leadingPowerFactorPercent, 0, 100)
+  ) {
+    return false
   }
-  if (dataType === 'maxDemand') return record.maxDemandKw !== undefined
-  if (dataType === 'estimatedBill') return record.estimatedBillWon !== undefined
-  return Boolean(record.patternSummary)
+
+  if (
+    !['date', 'loadType', 'patternLabel', 'patternSummary'].every(
+      (field) =>
+        record[field] === undefined || typeof record[field] === 'string',
+    )
+  ) {
+    return false
+  }
+
+  switch (record.dataType) {
+    case 'hourlyUsage':
+      return (
+        isValidCalendarDate(record.date) &&
+        typeof record.hour === 'number' &&
+        typeof record.usageKwh === 'number'
+      )
+    case 'dailyUsage':
+      return (
+        isValidCalendarDate(record.date) &&
+        typeof record.usageKwh === 'number'
+      )
+    case 'monthlyUsage':
+      return (
+        typeof record.usageKwh === 'number' &&
+        (isValidCalendarMonth(record.date) ||
+          (Number.isInteger(record.year) &&
+            Number(record.year) >= 2000 &&
+            Number(record.year) <= 2100 &&
+            Number.isInteger(record.month) &&
+            Number(record.month) >= 1 &&
+            Number(record.month) <= 12))
+      )
+    case 'maxDemand':
+      return typeof record.maxDemandKw === 'number'
+    case 'estimatedBill':
+      return typeof record.estimatedBillWon === 'number'
+    case 'patternAnalysis':
+      return [record.patternLabel, record.patternSummary].some(
+        (field) => typeof field === 'string' && Boolean(field.trim()),
+      )
+    default:
+      return false
+  }
 }
+
+const canonicalCalendarValue = (value: string | undefined) => {
+  const parsed = parseStrictCalendarValue(value)
+  if (!parsed) return value
+  const month = String(parsed.month).padStart(2, '0')
+  return parsed.day === undefined
+    ? `${parsed.year}-${month}`
+    : `${parsed.year}-${month}-${String(parsed.day).padStart(2, '0')}`
+}
+
+const normalizePowerPlannerRecord = (
+  record: PowerPlannerRecord,
+): PowerPlannerRecord => ({
+  ...record,
+  id: record.id.trim(),
+  date: canonicalCalendarValue(record.date),
+  loadType: record.loadType?.trim() || undefined,
+  patternLabel: record.patternLabel?.trim() || undefined,
+  patternSummary: record.patternSummary?.trim() || undefined,
+})
 
 export const mapRowsToPowerPlannerRecords = (
   rows: Record<string, unknown>[],
@@ -241,7 +341,9 @@ export const mapRowsToPowerPlannerRecords = (
         sourceRowIndex: index,
       }
 
-      return hasPowerPlannerRequiredValues(record, dataType) ? record : null
+      return isValidPowerPlannerRecord(record)
+        ? normalizePowerPlannerRecord(record)
+        : null
     })
     .filter((record): record is PowerPlannerRecord => Boolean(record))
 }
@@ -268,8 +370,41 @@ const powerPlannerFingerprintFields = [
 
 export const getPowerPlannerRecordFingerprint = (record: PowerPlannerRecord) =>
   JSON.stringify(
-    powerPlannerFingerprintFields.map((field) => record[field] ?? null),
+    powerPlannerFingerprintFields.map(
+      (field) => normalizePowerPlannerRecord(record)[field] ?? null,
+    ),
   )
+
+export const normalizePowerPlannerRecords = (
+  value: unknown,
+): { records: PowerPlannerRecord[] | null; changed: boolean } => {
+  if (!Array.isArray(value) || value.length === 0) {
+    return { records: null, changed: true }
+  }
+
+  const fingerprints = new Set<string>()
+  const records: PowerPlannerRecord[] = []
+  let changed = false
+  for (const rawRecord of value) {
+    if (!isValidPowerPlannerRecord(rawRecord)) {
+      return { records: null, changed: true }
+    }
+    const record = normalizePowerPlannerRecord(rawRecord)
+    const fingerprint = getPowerPlannerRecordFingerprint(record)
+    if (fingerprints.has(fingerprint)) {
+      changed = true
+      continue
+    }
+    fingerprints.add(fingerprint)
+    records.push(record)
+    changed ||= JSON.stringify(record) !== JSON.stringify(rawRecord)
+    if (records.length > POWER_PLANNER_AGGREGATE_RECORD_LIMIT) {
+      return { records: null, changed: true }
+    }
+  }
+
+  return { records, changed }
+}
 
 export interface PowerPlannerMergeResult {
   accepted: boolean

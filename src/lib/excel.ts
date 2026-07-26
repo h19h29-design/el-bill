@@ -9,6 +9,10 @@ import {
   isValidMonthlyBill,
   validateBillRequiredValues,
 } from './domainValidation'
+import {
+  parseStrictCalendarValue,
+  parseStrictMonth,
+} from './calendar'
 
 export interface ParsedSheet {
   name: string
@@ -107,21 +111,14 @@ const hasNumericValue = (value: unknown) => {
 }
 
 const asMonth = (value: unknown) => {
-  const match = normalize(value).match(/(\d{1,2})/)
-  if (!match) return 0
-  const month = Number(match[1])
-  return month >= 1 && month <= 12 ? month : 0
+  return parseStrictMonth(value) ?? 0
 }
 
 const asYearMonth = (value: unknown) => {
-  const match = normalize(value).match(/(\d{4})\D+(\d{1,2})/)
-  if (!match) return { year: 0, month: 0 }
-  const year = Number(match[1])
-  const month = Number(match[2])
-  return {
-    year: Number.isFinite(year) ? year : 0,
-    month: month >= 1 && month <= 12 ? month : 0,
-  }
+  const parsed = parseStrictCalendarValue(value)
+  return parsed
+    ? { year: parsed.year, month: parsed.month }
+    : { year: 0, month: 0 }
 }
 
 const seasonForMonth = (month: number) => {

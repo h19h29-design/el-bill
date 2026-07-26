@@ -5,7 +5,9 @@ import type {
   RatePlan,
   Season,
 } from '../../types'
-import { validateRatePlan } from '../../lib/domainValidation'
+import {
+  validateRatePlanCollection,
+} from '../../lib/domainValidation'
 import {
   defaultCalculationSettings,
   validateCalculationSettings,
@@ -26,18 +28,23 @@ const seasonLabels: Record<Season, string> = {
   winter: '겨울',
 }
 
-const normalizeTuplePart = (value: string) => value.trim().replace(/\s/g, '')
+const normalizeIdentifier = (value: string) =>
+  value.trim().toLocaleLowerCase('ko-KR')
 
-const hasDuplicateTuple = (plans: RatePlan[]) => {
-  const seen = new Set<string>()
-  return plans.some((plan) => {
-    const key = [plan.contractType, plan.voltageType, plan.planName]
-      .map(normalizeTuplePart)
-      .join('|')
-    if (seen.has(key)) return true
-    seen.add(key)
-    return false
-  })
+const createUniquePlanId = (plans: RatePlan[]) => {
+  const existing = new Set(plans.map((plan) => normalizeIdentifier(plan.id)))
+  const randomPart =
+    typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const base = `custom-${randomPart}`
+  let candidate = base
+  let suffix = 2
+  while (existing.has(normalizeIdentifier(candidate))) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  return candidate
 }
 
 export function RatePlanSettings({
@@ -63,16 +70,10 @@ export function RatePlanSettings({
     field: string,
   ) => {
     const nextPlans = plans.map((plan) => (plan.id === planId ? updater(plan) : plan))
-    const nextPlan = nextPlans.find((plan) => plan.id === planId)
-    const validation = validateRatePlan(nextPlan)
+    const validation = validateRatePlanCollection(nextPlans)
     if (!validation.valid) {
       setInvalidPlanField({ planId, field })
       setValidationMessage(validation.issues[0] ?? '요금제 값을 확인해 주세요.')
-      return
-    }
-    if (hasDuplicateTuple(nextPlans)) {
-      setInvalidPlanField({ planId, field })
-      setValidationMessage('계약종별·수전전압·요금제명 조합이 중복됩니다. 기존 요금제와 다른 조합으로 입력해 주세요.')
       return
     }
     setInvalidPlanField(null)
@@ -87,26 +88,33 @@ export function RatePlanSettings({
       plans
         .filter(
           (plan) =>
-            normalizeTuplePart(plan.contractType) === normalizeTuplePart(base.contractType) &&
-            normalizeTuplePart(plan.voltageType) === normalizeTuplePart(base.voltageType),
+            plan.contractType.trim() === base.contractType.trim() &&
+            plan.voltageType.trim() === base.voltageType.trim(),
         )
-        .map((plan) => normalizeTuplePart(plan.planName)),
+        .map((plan) => plan.planName.trim().replace(/\s+/g, '')),
     )
     let suffix = 1
     let planName = '사용자 요금제'
-    while (existingNames.has(normalizeTuplePart(planName))) {
+    while (existingNames.has(planName.trim().replace(/\s+/g, ''))) {
       suffix += 1
       planName = `사용자 요금제 ${suffix}`
     }
-    void onPlansChange([
+    const nextPlans = [
       ...plans,
       {
         ...base,
-        id: `custom-${Date.now()}`,
+        id: createUniquePlanId(plans),
         planName,
         memo: '설정 화면에서 추가',
       },
-    ]).catch(() => undefined)
+    ]
+    const validation = validateRatePlanCollection(nextPlans)
+    if (!validation.valid) {
+      setValidationMessage(validation.issues[0] ?? '요금제 값을 확인해 주세요.')
+      return
+    }
+    setValidationMessage('')
+    void onPlansChange(nextPlans).catch(() => undefined)
   }
 
   const changeCalculationSettings = async (
@@ -340,12 +348,16 @@ export function RatePlanSettings({
           </button>
         </div>
         <div className="rate-settings-list">
-          {plans.map((plan) => (
-            <article key={plan.id} className="rate-setting-row">
+          {plans.map((plan, index) => (
+            <article key={`${plan.id}-${index}`} className="rate-setting-row">
               <div className="rate-setting-main">
                 <input
                   value={plan.contractType}
                   aria-label="계약종별"
+                  aria-invalid={
+                    invalidPlanField?.planId === plan.id &&
+                    invalidPlanField.field === 'contractType'
+                  }
                   onChange={(event) =>
                     updatePlan(plan.id, (current) => ({
                       ...current,
@@ -356,6 +368,10 @@ export function RatePlanSettings({
                 <input
                   value={plan.voltageType}
                   aria-label="수전전압"
+                  aria-invalid={
+                    invalidPlanField?.planId === plan.id &&
+                    invalidPlanField.field === 'voltageType'
+                  }
                   onChange={(event) =>
                     updatePlan(plan.id, (current) => ({
                       ...current,
@@ -366,6 +382,10 @@ export function RatePlanSettings({
                 <input
                   value={plan.planName}
                   aria-label="요금제명"
+                  aria-invalid={
+                    invalidPlanField?.planId === plan.id &&
+                    invalidPlanField.field === 'planName'
+                  }
                   onChange={(event) =>
                     updatePlan(plan.id, (current) => ({
                       ...current,
@@ -449,9 +469,11 @@ export function RatePlanSettings({
           ))}
         </div>
       </section>
-      {validationMessage && (
+      {(validationMessage ||
+        !validateRatePlanCollection(plans).valid) && (
         <p className="status-line" role="status">
-          {validationMessage}
+          {validationMessage ||
+            validateRatePlanCollection(plans).issues[0]}
         </p>
       )}
     </div>

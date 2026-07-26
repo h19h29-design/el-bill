@@ -25,6 +25,7 @@ import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import { defaultCalculationSettings } from './lib/calculationSettings'
+import { validateSchoolProfile } from './lib/domainValidation'
 import {
   cleanupExpiredStorageSnapshots,
   getNextStorageSnapshotExpiry,
@@ -766,18 +767,49 @@ interface SchoolProfilePanelProps {
   onProfileChange: (profile: SchoolProfile) => Promise<boolean>
 }
 
-function SchoolProfilePanel({
+export function SchoolProfilePanel({
   profile,
   ratePlans,
   onProfileChange,
 }: SchoolProfilePanelProps) {
+  const [profileError, setProfileError] = useState('')
+  const [invalidField, setInvalidField] =
+    useState<keyof SchoolProfile | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const saveProfile = async (
+    nextProfile: SchoolProfile,
+    field: keyof SchoolProfile,
+  ) => {
+    if (saving) return
+    const validation = validateSchoolProfile(nextProfile)
+    if (!validation.valid) {
+      setInvalidField(field)
+      setProfileError(
+        validation.issues[0] ?? '학교 프로필 값을 확인해 주세요.',
+      )
+      return
+    }
+    setInvalidField(null)
+    setProfileError('')
+    setSaving(true)
+    const saved = await onProfileChange(nextProfile)
+      .catch(() => false)
+      .finally(() => setSaving(false))
+    if (!saved) {
+      setProfileError(
+        '학교 프로필을 저장하지 못해 이전 값으로 유지했습니다.',
+      )
+    }
+  }
+
   const update = (key: keyof SchoolProfile, value: string) => {
-    void onProfileChange({
+    void saveProfile({
       ...profile,
       [key]: ['contractPowerKw', 'appliedPowerKw'].includes(key)
         ? Number(value)
         : value,
-    }).catch(() => undefined)
+    }, key)
   }
 
   const contractTypes = Array.from(new Set(ratePlans.map((plan) => plan.contractType)))
@@ -810,12 +842,12 @@ function SchoolProfilePanel({
     )
     const nextPlan = compatiblePlans.find((plan) => plan.id === currentPlanId)
       ?? compatiblePlans[0]
-    void onProfileChange({
+    void saveProfile({
       ...profile,
       contractType,
       voltageType,
       currentPlan: nextPlan?.planName ?? '',
-    }).catch(() => undefined)
+    }, 'currentPlan')
   }
 
   const updateContractType = (contractType: string) => {
@@ -872,6 +904,26 @@ function SchoolProfilePanel({
             <label key={key}>
               {label}
               <input
+                type={
+                  ['contractPowerKw', 'appliedPowerKw'].includes(key)
+                    ? 'number'
+                    : 'text'
+                }
+                min={
+                  ['contractPowerKw', 'appliedPowerKw'].includes(key)
+                    ? 0.01
+                    : undefined
+                }
+                max={
+                  ['contractPowerKw', 'appliedPowerKw'].includes(key)
+                    ? 10_000_000
+                    : undefined
+                }
+                disabled={saving}
+                aria-invalid={invalidField === key}
+                aria-describedby={
+                  invalidField === key ? 'school-profile-error' : undefined
+                }
                 value={String(profile[key as keyof SchoolProfile])}
                 onChange={(event) =>
                   update(key as keyof SchoolProfile, event.target.value)
@@ -881,7 +933,12 @@ function SchoolProfilePanel({
           ))}
           <label>
             계약종별
-            <select value={profile.contractType} onChange={(event) => updateContractType(event.target.value)}>
+            <select
+              value={profile.contractType}
+              disabled={saving}
+              aria-invalid={invalidField === 'contractType'}
+              onChange={(event) => updateContractType(event.target.value)}
+            >
               <option value="">선택</option>
               {contractTypes.map((contractType) => (
                 <option key={contractType} value={contractType}>{contractType}</option>
@@ -892,6 +949,8 @@ function SchoolProfilePanel({
             수전전압
             <select
               value={profile.voltageType}
+              disabled={saving}
+              aria-invalid={invalidField === 'voltageType'}
               onChange={(event) => setTariffProfile(profile.contractType, event.target.value)}
             >
               <option value="">선택</option>
@@ -904,6 +963,8 @@ function SchoolProfilePanel({
             현재 요금제
             <select
               value={selectedCurrentPlanId}
+              disabled={saving}
+              aria-invalid={invalidField === 'currentPlan'}
               onChange={(event) =>
                 setTariffProfile(profile.contractType, profile.voltageType, event.target.value)
               }
@@ -918,6 +979,11 @@ function SchoolProfilePanel({
         {!hasCurrentPlan && (
           <p className="status-line" role="status">
             현재 요금제 조합이 없거나 중복됩니다. 계약종별·수전전압·요금제명 조합을 하나만 남긴 뒤 선택해 주세요.
+          </p>
+        )}
+        {profileError && (
+          <p id="school-profile-error" className="status-line" role="status">
+            {profileError}
           </p>
         )}
       </section>

@@ -4,8 +4,6 @@ import type {
   MonthlyBill,
   PeakScenario,
   PowerPlannerDataSource,
-  PowerPlannerDataType,
-  PowerPlannerRecord,
   RatePlan,
   SchoolProfile,
 } from '../types'
@@ -14,12 +12,14 @@ import {
   isCalculationSettings,
 } from './calculationSettings'
 import {
+  isValidPeakScenario,
+  isValidSchoolProfile,
   isValidMonthlyBill,
-  isValidRatePlan,
+  normalizePeakScenario,
+  validateRatePlanCollection,
 } from './domainValidation'
 import {
-  getPowerPlannerRecordFingerprint,
-  POWER_PLANNER_AGGREGATE_RECORD_LIMIT,
+  normalizePowerPlannerRecords,
 } from './powerPlanner'
 
 const dayMs = 24 * 60 * 60 * 1000
@@ -202,15 +202,6 @@ const isDataProvenance = (value: unknown): value is DataProvenance => {
   )
 }
 
-const isFiniteNumber = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value)
-
-const isOptionalFiniteNumber = (value: unknown) =>
-  value === undefined || isFiniteNumber(value)
-
-const isOptionalString = (value: unknown) =>
-  value === undefined || typeof value === 'string'
-
 const isStoredMonthlyBill = (value: unknown): value is MonthlyBill => {
   return isValidMonthlyBill(value)
 }
@@ -230,159 +221,12 @@ export const isStoredMonthlyBillCollection = (
 ): value is MonthlyBill[] =>
   Array.isArray(value) && value.every(isStoredMonthlyBill)
 
-const profileStringFields: Array<keyof SchoolProfile> = [
-  'schoolName',
-  'displaySchoolName',
-  'customerNumber',
-  'address',
-  'kepcoBranch',
-  'contractType',
-  'voltageType',
-  'currentPlan',
-  'managerName',
-  'managerPhone',
-  'dataCreatedAt',
-  'dataExpiresAt',
-]
-
 const isSchoolProfile = (value: unknown): value is SchoolProfile => {
-  if (!value || typeof value !== 'object') return false
-  const profile = value as Record<string, unknown>
-  return (
-    profileStringFields.every((field) => typeof profile[field] === 'string') &&
-    isFiniteNumber(profile.contractPowerKw) &&
-    isFiniteNumber(profile.appliedPowerKw)
-  )
+  return isValidSchoolProfile(value)
 }
 
 const isPeakScenario = (value: unknown): value is PeakScenario => {
-  if (!value || typeof value !== 'object') return false
-  const scenario = value as Record<string, unknown>
-  return (
-    [
-      'targetPeakKw',
-      'expectedPeakKw',
-      'usageIncreasePercent',
-      'summerIncreasePercent',
-      'winterIncreasePercent',
-      'analysisYear',
-    ].every((field) => isFiniteNumber(scenario[field])) &&
-    typeof scenario.memo === 'string' &&
-    isOptionalFiniteNumber(scenario.mainBuildingEhpGroups) &&
-    isOptionalFiniteNumber(scenario.annexEhpGroups) &&
-    (scenario.auditoriumCooling === undefined ||
-      typeof scenario.auditoriumCooling === 'boolean') &&
-    isOptionalString(scenario.cafeteriaHighPowerTime) &&
-    isOptionalString(scenario.specialRoomTime) &&
-    isOptionalString(scenario.exemptSpaces)
-  )
-}
-
-const isRatePlan = (value: unknown): value is RatePlan => {
-  return isValidRatePlan(value)
-}
-
-const powerPlannerDataTypes = new Set<PowerPlannerDataType>([
-  'monthlyUsage',
-  'dailyUsage',
-  'hourlyUsage',
-  'maxDemand',
-  'estimatedBill',
-  'patternAnalysis',
-])
-
-const isValidPowerPlannerRecord = (
-  value: unknown,
-): value is PowerPlannerRecord => {
-  if (!value || typeof value !== 'object') return false
-  const record = value as Record<string, unknown>
-  if (
-    typeof record.id !== 'string' ||
-    !record.id ||
-    !powerPlannerDataTypes.has(record.dataType as PowerPlannerDataType) ||
-    !Number.isInteger(record.sourceRowIndex) ||
-    Number(record.sourceRowIndex) < 0
-  ) {
-    return false
-  }
-  const numericFields = [
-    'year',
-    'month',
-    'day',
-    'hour',
-    'usageKwh',
-    'maxDemandKw',
-    'estimatedBillWon',
-    'contractPowerKw',
-    'appliedPowerKw',
-    'usageDays',
-    'laggingPowerFactorPercent',
-    'leadingPowerFactorPercent',
-  ]
-  if (!numericFields.every((field) => isOptionalFiniteNumber(record[field]))) {
-    return false
-  }
-  const optionalNumberInRange = (
-    field: string,
-    minimum: number,
-    maximum: number,
-    integer = false,
-  ) => {
-    const value = record[field]
-    return (
-      value === undefined ||
-      (isFiniteNumber(value) &&
-        value >= minimum &&
-        value <= maximum &&
-        (!integer || Number.isInteger(value)))
-    )
-  }
-  if (
-    !optionalNumberInRange('year', 2000, 2100, true) ||
-    !optionalNumberInRange('month', 1, 12, true) ||
-    !optionalNumberInRange('day', 1, 31, true) ||
-    !optionalNumberInRange('hour', 0, 23, true) ||
-    !optionalNumberInRange('usageKwh', 0, 1_000_000_000) ||
-    !optionalNumberInRange('maxDemandKw', 0, 10_000_000) ||
-    !optionalNumberInRange('estimatedBillWon', 0, 1_000_000_000_000) ||
-    !optionalNumberInRange('contractPowerKw', 0, 10_000_000) ||
-    !optionalNumberInRange('appliedPowerKw', 0, 10_000_000) ||
-    !optionalNumberInRange('usageDays', 0, 366, true) ||
-    !optionalNumberInRange('laggingPowerFactorPercent', 0, 100) ||
-    !optionalNumberInRange('leadingPowerFactorPercent', 0, 100)
-  ) {
-    return false
-  }
-  if (
-    !['date', 'loadType', 'patternLabel', 'patternSummary'].every((field) =>
-      isOptionalString(record[field]),
-    )
-  ) {
-    return false
-  }
-  switch (record.dataType) {
-    case 'hourlyUsage':
-      return (
-        isFiniteNumber(record.hour) &&
-        record.hour >= 0 &&
-        record.hour <= 23 &&
-        isFiniteNumber(record.usageKwh)
-      )
-    case 'maxDemand':
-      return isFiniteNumber(record.maxDemandKw)
-    case 'monthlyUsage':
-    case 'dailyUsage':
-      return isFiniteNumber(record.usageKwh)
-    case 'estimatedBill':
-      return isFiniteNumber(record.estimatedBillWon)
-    case 'patternAnalysis':
-      return (
-        typeof record.patternLabel === 'string' ||
-        typeof record.patternSummary === 'string'
-      )
-    default:
-      return false
-  }
+  return isValidPeakScenario(value)
 }
 
 const normalizePowerPlannerDataSource = (
@@ -403,30 +247,18 @@ const normalizePowerPlannerDataSource = (
     typeof source.importedAt === 'string' &&
     Number.isFinite(Date.parse(source.importedAt)) &&
     typeof source.memo === 'string' &&
-    Array.isArray(source.records) &&
-    source.records.length > 0 &&
-    source.records.every(isValidPowerPlannerRecord)
+    Array.isArray(source.records)
   if (!metadataIsValid) return { dataSource: null, changed: true }
 
-  const sourceRecords = source.records as PowerPlannerRecord[]
-  const fingerprints = new Set<string>()
-  const uniqueRecords: PowerPlannerRecord[] = []
-  for (const record of sourceRecords) {
-    const fingerprint = getPowerPlannerRecordFingerprint(record)
-    if (fingerprints.has(fingerprint)) continue
-    fingerprints.add(fingerprint)
-    uniqueRecords.push(record)
-    if (uniqueRecords.length > POWER_PLANNER_AGGREGATE_RECORD_LIMIT) {
-      return { dataSource: null, changed: true }
-    }
-  }
+  const normalizedRecords = normalizePowerPlannerRecords(source.records)
+  if (!normalizedRecords.records) return { dataSource: null, changed: true }
 
   return {
     dataSource: {
       ...(source as unknown as PowerPlannerDataSource),
-      records: uniqueRecords,
+      records: normalizedRecords.records,
     },
-    changed: uniqueRecords.length !== sourceRecords.length,
+    changed: normalizedRecords.changed,
   }
 }
 
@@ -451,9 +283,7 @@ const isStorageSnapshotData = (
     data.bills.every(isCompleteMonthlyBill) &&
     isSchoolProfile(data.profile) &&
     isPeakScenario(data.scenario) &&
-    Array.isArray(data.ratePlans) &&
-    data.ratePlans.length > 0 &&
-    data.ratePlans.every(isRatePlan) &&
+    validateRatePlanCollection(data.ratePlans).valid &&
     (isCalculationSettings(data.calculationSettings) ||
       (allowMissingCalculationSettings &&
         data.calculationSettings === undefined)) &&
@@ -481,6 +311,7 @@ const parseStorageSnapshot = (
     const normalizedPowerPlanner = normalizePowerPlannerDataSource(
       rawData?.powerPlanner,
     )
+    const normalizedScenario = normalizePeakScenario(rawData?.scenario)
     const rawProvenance =
       rawData?.provenance && typeof rawData.provenance === 'object'
         ? (rawData.provenance as DataProvenance)
@@ -488,6 +319,7 @@ const parseStorageSnapshot = (
     const sanitizedData = rawData
       ? {
           ...rawData,
+          scenario: normalizedScenario.scenario ?? rawData.scenario,
           powerPlanner: normalizedPowerPlanner.dataSource,
           provenance: rawProvenance
             ? {
@@ -1198,10 +1030,12 @@ const migrateLegacyPerKeyStorage = (
     ? explicitProvenance
     : { bills: 'sample' as const, powerPlanner: 'none' as const }
   const legacyPowerPlanner = payloads.get(powerPlannerStorageKey)?.data
+  const normalizedLegacyPowerPlanner =
+    normalizePowerPlannerDataSource(legacyPowerPlanner)
   const powerPlanner =
     provenance.powerPlanner !== 'none' &&
-    isValidPowerPlannerDataSource(legacyPowerPlanner)
-      ? legacyPowerPlanner
+    normalizedLegacyPowerPlanner.dataSource
+      ? normalizedLegacyPowerPlanner.dataSource
       : null
   const safeProvenance: DataProvenance = {
     bills: bills && provenance.bills === 'uploaded' ? 'uploaded' : 'sample',
@@ -1221,11 +1055,11 @@ const migrateLegacyPerKeyStorage = (
     data: {
       bills: bills ?? fallbackData.bills,
       profile: isSchoolProfile(profile) ? profile : fallbackData.profile,
-      scenario: isPeakScenario(scenario) ? scenario : fallbackData.scenario,
-      ratePlans:
-        Array.isArray(ratePlans) && ratePlans.every(isRatePlan)
-          ? ratePlans
-          : fallbackData.ratePlans,
+      scenario:
+        normalizePeakScenario(scenario).scenario ?? fallbackData.scenario,
+      ratePlans: validateRatePlanCollection(ratePlans).valid
+        ? (ratePlans as RatePlan[])
+        : fallbackData.ratePlans,
       calculationSettings: fallbackData.calculationSettings,
       powerPlanner,
       provenance: safeProvenance,

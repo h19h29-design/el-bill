@@ -597,6 +597,36 @@ describe('automatic diagnosis harness', () => {
     expect(diagnosis.canGenerateChangeDocuments).toBe(false)
   })
 
+  it('blocks diagnosis and documents when different plans share an identifier', () => {
+    const duplicateIdCandidate = {
+      ...cheaperPlan,
+      id: currentPlan.id,
+      planName: '다른 이름의 후보',
+    }
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: currentPlan.contractType,
+      voltageType: currentPlan.voltageType,
+      currentPlan: currentPlan.planName,
+    }
+
+    const diagnosis = buildAutoDiagnosis({
+      bills: thirtySixConsecutiveBills,
+      profile,
+      ratePlans: [currentPlan, duplicateIdCandidate],
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+      billsAreUserUploaded: true,
+    })
+
+    expect(diagnosis.completed).toBe(false)
+    expect(diagnosis.configurationRequired).toBe(true)
+    expect(diagnosis.currentPlan).toBeNull()
+    expect(diagnosis.recommendedPlan).toBeNull()
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(diagnosis.documentBlockReason).toContain('요금제')
+  })
+
   it('unknown current plan blocks diagnosis', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills,
@@ -643,6 +673,33 @@ describe('automatic diagnosis harness', () => {
     expect(diagnosis.topCandidates).toEqual([])
     expect(diagnosis.canGenerateChangeDocuments).toBe(false)
     expect(diagnosis.documentBlockReason).toContain('고지서')
+  })
+
+  it.each([
+    ['negative contract power', { contractPowerKw: -1 }],
+    ['zero applied power', { appliedPowerKw: 0 }],
+    ['non-finite applied power', { appliedPowerKw: Number.NaN }],
+    ['applied power over contract', { contractPowerKw: 400, appliedPowerKw: 500 }],
+  ])('blocks diagnosis and documents for %s', (_label, patch) => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: thirtySixConsecutiveBills,
+      profile: {
+        ...defaultSchoolProfile,
+        contractType: currentPlan.contractType,
+        voltageType: currentPlan.voltageType,
+        currentPlan: currentPlan.planName,
+        ...patch,
+      },
+      ratePlans: [currentPlan, cheaperPlan],
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+      billsAreUserUploaded: true,
+    })
+
+    expect(diagnosis.completed).toBe(false)
+    expect(diagnosis.recommendedPlan).toBeNull()
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(diagnosis.documentBlockReason).toContain('학교')
   })
 
   it('excludes an invalid negative-rate candidate and never recommends it', () => {

@@ -69,6 +69,14 @@ const createInvalidRequiredWorkbook = async () => {
   return toArrayBuffer(await workbook.xlsx.writeBuffer())
 }
 
+const createMonthWorkbook = async (months: unknown[]) => {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('2026 시연')
+  sheet.addRow(['월분', '사용량(kWh)', '2026학년도'])
+  months.forEach((month) => sheet.addRow([month, 42_000, 6_420_000]))
+  return toArrayBuffer(await workbook.xlsx.writeBuffer())
+}
+
 const createWorkbookWithShape = async (rows: number, columns: number) => {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('2026 시연')
@@ -578,6 +586,61 @@ describe('synthetic workbook parser harness', () => {
     expect(result.diagnostics.join(' ')).toContain('제외')
   })
 
+  it('accepts only strict automatic month values', async () => {
+    const valid = await parseWorkbook(
+      await createMonthWorkbook([1, '01', '1월', ' 12월 ']),
+    )
+    const invalid = await parseWorkbook(
+      await createMonthWorkbook([
+        -1,
+        -12,
+        1.5,
+        13,
+        'x1',
+        '1x',
+        '1e1',
+        '01월분',
+      ]),
+    )
+
+    expect(valid.autoRows.map((bill) => bill.month)).toEqual([1, 1, 1, 12])
+    expect(invalid.autoRows).toEqual([])
+    expect(invalid.diagnostics.join(' ')).toContain('월')
+  })
+
+  it.each([
+    '2026년 06월',
+    '2026-06',
+    '2026/6',
+    '2026.06',
+    '2026-06-30',
+    '2026년 6월 30일',
+  ])('accepts anchored calendar-valid year-month value %s', async (value) => {
+    const fixture = powerPlannerHtmlFixture.replace('2026년 06월', value)
+    const result = await parseWorkbook(
+      new TextEncoder().encode(fixture).buffer,
+    )
+
+    expect(result.autoRows[0]).toMatchObject({ year: 2026, month: 6 })
+  })
+
+  it.each([
+    'x2026년 06월',
+    '2026년 06월x',
+    '2026-02-30',
+    '2026-13',
+    '2026-1.5',
+    '2026e0-06',
+    '-2026-06',
+  ])('rejects malformed or invalid year-month value %s', async (value) => {
+    const fixture = powerPlannerHtmlFixture.replace('2026년 06월', value)
+    const result = await parseWorkbook(
+      new TextEncoder().encode(fixture).buffer,
+    )
+
+    expect(result.autoRows).toEqual([])
+  })
+
   it('treats blank Power Planner applied power as an inferred profile fallback', async () => {
     const blankAppliedPowerFixture = powerPlannerHtmlFixture.replace(
       'title="450" aria-describedby="grid_JOJ_KW">450',
@@ -683,6 +746,37 @@ describe('synthetic workbook parser harness', () => {
         totalBillWon: '총 전기요금',
         appliedPowerKw: '요금적용전력',
         vatWon: '부가세',
+      },
+      { appliedPowerKw: 620, currentPlan },
+    )
+
+    expect(bills).toEqual([])
+  })
+
+  it.each([
+    -1,
+    -12,
+    1.5,
+    13,
+    'x1',
+    '1x',
+    '1e1',
+    '01월분',
+  ])('rejects malformed manual month value %s', (month) => {
+    const bills = mapRowsToBills(
+      [
+        {
+          연도: 2026,
+          월: month,
+          사용량: 42_000,
+          '총 전기요금': 6_420_000,
+        },
+      ],
+      {
+        year: '연도',
+        month: '월',
+        usageKwh: '사용량',
+        totalBillWon: '총 전기요금',
       },
       { appliedPowerKw: 620, currentPlan },
     )

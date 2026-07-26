@@ -26,6 +26,49 @@ const plan = (id: string, planName: string): RatePlan => ({
 afterEach(cleanup)
 
 describe('rate-plan settings validation', () => {
+  it('shows accessible guidance for an invalid incoming collection', () => {
+    render(
+      <RatePlanSettings
+        plans={[
+          plan('duplicate', '선택요금Ⅰ'),
+          plan('duplicate', '선택요금Ⅱ'),
+        ]}
+        onPlansChange={vi.fn(async () => true)}
+        calculationSettings={defaultCalculationSettings}
+        onCalculationSettingsChange={vi.fn(async () => true)}
+      />,
+    )
+
+    expect(screen.getByRole('status').textContent).toContain('식별값')
+  })
+
+  it('creates collision-proof identifiers when adding plans', async () => {
+    const onPlansChange = vi.fn(async (_plans: RatePlan[]) => true)
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(
+      '00000000-0000-4000-8000-000000000000',
+    )
+    const existing = plan(
+      'custom-00000000-0000-4000-8000-000000000000',
+      '선택요금Ⅰ',
+    )
+    render(
+      <RatePlanSettings
+        plans={[existing]}
+        onPlansChange={onPlansChange}
+        calculationSettings={defaultCalculationSettings}
+        onCalculationSettingsChange={vi.fn(async () => true)}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '요금제 추가' }))
+
+    await waitFor(() => expect(onPlansChange).toHaveBeenCalledTimes(1))
+    const nextPlans = onPlansChange.mock.calls[0][0]
+    expect(new Set(nextPlans.map((item) => item.id)).size).toBe(
+      nextPlans.length,
+    )
+  })
+
   it('rejects an edit that duplicates an existing contract-voltage-plan tuple', () => {
     const onPlansChange = vi.fn(async () => true)
     render(
