@@ -28,6 +28,7 @@ describe('PowerPlannerUpload aggregate limit', () => {
     const updates: PowerPlannerDataSource[] = []
     const onDataSourceChange = vi.fn((next: PowerPlannerDataSource | null) => {
       if (next) updates.push(next)
+      return true
     })
     const { container, rerender } = render(
       <PowerPlannerUpload
@@ -72,7 +73,7 @@ describe('PowerPlannerUpload aggregate limit', () => {
         sourceRowIndex: index,
       })),
     }
-    const onDataSourceChange = vi.fn()
+    const onDataSourceChange = vi.fn(() => true)
     const { container } = render(
       <PowerPlannerUpload
         dataSource={source}

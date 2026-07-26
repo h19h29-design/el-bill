@@ -1,9 +1,12 @@
 import type {
   DataProvenance,
   MonthlyBill,
+  PeakScenario,
   PowerPlannerDataSource,
   PowerPlannerDataType,
   PowerPlannerRecord,
+  RatePlan,
+  SchoolProfile,
 } from '../types'
 
 const dayMs = 24 * 60 * 60 * 1000
@@ -13,6 +16,11 @@ export const legacyDataModeStorageKey = 'el-bill:data-mode'
 export const powerPlannerStorageKey = 'el-bill:power-planner'
 export const storageSessionKey = 'el-bill:storage-session'
 export const storageCommitKey = 'el-bill:storage-commit'
+export const storageSnapshotKey = 'el-bill:storage-snapshot'
+export const billsStorageKey = 'el-bill:bills'
+export const profileStorageKey = 'el-bill:profile'
+export const scenarioStorageKey = 'el-bill:scenario'
+export const ratePlansStorageKey = 'el-bill:rate-plans'
 export const defaultDataProvenance: DataProvenance = {
   bills: 'sample',
   powerPlanner: 'none',
@@ -38,6 +46,28 @@ export interface StorageSession {
   expiresAt: string
   sessionId: string
 }
+
+export interface StorageSnapshotData {
+  bills: MonthlyBill[]
+  profile: SchoolProfile
+  scenario: PeakScenario
+  ratePlans: RatePlan[]
+  powerPlanner: PowerPlannerDataSource | null
+  provenance: DataProvenance
+}
+
+export interface StorageSnapshot {
+  schemaVersion: 1
+  session: StorageSession
+  data: StorageSnapshotData
+}
+
+export type StorageSnapshotWriteResult =
+  | { ok: true; snapshot: StorageSnapshot }
+  | {
+      ok: false
+      reason: 'invalid-data' | 'storage-error' | 'missing' | 'malformed' | 'expired' | 'stale-session'
+    }
 
 type LegacySessionMetadata = Omit<StorageSession, 'sessionId'>
 export type StorageEntry = readonly [key: string, data: unknown]
@@ -429,7 +459,7 @@ const billNumberFields: Array<keyof MonthlyBill> = [
 
 const isStoredMonthlyBill = (value: unknown): value is MonthlyBill => {
   if (!value || typeof value !== 'object') return false
-  const bill = value as Record<string, unknown>
+  const bill = value as unknown as Record<string, unknown>
   return (
     typeof bill.id === 'string' &&
     billNumberFields.every((field) => Number.isFinite(bill[field]))
@@ -524,6 +554,395 @@ const isValidPowerPlannerDataSource = (
     source.records.length > 0 &&
     source.records.every(isValidPowerPlannerRecord)
   )
+}
+
+const profileStringFields: Array<keyof SchoolProfile> = [
+  'schoolName',
+  'displaySchoolName',
+  'customerNumber',
+  'address',
+  'kepcoBranch',
+  'contractType',
+  'voltageType',
+  'currentPlan',
+  'managerName',
+  'managerPhone',
+  'dataCreatedAt',
+  'dataExpiresAt',
+]
+
+const isSchoolProfile = (value: unknown): value is SchoolProfile => {
+  if (!value || typeof value !== 'object') return false
+  const profile = value as Record<string, unknown>
+  return (
+    profileStringFields.every((field) => typeof profile[field] === 'string') &&
+    isFiniteNumber(profile.contractPowerKw) &&
+    isFiniteNumber(profile.appliedPowerKw)
+  )
+}
+
+const isPeakScenario = (value: unknown): value is PeakScenario => {
+  if (!value || typeof value !== 'object') return false
+  const scenario = value as Record<string, unknown>
+  return (
+    [
+      'targetPeakKw',
+      'expectedPeakKw',
+      'usageIncreasePercent',
+      'summerIncreasePercent',
+      'winterIncreasePercent',
+      'analysisYear',
+    ].every((field) => isFiniteNumber(scenario[field])) &&
+    typeof scenario.memo === 'string' &&
+    isOptionalFiniteNumber(scenario.mainBuildingEhpGroups) &&
+    isOptionalFiniteNumber(scenario.annexEhpGroups) &&
+    (scenario.auditoriumCooling === undefined ||
+      typeof scenario.auditoriumCooling === 'boolean') &&
+    isOptionalString(scenario.cafeteriaHighPowerTime) &&
+    isOptionalString(scenario.specialRoomTime) &&
+    isOptionalString(scenario.exemptSpaces)
+  )
+}
+
+const isRatePlan = (value: unknown): value is RatePlan => {
+  if (!value || typeof value !== 'object') return false
+  const plan = value as Record<string, unknown>
+  const seasonRates = plan.seasonRates as Record<string, unknown> | undefined
+  return (
+    ['id', 'contractType', 'voltageType', 'planName', 'effectiveFrom', 'memo'].every(
+      (field) => typeof plan[field] === 'string',
+    ) &&
+    isFiniteNumber(plan.baseRateWonPerKw) &&
+    Boolean(seasonRates) &&
+    isFiniteNumber(seasonRates?.springAutumn) &&
+    isFiniteNumber(seasonRates?.summer) &&
+    isFiniteNumber(seasonRates?.winter) &&
+    isOptionalFiniteNumber(plan.lightLoadRate) &&
+    isOptionalFiniteNumber(plan.midLoadRate) &&
+    isOptionalFiniteNumber(plan.peakLoadRate)
+  )
+}
+
+const isCompleteMonthlyBill = (value: unknown): value is MonthlyBill => {
+  if (!isStoredMonthlyBill(value)) return false
+  const bill = value as unknown as Record<string, unknown>
+  return (
+    typeof bill.note === 'string' &&
+    Array.isArray(bill.observedFields) &&
+    bill.observedFields.every((field) => typeof field === 'string')
+  )
+}
+
+const isStorageSnapshotData = (value: unknown): value is StorageSnapshotData => {
+  if (!value || typeof value !== 'object') return false
+  const data = value as Record<string, unknown>
+  const provenance = data.provenance
+  const hasPowerPlanner = isValidPowerPlannerDataSource(data.powerPlanner)
+  return (
+    Array.isArray(data.bills) &&
+    data.bills.length > 0 &&
+    data.bills.every(isCompleteMonthlyBill) &&
+    isSchoolProfile(data.profile) &&
+    isPeakScenario(data.scenario) &&
+    Array.isArray(data.ratePlans) &&
+    data.ratePlans.length > 0 &&
+    data.ratePlans.every(isRatePlan) &&
+    (data.powerPlanner === null || hasPowerPlanner) &&
+    isDataProvenance(provenance) &&
+    (provenance.powerPlanner === 'none'
+      ? data.powerPlanner === null
+      : hasPowerPlanner)
+  )
+}
+
+const parseStorageSnapshotRoot = (raw: string): StorageSnapshot | null => {
+  try {
+    const value = JSON.parse(raw) as unknown
+    if (!value || typeof value !== 'object') return null
+    const snapshot = value as Record<string, unknown>
+    if (
+      snapshot.schemaVersion !== 1 ||
+      !isStorageSession(snapshot.session) ||
+      !isStorageSnapshotData(snapshot.data)
+    ) {
+      return null
+    }
+    return snapshot as unknown as StorageSnapshot
+  } catch {
+    return null
+  }
+}
+
+const snapshotExpiredAt = (snapshot: StorageSnapshot, now: number) =>
+  Date.parse(snapshot.session.expiresAt) <= now
+
+const removeRootIfUnchanged = (raw: string) => {
+  if (localStorage.getItem(storageSnapshotKey) !== raw) return false
+  localStorage.removeItem(storageSnapshotKey)
+  return true
+}
+
+const serializeSnapshot = (snapshot: StorageSnapshot) => {
+  if (!isStorageSnapshotData(snapshot.data) || !isStorageSession(snapshot.session)) {
+    return null
+  }
+  try {
+    return JSON.stringify(snapshot)
+  } catch {
+    return null
+  }
+}
+
+export const startNewStorageSnapshot = (
+  data: StorageSnapshotData,
+  now = Date.now(),
+  sessionId = createSessionId(),
+): StorageSnapshotWriteResult => {
+  const snapshot: StorageSnapshot = {
+    schemaVersion: 1,
+    session: createStorageSession(now, sessionId),
+    data,
+  }
+  const serialized = serializeSnapshot(snapshot)
+  if (!serialized) return { ok: false, reason: 'invalid-data' }
+  try {
+    localStorage.setItem(storageSnapshotKey, serialized)
+  } catch {
+    return { ok: false, reason: 'storage-error' }
+  }
+  allLegacyStorageKeys.forEach((key) => {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      // The atomic root is already committed; legacy cleanup can retry on reload.
+    }
+  })
+  return { ok: true, snapshot }
+}
+
+export const updateStorageSnapshot = (
+  expectedSessionId: string,
+  data: StorageSnapshotData,
+  now = Date.now(),
+): StorageSnapshotWriteResult => {
+  const raw = localStorage.getItem(storageSnapshotKey)
+  if (!raw) return { ok: false, reason: 'missing' }
+  const current = parseStorageSnapshotRoot(raw)
+  if (!current) return { ok: false, reason: 'malformed' }
+  if (snapshotExpiredAt(current, now)) return { ok: false, reason: 'expired' }
+  if (current.session.sessionId !== expectedSessionId) {
+    return { ok: false, reason: 'stale-session' }
+  }
+  const next: StorageSnapshot = { ...current, data }
+  const serialized = serializeSnapshot(next)
+  if (!serialized) return { ok: false, reason: 'invalid-data' }
+  if (localStorage.getItem(storageSnapshotKey) !== raw) {
+    return { ok: false, reason: 'stale-session' }
+  }
+  try {
+    localStorage.setItem(storageSnapshotKey, serialized)
+    return { ok: true, snapshot: next }
+  } catch {
+    return { ok: false, reason: 'storage-error' }
+  }
+}
+
+export const readStorageSnapshot = (now = Date.now()): StorageSnapshot | null => {
+  const raw = localStorage.getItem(storageSnapshotKey)
+  if (!raw) return null
+  const snapshot = parseStorageSnapshotRoot(raw)
+  if (!snapshot || snapshotExpiredAt(snapshot, now)) {
+    removeRootIfUnchanged(raw)
+    return null
+  }
+  return snapshot
+}
+
+export const purgeExpiredStorageSnapshot = (
+  expectedSessionId: string,
+  now = Date.now(),
+) => {
+  const raw = localStorage.getItem(storageSnapshotKey)
+  if (!raw) return false
+  const snapshot = parseStorageSnapshotRoot(raw)
+  if (
+    !snapshot ||
+    snapshot.session.sessionId !== expectedSessionId ||
+    !snapshotExpiredAt(snapshot, now)
+  ) {
+    return false
+  }
+  return removeRootIfUnchanged(raw)
+}
+
+export const removeStorageSnapshot = (expectedSessionId?: string) => {
+  const raw = localStorage.getItem(storageSnapshotKey)
+  if (!raw) return false
+  if (expectedSessionId) {
+    const snapshot = parseStorageSnapshotRoot(raw)
+    if (!snapshot || snapshot.session.sessionId !== expectedSessionId) return false
+  }
+  return removeRootIfUnchanged(raw)
+}
+
+const legacySnapshotKeys = [
+  billsStorageKey,
+  profileStorageKey,
+  scenarioStorageKey,
+  ratePlansStorageKey,
+  powerPlannerStorageKey,
+  dataProvenanceStorageKey,
+] as const
+
+const allLegacyStorageKeys = [
+  ...legacySnapshotKeys,
+  legacyDataModeStorageKey,
+  storageSessionKey,
+  storageCommitKey,
+]
+
+const normalizeLegacyBills = (value: unknown): MonthlyBill[] | null => {
+  if (!isStoredMonthlyBillCollection(value)) return null
+  return value.map((bill) => ({
+    ...bill,
+    note: typeof bill.note === 'string' ? bill.note : '',
+    observedFields: Array.isArray(bill.observedFields)
+      ? bill.observedFields.filter((field): field is MonthlyBill['observedFields'][number] =>
+          typeof field === 'string',
+        )
+      : [],
+  }))
+}
+
+const readLegacySession = () => {
+  const rawSession = localStorage.getItem(storageSessionKey)
+  if (!rawSession) return { valid: true, session: null as StorageSession | LegacySessionMetadata | null }
+  try {
+    const value = JSON.parse(rawSession) as unknown
+    if (isStorageSession(value)) {
+      const rawCommit = localStorage.getItem(storageCommitKey)
+      if (!rawCommit) return { valid: false, session: null }
+      const commit = JSON.parse(rawCommit) as unknown
+      return {
+        valid: isStorageSession(commit) && sessionsMatch(value, commit),
+        session: value,
+      }
+    }
+    return {
+      valid: isSessionMetadata(value) && !hasSessionIdField(value),
+      session: isSessionMetadata(value) ? value : null,
+    }
+  } catch {
+    return { valid: false, session: null }
+  }
+}
+
+const migrateLegacyStorageSnapshot = (
+  fallbackData: StorageSnapshotData,
+  now: number,
+): StorageSnapshot | null => {
+  const legacySession = readLegacySession()
+  if (!legacySession.valid) return null
+
+  const payloads = new Map(
+    legacySnapshotKeys.map((key) => [
+      key,
+      parseStoredPayload<unknown>(localStorage.getItem(key)),
+    ]),
+  )
+  const committedSessionId =
+    legacySession.session && isStorageSession(legacySession.session)
+      ? legacySession.session.sessionId
+      : null
+  const hasMismatchedPayload = [...payloads.values()].some((payload) => {
+    if (!payload) return false
+    return committedSessionId
+      ? payload.sessionId !== committedSessionId
+      : Boolean(payload.sessionId)
+  })
+  if (hasMismatchedPayload) return null
+
+  const metadata = [
+    ...(legacySession.session ? [legacySession.session] : []),
+    ...[...payloads.values()].filter(
+      (payload): payload is LegacySessionMetadata & { data: unknown; sessionId?: string } =>
+        Boolean(payload),
+    ),
+  ]
+  if (!metadata.length) {
+    localStorage.removeItem(legacyDataModeStorageKey)
+    return null
+  }
+
+  const earliest = metadata.reduce((current, candidate) =>
+    Date.parse(candidate.expiresAt) < Date.parse(current.expiresAt) ? candidate : current,
+  )
+  if (Date.parse(earliest.expiresAt) <= now) return null
+
+  const bills = normalizeLegacyBills(payloads.get(billsStorageKey)?.data)
+  const profileValue = payloads.get(profileStorageKey)?.data
+  const scenarioValue = payloads.get(scenarioStorageKey)?.data
+  const ratePlansValue = payloads.get(ratePlansStorageKey)?.data
+  const provenanceValue = payloads.get(dataProvenanceStorageKey)?.data
+  const powerPlannerValue = payloads.get(powerPlannerStorageKey)?.data
+  const provenance: DataProvenance =
+    bills && isDataProvenance(provenanceValue)
+      ? provenanceValue
+      : defaultDataProvenance
+  const powerPlanner =
+    provenance.powerPlanner !== 'none' &&
+    isValidPowerPlannerDataSource(powerPlannerValue)
+      ? powerPlannerValue
+      : null
+  const safeProvenance: DataProvenance = {
+    bills: bills && provenance.bills === 'uploaded' ? 'uploaded' : 'sample',
+    powerPlanner: powerPlanner ? provenance.powerPlanner : 'none',
+  }
+  const data: StorageSnapshotData = {
+    bills: bills ?? fallbackData.bills,
+    profile: isSchoolProfile(profileValue) ? profileValue : fallbackData.profile,
+    scenario: isPeakScenario(scenarioValue) ? scenarioValue : fallbackData.scenario,
+    ratePlans:
+      Array.isArray(ratePlansValue) && ratePlansValue.every(isRatePlan)
+        ? ratePlansValue
+        : fallbackData.ratePlans,
+    powerPlanner,
+    provenance: safeProvenance,
+  }
+  const snapshot: StorageSnapshot = {
+    schemaVersion: 1,
+    session: {
+      sessionId: createSessionId(),
+      createdAt: earliest.createdAt,
+      expiresAt: earliest.expiresAt,
+    },
+    data,
+  }
+  const serialized = serializeSnapshot(snapshot)
+  if (!serialized) return null
+  try {
+    localStorage.setItem(storageSnapshotKey, serialized)
+  } catch {
+    return null
+  }
+  allLegacyStorageKeys.forEach((key) => localStorage.removeItem(key))
+  return snapshot
+}
+
+export const restoreStorageSnapshot = (
+  fallbackData: StorageSnapshotData,
+  now = Date.now(),
+): StorageSnapshot | null => {
+  const raw = localStorage.getItem(storageSnapshotKey)
+  if (raw) {
+    const snapshot = parseStorageSnapshotRoot(raw)
+    if (!snapshot || snapshotExpiredAt(snapshot, now)) {
+      removeRootIfUnchanged(raw)
+      return null
+    }
+    return snapshot
+  }
+  return migrateLegacyStorageSnapshot(fallbackData, now)
 }
 
 export const isStoredMonthlyBillCollection = (

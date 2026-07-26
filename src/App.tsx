@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Building2, CalendarDays, ClipboardCheck } from 'lucide-react'
 import { Sidebar } from './components/layout/Sidebar'
 import { TopNotice } from './components/layout/TopNotice'
@@ -24,49 +24,38 @@ import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import {
-  dataProvenanceStorageKey,
-  isCommittedStorageSession,
-  isStoredMonthlyBillCollection,
-  legacyDataModeStorageKey,
-  loadDataProvenance,
-  loadForSession,
-  powerPlannerStorageKey,
-  purgeInvalidCurrentStorageSession,
-  purgeStorageSession,
-  readStorageSession,
-  restorePowerPlannerState,
-  restoreStorageSession,
-  saveForSession,
-  startNewStorageSession,
-  storageCommitKey,
-  storageSessionKey,
-  type StorageEntry,
+  purgeExpiredStorageSnapshot,
+  readStorageSnapshot,
+  removeStorageSnapshot,
+  restoreStorageSnapshot,
+  startNewStorageSnapshot,
+  storageSnapshotKey,
+  updateStorageSnapshot,
+  type StorageSnapshot,
+  type StorageSnapshotData,
   type StorageSession,
 } from './lib/storage'
 
-const billsKey = 'el-bill:bills'
-const profileKey = 'el-bill:profile'
-const scenarioKey = 'el-bill:scenario'
-const ratePlansKey = 'el-bill:rate-plans'
-const storageKeys = [
-  billsKey,
-  profileKey,
-  scenarioKey,
-  ratePlansKey,
-  powerPlannerStorageKey,
-  dataProvenanceStorageKey,
-  legacyDataModeStorageKey,
-]
-const storageSnapshotKeys = [
-  billsKey,
-  profileKey,
-  scenarioKey,
-  ratePlansKey,
-  powerPlannerStorageKey,
-  dataProvenanceStorageKey,
-]
 const maxBrowserTimeoutMs = 2_147_483_647
-const crossTabSessionGraceMs = 50
+const storageFailureMessage =
+  '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.'
+
+const defaultStorageData = (): StorageSnapshotData => ({
+  bills: sampleBills,
+  profile: defaultSchoolProfile,
+  scenario: defaultScenario,
+  ratePlans: defaultRatePlans,
+  powerPlanner: null,
+  provenance: { bills: 'sample', powerPlanner: 'none' },
+})
+
+const initializeAppStorage = () => {
+  const snapshot = restoreStorageSnapshot(defaultStorageData())
+  return {
+    snapshot,
+    data: snapshot?.data ?? defaultStorageData(),
+  }
+}
 
 const Dashboard = lazy(() =>
   import('./components/dashboard/Dashboard').then((module) => ({
@@ -108,105 +97,106 @@ function ViewLoadingFallback() {
 }
 
 function App() {
-  const initialStorageSession = restoreStorageSession(
-    storageKeys,
-    storageSessionKey,
-    storageSnapshotKeys,
-  )
-
-  const loadedBillsPayload = initialStorageSession
-    ? loadForSession<unknown>(billsKey, initialStorageSession)
-    : null
-  const loadedBills = isStoredMonthlyBillCollection(loadedBillsPayload?.data)
-    ? { ...loadedBillsPayload, data: loadedBillsPayload.data }
-    : null
-  if (loadedBillsPayload && !loadedBills) localStorage.removeItem(billsKey)
-  const loadedProfile = initialStorageSession
-    ? loadForSession<SchoolProfile>(profileKey, initialStorageSession)
-    : null
-  const loadedScenario = initialStorageSession
-    ? loadForSession<PeakScenario>(scenarioKey, initialStorageSession)
-    : null
-  const loadedPlans = initialStorageSession
-    ? loadForSession<RatePlan[]>(ratePlansKey, initialStorageSession)
-    : null
-  const [restoredPowerPlanner] = useState(() =>
-    restorePowerPlannerState(
-      loadDataProvenance(loadedBills?.data, initialStorageSession),
-      initialStorageSession,
-    ),
-  )
-
+  const [initialStorage] = useState(initializeAppStorage)
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
-  const [bills, setBills] = useState<MonthlyBill[]>(loadedBills?.data ?? sampleBills)
+  const [bills, setBills] = useState<MonthlyBill[]>(initialStorage.data.bills)
   const [profile, setProfile] = useState<SchoolProfile>(
-    loadedProfile?.data ?? defaultSchoolProfile,
+    initialStorage.data.profile,
   )
   const [scenario, setScenario] = useState<PeakScenario>(
-    loadedScenario?.data ?? defaultScenario,
+    initialStorage.data.scenario,
   )
   const [ratePlans, setRatePlans] = useState<RatePlan[]>(
-    loadedPlans?.data ?? defaultRatePlans,
+    initialStorage.data.ratePlans,
   )
   const [powerPlannerDataSource, setPowerPlannerDataSource] =
-    useState<PowerPlannerDataSource | null>(restoredPowerPlanner.powerPlannerData)
+    useState<PowerPlannerDataSource | null>(initialStorage.data.powerPlanner)
   const [dataProvenance, setDataProvenance] = useState<DataProvenance>(
-    restoredPowerPlanner.provenance,
+    initialStorage.data.provenance,
   )
   const [storageSession, setStorageSession] = useState<StorageSession | null>(
-    initialStorageSession,
+    initialStorage.snapshot?.session ?? null,
   )
   const [expiryMessage, setExpiryMessage] = useState('')
 
-  useEffect(() => {
-    if (storageSession) saveForSession(billsKey, bills, storageSession)
-  }, [bills, storageSession])
+  const applySnapshot = useCallback((snapshot: StorageSnapshot) => {
+    setStorageSession(snapshot.session)
+    setBills(snapshot.data.bills)
+    setProfile(snapshot.data.profile)
+    setScenario(snapshot.data.scenario)
+    setRatePlans(snapshot.data.ratePlans)
+    setPowerPlannerDataSource(snapshot.data.powerPlanner)
+    setDataProvenance(snapshot.data.provenance)
+    setExpiryMessage('')
+  }, [])
 
-  useEffect(() => {
-    if (storageSession) saveForSession(profileKey, profile, storageSession)
-  }, [profile, storageSession])
-
-  useEffect(() => {
-    if (storageSession) saveForSession(scenarioKey, scenario, storageSession)
-  }, [scenario, storageSession])
-
-  useEffect(() => {
-    if (storageSession) saveForSession(ratePlansKey, ratePlans, storageSession)
-  }, [ratePlans, storageSession])
+  const resetInMemoryToSamples = useCallback((message = '') => {
+    const defaults = defaultStorageData()
+    setStorageSession(null)
+    setBills(defaults.bills)
+    setProfile(defaults.profile)
+    setScenario(defaults.scenario)
+    setRatePlans(defaults.ratePlans)
+    setPowerPlannerDataSource(defaults.powerPlanner)
+    setDataProvenance(defaults.provenance)
+    setActiveView('dashboard')
+    setExpiryMessage(message)
+  }, [])
 
   useEffect(() => {
     if (!storageSession) return
-    saveForSession(powerPlannerStorageKey, powerPlannerDataSource, storageSession)
-  }, [powerPlannerDataSource, storageSession])
-
-  useEffect(() => {
-    if (storageSession) {
-      saveForSession(dataProvenanceStorageKey, dataProvenance, storageSession)
+    const result = updateStorageSnapshot(storageSession.sessionId, {
+      bills,
+      profile,
+      scenario,
+      ratePlans,
+      powerPlanner: powerPlannerDataSource,
+      provenance: dataProvenance,
+    })
+    if (result.ok) return
+    if (result.reason === 'storage-error' || result.reason === 'invalid-data') {
+      setExpiryMessage(storageFailureMessage)
+      return
     }
-  }, [dataProvenance, storageSession])
+    const latest = readStorageSnapshot()
+    if (latest) {
+      applySnapshot(latest)
+      return
+    }
+    resetInMemoryToSamples(
+      result.reason === 'expired'
+        ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
+        : '다른 탭에서 저장 데이터가 변경되어 시연 샘플로 전환했습니다.',
+    )
+  }, [
+    applySnapshot,
+    bills,
+    dataProvenance,
+    powerPlannerDataSource,
+    profile,
+    ratePlans,
+    resetInMemoryToSamples,
+    scenario,
+    storageSession,
+  ])
 
   useEffect(() => {
     if (!storageSession) return
 
     const expireSession = () => {
-      if (!purgeStorageSession(storageKeys, storageSession, storageSessionKey)) return
-      setStorageSession(null)
-      setBills(sampleBills)
-      setProfile(defaultSchoolProfile)
-      setScenario(defaultScenario)
-      setRatePlans(defaultRatePlans)
-      setPowerPlannerDataSource(null)
-      setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
-      setActiveView('dashboard')
-      setExpiryMessage('24시간이 지나 시연 데이터가 삭제되었습니다.')
+      if (
+        purgeExpiredStorageSnapshot(storageSession.sessionId) ||
+        !readStorageSnapshot()
+      ) {
+        resetInMemoryToSamples('24시간이 지나 시연 데이터가 삭제되었습니다.')
+        return
+      }
+      const latest = readStorageSnapshot()
+      if (latest) applySnapshot(latest)
     }
 
     let timeoutId: number | undefined
     const scheduleExpiry = () => {
-      if (!isCommittedStorageSession(storageSession)) {
-        expireSession()
-        return
-      }
       const remainingMs = Date.parse(storageSession.expiresAt) - Date.now()
       if (remainingMs <= 0) {
         expireSession()
@@ -222,94 +212,33 @@ function App() {
     return () => {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
-  }, [storageSession])
+  }, [applySnapshot, resetInMemoryToSamples, storageSession])
 
   useEffect(() => {
-    if (!storageSession) return
-    const resetToSample = (message: string) => {
-      setStorageSession(null)
-      setBills(sampleBills)
-      setProfile(defaultSchoolProfile)
-      setScenario(defaultScenario)
-      setRatePlans(defaultRatePlans)
-      setPowerPlannerDataSource(null)
-      setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
-      setActiveView('dashboard')
-      setExpiryMessage(message)
-    }
-
-    const adoptOrPurgeCurrentSession = () => {
-      const nextSession = readStorageSession(storageSessionKey)
-      if (!nextSession) {
-        purgeInvalidCurrentStorageSession(
-          storageKeys,
-          storageSnapshotKeys,
-          storageSessionKey,
-        )
-        resetToSample('다른 탭의 저장이 완료되지 않아 시연 샘플로 전환했습니다.')
+    const adoptCurrentRoot = (missingMessage: string) => {
+      const latest = readStorageSnapshot()
+      if (latest) {
+        applySnapshot(latest)
         return
       }
-
-      const nextBillsPayload = loadForSession<unknown>(billsKey, nextSession)
-      const nextProfilePayload = loadForSession<SchoolProfile>(profileKey, nextSession)
-      const nextScenarioPayload = loadForSession<PeakScenario>(scenarioKey, nextSession)
-      const nextPlansPayload = loadForSession<RatePlan[]>(ratePlansKey, nextSession)
-      if (
-        !isStoredMonthlyBillCollection(nextBillsPayload?.data) ||
-        !nextProfilePayload?.data ||
-        !nextScenarioPayload?.data ||
-        !Array.isArray(nextPlansPayload?.data)
-      ) {
-        purgeInvalidCurrentStorageSession(
-          storageKeys,
-          storageSnapshotKeys,
-          storageSessionKey,
-        )
-        resetToSample('다른 탭의 저장이 완료되지 않아 시연 샘플로 전환했습니다.')
-        return
-      }
-
-      const nextProvenance = loadDataProvenance(nextBillsPayload.data, nextSession)
-      const nextPowerPlanner = restorePowerPlannerState(nextProvenance, nextSession)
-      setStorageSession(nextSession)
-      setBills(nextBillsPayload.data)
-      setProfile(nextProfilePayload.data)
-      setScenario(nextScenarioPayload.data)
-      setRatePlans(nextPlansPayload.data)
-      setPowerPlannerDataSource(nextPowerPlanner.powerPlannerData)
-      setDataProvenance(nextPowerPlanner.provenance)
-      setExpiryMessage('')
-    }
-
-    let deferredRecheckId: number | undefined
-    const scheduleCrossTabRecheck = () => {
-      if (deferredRecheckId !== undefined) window.clearTimeout(deferredRecheckId)
-      deferredRecheckId = window.setTimeout(() => {
-        deferredRecheckId = undefined
-        adoptOrPurgeCurrentSession()
-      }, crossTabSessionGraceMs)
-    }
-
-    const recheckOwnedSession = () => {
-      if (isCommittedStorageSession(storageSession)) return
-      const expired = Date.parse(storageSession.expiresAt) <= Date.now()
-      if (expired && purgeStorageSession(storageKeys, storageSession, storageSessionKey)) {
-        resetToSample('24시간이 지나 시연 데이터가 삭제되었습니다.')
-        return
-      }
-      scheduleCrossTabRecheck()
+      if (storageSession) resetInMemoryToSamples(missingMessage)
     }
 
     const handleStorageSessionChange = (event: StorageEvent) => {
       if (
         event.storageArea !== localStorage ||
-        (event.key !== storageSessionKey && event.key !== storageCommitKey)
+        event.key !== storageSnapshotKey
       ) return
-      scheduleCrossTabRecheck()
+      adoptCurrentRoot('다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.')
     }
-    const handleFocus = () => recheckOwnedSession()
+    const handleFocus = () =>
+      adoptCurrentRoot(
+        Date.parse(storageSession?.expiresAt ?? '') <= Date.now()
+          ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
+          : '다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.',
+      )
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') recheckOwnedSession()
+      if (document.visibilityState === 'visible') handleFocus()
     }
     window.addEventListener('storage', handleStorageSessionChange)
     window.addEventListener('focus', handleFocus)
@@ -318,9 +247,8 @@ function App() {
       window.removeEventListener('storage', handleStorageSessionChange)
       window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
-      if (deferredRecheckId !== undefined) window.clearTimeout(deferredRecheckId)
     }
-  }, [storageSession])
+  }, [applySnapshot, resetInMemoryToSamples, storageSession])
 
   const sortedBills = useMemo(() => sortBillsChronologically(bills), [bills])
   const latestBill = sortedBills.at(-1)
@@ -345,17 +273,16 @@ function App() {
   )
 
   const resetSample = () => {
-    storageKeys.forEach((key) => localStorage.removeItem(key))
-    localStorage.removeItem(storageSessionKey)
-    localStorage.removeItem(storageCommitKey)
-    setStorageSession(null)
-    setBills(sampleBills)
-    setProfile(defaultSchoolProfile)
-    setScenario(defaultScenario)
-    setRatePlans(defaultRatePlans)
-    setPowerPlannerDataSource(null)
-    setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
-    setExpiryMessage('')
+    if (storageSession && !removeStorageSnapshot(storageSession.sessionId)) {
+      const latest = readStorageSnapshot()
+      if (latest) {
+        applySnapshot(latest)
+        return
+      }
+    } else if (!storageSession) {
+      removeStorageSnapshot()
+    }
+    resetInMemoryToSamples()
   }
 
   const startUploadSession = (
@@ -363,22 +290,21 @@ function App() {
     nextPowerPlannerDataSource: PowerPlannerDataSource | null,
     nextProvenance: DataProvenance,
   ) => {
-    const entries: StorageEntry[] = [
-      [billsKey, nextBills],
-      [profileKey, profile],
-      [scenarioKey, scenario],
-      [ratePlansKey, ratePlans],
-      [powerPlannerStorageKey, nextPowerPlannerDataSource],
-      [dataProvenanceStorageKey, nextProvenance],
-    ]
-    const nextSession = startNewStorageSession(
-      entries,
-      Date.now(),
-      undefined,
-      storageSnapshotKeys,
-    )
-    setStorageSession(nextSession)
+    const result = startNewStorageSnapshot({
+      bills: nextBills,
+      profile,
+      scenario,
+      ratePlans,
+      powerPlanner: nextPowerPlannerDataSource,
+      provenance: nextProvenance,
+    })
+    if (!result.ok) {
+      setExpiryMessage(storageFailureMessage)
+      return false
+    }
+    applySnapshot(result.snapshot)
     setExpiryMessage('')
+    return true
   }
 
   const applyBillsAndOpenDiagnosis = (nextBills: MonthlyBill[]) => {
@@ -386,10 +312,11 @@ function App() {
       ...dataProvenance,
       bills: 'uploaded',
     }
-    startUploadSession(nextBills, powerPlannerDataSource, nextProvenance)
-    setBills(nextBills)
-    setDataProvenance(nextProvenance)
+    if (!startUploadSession(nextBills, powerPlannerDataSource, nextProvenance)) {
+      return false
+    }
     setActiveView('diagnosis')
+    return true
   }
 
   const applyPowerPlannerAndOpenDiagnosis = (
@@ -401,13 +328,15 @@ function App() {
       powerPlanner: origin,
     }
     if (nextDataSource && origin === 'uploaded') {
-      startUploadSession(bills, nextDataSource, nextProvenance)
+      if (!startUploadSession(bills, nextDataSource, nextProvenance)) return false
+    } else {
+      setPowerPlannerDataSource(nextDataSource)
+      setDataProvenance(nextProvenance)
     }
-    setPowerPlannerDataSource(nextDataSource)
-    setDataProvenance(nextProvenance)
     if (nextDataSource) {
       setActiveView('diagnosis')
     }
+    return true
   }
 
   return (

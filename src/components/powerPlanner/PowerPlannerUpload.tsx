@@ -45,7 +45,7 @@ interface PowerPlannerUploadProps {
   onDataSourceChange: (
     dataSource: PowerPlannerDataSource | null,
     origin: DataProvenance['powerPlanner'],
-  ) => void
+  ) => boolean
 }
 
 const dataTypes = Object.entries(powerPlannerDataTypeLabels) as Array<
@@ -147,7 +147,12 @@ export function PowerPlannerUpload({
       sourceName,
       `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건 반영`,
     )
-    onDataSourceChange(next, 'uploaded')
+    if (!onDataSourceChange(next, 'uploaded')) {
+      setMessage(
+        '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+      )
+      return
+    }
     const duplicateNotice = merged.duplicateCount
       ? ` 중복 ${merged.duplicateCount.toLocaleString('ko-KR')}건은 제외했습니다.`
       : ''
@@ -228,7 +233,7 @@ export function PowerPlannerUpload({
             type="button"
             className="ghost-button"
             onClick={() => {
-              onDataSourceChange(samplePowerPlannerDataSource, 'sample')
+              if (!onDataSourceChange(samplePowerPlannerDataSource, 'sample')) return
               setMessage('시연용 시간대별 파워플래너 샘플을 적용했습니다.')
             }}
           >
@@ -342,7 +347,7 @@ export function PowerPlannerUpload({
             type="button"
             className="ghost-button"
             onClick={() => {
-              onDataSourceChange(null, 'none')
+              if (!onDataSourceChange(null, 'none')) return
               setMessage('파워플래너 업로드 자료를 초기화했습니다.')
             }}
           >

@@ -20,7 +20,7 @@ interface BillUploadProps {
   bills: MonthlyBill[]
   profile: SchoolProfile
   ratePlans: RatePlan[]
-  onBillsChange: (bills: MonthlyBill[]) => void
+  onBillsChange: (bills: MonthlyBill[]) => boolean
 }
 
 const mappingFields = [
@@ -172,7 +172,12 @@ export function BillUpload({
       setMessage('필수 매핑 결과가 없습니다. 연도, 월, 사용량, 총 전기요금을 확인해 주세요.')
       return
     }
-    onBillsChange(mapped)
+    if (!onBillsChange(mapped)) {
+      setMessage(
+        '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+      )
+      return
+    }
     setMessage(`${mapped.length.toLocaleString('ko-KR')}건을 매핑해 반영했습니다.`)
   }
 
@@ -185,7 +190,12 @@ export function BillUpload({
       return
     }
     if (parseResult.autoRows.length) {
-      onBillsChange(parseResult.autoRows)
+      if (!onBillsChange(parseResult.autoRows)) {
+        setMessage(
+          '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.',
+        )
+        return
+      }
       const isPowerPlannerExport = parseResult.diagnostics.some((item) =>
         item.includes('파워플래너'),
       )
