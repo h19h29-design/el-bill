@@ -24,8 +24,8 @@ export function PlanCandidateTable({ candidates }: PlanCandidateTableProps) {
               <th>후보 요금제</th>
               <th>최근 12개월 예상액</th>
               <th>최근 12개월 절감액</th>
-              <th>최근 3년 절감액</th>
-              <th>피크 반영 절감액</th>
+              <th>최근 연속 36개월 절감액</th>
+              <th>피크 시나리오 절감액</th>
               <th>판단</th>
               <th>검토 사유</th>
             </tr>
@@ -41,7 +41,11 @@ export function PlanCandidateTable({ candidates }: PlanCandidateTableProps) {
                 <td className={candidate.savingWon >= 0 ? 'positive' : 'danger-text'}>
                   {formatWon(candidate.savingWon)}
                 </td>
-                <td>{formatWon(candidate.threeYearSavingWon)}</td>
+                <td>
+                  {candidate.threeYearDataAvailable
+                    ? formatWon(candidate.threeYearSavingWon)
+                    : '36개월 자료 부족'}
+                </td>
                 <td>{formatWon(candidate.peakScenarioSavingWon)}</td>
                 <td>
                   <span className={`judgement-pill ${candidate.recommendation === '변경 추천' ? 'good' : candidate.recommendation === '유지 추천' ? 'hold' : 'review'}`}>

@@ -149,6 +149,7 @@ describe('automatic diagnosis harness', () => {
       profile: defaultSchoolProfile,
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
 
     expect(diagnosis.finalJudgement).toBe('추가 검토 필요')
@@ -161,10 +162,15 @@ describe('automatic diagnosis harness', () => {
       currentPlan,
       cheaperPlan,
       defaultScenario,
-      'billDelta',
+      defaultCalculationSettings,
     )
 
     expect(comparison.savingWon).toBeGreaterThan(0)
+    expect(comparison.currentThreeYearWon).toBeGreaterThan(0)
+    expect(comparison.candidateThreeYearWon).toBeGreaterThan(0)
+    expect(comparison.threeYearSavingWon).toBe(
+      comparison.currentThreeYearWon - comparison.candidateThreeYearWon,
+    )
     expect(comparison.threeYearSavingWon).toBeGreaterThan(0)
     expect(comparison.recommendation).toBe('변경 추천')
   })
@@ -191,6 +197,7 @@ describe('automatic diagnosis harness', () => {
       profile: defaultSchoolProfile,
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
 
     expect(diagnosis.dataConfidence).toBe('보통')
@@ -231,6 +238,7 @@ describe('automatic diagnosis harness', () => {
       profile,
       ratePlans: [currentPlan, duplicateCurrentPlan, cheaperPlan],
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
 
@@ -247,6 +255,7 @@ describe('automatic diagnosis harness', () => {
       profile: { ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' },
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
 
     expect(diagnosis.configurationRequired).toBe(true)
@@ -264,10 +273,15 @@ describe('automatic diagnosis harness', () => {
       [...consecutiveBills(2022, 1, 24), ...consecutiveBills(2026, 1, 12)],
       currentPlan,
       cheaperPlan,
+      undefined,
+      defaultCalculationSettings,
     )
 
     expect(comparison.savingWon).toBeGreaterThan(0)
+    expect(comparison.currentThreeYearWon).toBe(0)
+    expect(comparison.candidateThreeYearWon).toBe(0)
     expect(comparison.threeYearSavingWon).toBe(0)
+    expect(comparison.threeYearDataAvailable).toBe(false)
     expect(comparison.recommendation).toBe('추가 검토 필요')
   })
 
@@ -276,6 +290,8 @@ describe('automatic diagnosis harness', () => {
       [{ ...makeBill(1), id: 'old-bill', year: 2025 }, ...consecutiveBills(2026, 2, 11)],
       currentPlan,
       cheaperPlan,
+      undefined,
+      defaultCalculationSettings,
     )
 
     expect(comparison.currentAnnualWon).toBeGreaterThan(0)
@@ -288,7 +304,7 @@ describe('automatic diagnosis harness', () => {
       currentPlan,
       expensivePlan,
       defaultScenario,
-      'billDelta',
+      defaultCalculationSettings,
     )
 
     expect(comparison.savingWon).toBeLessThan(0)
@@ -306,6 +322,7 @@ describe('automatic diagnosis harness', () => {
       },
       ratePlans: [currentPlan, expensivePlan],
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
 
@@ -321,6 +338,7 @@ describe('automatic diagnosis harness', () => {
       profile: defaultSchoolProfile,
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
 
     expect(diagnosis.canGenerateChangeDocuments).toBe(false)
@@ -339,6 +357,7 @@ describe('automatic diagnosis harness', () => {
       profile,
       ratePlans: [currentPlan, cheaperPlan],
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
     const gappedDiagnosis = buildAutoDiagnosis({
@@ -348,6 +367,7 @@ describe('automatic diagnosis harness', () => {
       },
       ratePlans: [currentPlan, cheaperPlan],
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
 
@@ -373,6 +393,7 @@ describe('automatic diagnosis harness', () => {
       profile,
       ratePlans: [currentPlan, cheaperPlan],
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
     const gappedDiagnosis = buildAutoDiagnosis({
@@ -380,6 +401,7 @@ describe('automatic diagnosis harness', () => {
       profile,
       ratePlans: [currentPlan, cheaperPlan],
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
 
@@ -406,6 +428,7 @@ describe('automatic diagnosis harness', () => {
       profile,
       ratePlans: [currentPlan, cheaperPlan, expensivePlan],
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
 
@@ -419,24 +442,57 @@ describe('automatic diagnosis harness', () => {
     }
   })
 
-  it('recalculates savings when expected peak changes', () => {
+  it('separates baseline values from the peak scenario', () => {
     const basePeakComparison = comparePlansForDiagnosis(
-      twelveBills,
+      thirtySixConsecutiveBills,
       currentPlan,
       cheaperPlan,
       { ...defaultScenario, expectedPeakKw: 500 },
-      'billDelta',
+      defaultCalculationSettings,
     )
     const highPeakComparison = comparePlansForDiagnosis(
-      twelveBills,
+      thirtySixConsecutiveBills,
       currentPlan,
       cheaperPlan,
-      { ...defaultScenario, expectedPeakKw: 900 },
-      'billDelta',
+      {
+        ...defaultScenario,
+        expectedPeakKw: 900,
+        usageIncreasePercent: 20,
+        summerIncreasePercent: 30,
+        winterIncreasePercent: 40,
+      },
+      defaultCalculationSettings,
     )
 
-    expect(highPeakComparison.savingWon).not.toBe(basePeakComparison.savingWon)
-    expect(highPeakComparison.peakScenarioSavingWon).toBe(highPeakComparison.savingWon)
+    expect(highPeakComparison.currentAnnualWon).toBe(
+      basePeakComparison.currentAnnualWon,
+    )
+    expect(highPeakComparison.candidateAnnualWon).toBe(
+      basePeakComparison.candidateAnnualWon,
+    )
+    expect(highPeakComparison.savingWon).toBe(basePeakComparison.savingWon)
+    expect(highPeakComparison.currentThreeYearWon).toBe(
+      basePeakComparison.currentThreeYearWon,
+    )
+    expect(highPeakComparison.candidateThreeYearWon).toBe(
+      basePeakComparison.candidateThreeYearWon,
+    )
+    expect(highPeakComparison.threeYearSavingWon).toBe(
+      basePeakComparison.threeYearSavingWon,
+    )
+    expect(highPeakComparison.peakScenarioCurrentAnnualWon).not.toBe(
+      basePeakComparison.peakScenarioCurrentAnnualWon,
+    )
+    expect(highPeakComparison.peakScenarioCandidateAnnualWon).not.toBe(
+      basePeakComparison.peakScenarioCandidateAnnualWon,
+    )
+    expect(highPeakComparison.peakScenarioSavingWon).not.toBe(
+      highPeakComparison.savingWon,
+    )
+    expect(highPeakComparison.peakScenarioSavingWon).toBe(
+      highPeakComparison.peakScenarioCurrentAnnualWon -
+        highPeakComparison.peakScenarioCandidateAnnualWon,
+    )
   })
 
   it('forces candidates with different contract conditions to additional review', () => {
@@ -462,6 +518,7 @@ describe('automatic diagnosis harness', () => {
       },
       ratePlans: [currentPlan, cheaperPlan, foreignVoltagePlan],
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
     const foreignCandidate = diagnosis.topCandidates.find(
       (candidate) => candidate.candidatePlanId === foreignVoltagePlan.id,

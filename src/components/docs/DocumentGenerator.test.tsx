@@ -4,6 +4,7 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
 import { defaultRatePlans } from '../../data/ratePlans'
+import { defaultCalculationSettings } from '../../lib/calculationSettings'
 import { buildAutoDiagnosis } from '../../lib/diagnosis'
 import { getDocumentFileNames, sanitizeDownloadStem } from '../../lib/downloadNames'
 import { buildPeakOperationPlan } from '../../lib/peakOperations'
@@ -27,6 +28,7 @@ describe('document generation eligibility', () => {
       profile: { ...defaultSchoolProfile, displaySchoolName: '테스트고등학교' },
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
 
     const { container } = render(
@@ -50,6 +52,7 @@ describe('document generation eligibility', () => {
       profile: { ...defaultSchoolProfile, displaySchoolName },
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
     const { container } = render(
       <DocumentGenerator
@@ -74,6 +77,7 @@ describe('document generation eligibility', () => {
       profile: defaultSchoolProfile,
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
     const blockedDiagnosis = {
       ...diagnosis,
@@ -115,6 +119,7 @@ describe('document generation eligibility', () => {
       profile: defaultSchoolProfile,
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
 
@@ -140,6 +145,7 @@ describe('document generation eligibility', () => {
       profile: { ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' },
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
 
     const { container } = render(

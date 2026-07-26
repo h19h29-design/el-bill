@@ -45,7 +45,11 @@ export function RatePlanSettings({
   calculationSettings,
   onCalculationSettingsChange,
 }: RatePlanSettingsProps) {
+  type CalculationFactorField = Exclude<keyof CalculationSettings, 'mode'>
   const [validationMessage, setValidationMessage] = useState('')
+  const [calculationErrors, setCalculationErrors] = useState<
+    Partial<Record<CalculationFactorField, string>>
+  >({})
   const [savingCalculationSettings, setSavingCalculationSettings] =
     useState(false)
   const updatePlan = (
@@ -96,9 +100,11 @@ export function RatePlanSettings({
     if (savingCalculationSettings) return
     const validation = validateCalculationSettings(nextSettings)
     if (!validation.valid) {
+      setCalculationErrors(validation.errors)
       setValidationMessage(Object.values(validation.errors)[0] ?? '')
       return
     }
+    setCalculationErrors({})
     setValidationMessage('')
     setSavingCalculationSettings(true)
     const saved = await onCalculationSettingsChange(nextSettings)
@@ -112,7 +118,7 @@ export function RatePlanSettings({
   }
 
   const updateCalculationNumber = (
-    field: Exclude<keyof CalculationSettings, 'mode'>,
+    field: CalculationFactorField,
     value: string,
   ) => {
     void changeCalculationSettings({
@@ -172,7 +178,16 @@ export function RatePlanSettings({
             기후환경요금 단가
             <span className="input-with-unit">
               <input
-                aria-label="기후환경요금 단가"
+                aria-label="기후환경요금 단가(원/kWh)"
+                aria-invalid={Boolean(
+                  calculationErrors.climateEnvironmentWonPerKwh,
+                )}
+                aria-describedby={[
+                  'climate-environment-help',
+                  calculationErrors.climateEnvironmentWonPerKwh
+                    ? 'climate-environment-error'
+                    : '',
+                ].filter(Boolean).join(' ')}
                 type="number"
                 step="0.1"
                 min="0"
@@ -188,12 +203,29 @@ export function RatePlanSettings({
               />
               <span>원/kWh</span>
             </span>
+            <span id="climate-environment-help" className="helper-text">
+              0~100원/kWh 범위
+            </span>
+            {calculationErrors.climateEnvironmentWonPerKwh && (
+              <span id="climate-environment-error" className="field-error">
+                {calculationErrors.climateEnvironmentWonPerKwh}
+              </span>
+            )}
           </label>
           <label>
             연료비조정 단가
             <span className="input-with-unit">
               <input
-                aria-label="연료비조정 단가"
+                aria-label="연료비조정 단가(원/kWh)"
+                aria-invalid={Boolean(
+                  calculationErrors.fuelAdjustmentWonPerKwh,
+                )}
+                aria-describedby={[
+                  'fuel-adjustment-help',
+                  calculationErrors.fuelAdjustmentWonPerKwh
+                    ? 'fuel-adjustment-error'
+                    : '',
+                ].filter(Boolean).join(' ')}
                 type="number"
                 step="0.1"
                 min="-100"
@@ -209,12 +241,25 @@ export function RatePlanSettings({
               />
               <span>원/kWh</span>
             </span>
+            <span id="fuel-adjustment-help" className="helper-text">
+              -100~100원/kWh 범위
+            </span>
+            {calculationErrors.fuelAdjustmentWonPerKwh && (
+              <span id="fuel-adjustment-error" className="field-error">
+                {calculationErrors.fuelAdjustmentWonPerKwh}
+              </span>
+            )}
           </label>
           <label>
             부가세율
             <span className="input-with-unit">
               <input
-                aria-label="부가세율"
+                aria-label="부가세율(%)"
+                aria-invalid={Boolean(calculationErrors.vatPercent)}
+                aria-describedby={[
+                  'vat-percent-help',
+                  calculationErrors.vatPercent ? 'vat-percent-error' : '',
+                ].filter(Boolean).join(' ')}
                 type="number"
                 step="0.1"
                 min="0"
@@ -227,12 +272,25 @@ export function RatePlanSettings({
               />
               <span>%</span>
             </span>
+            <span id="vat-percent-help" className="helper-text">
+              0~100% 범위
+            </span>
+            {calculationErrors.vatPercent && (
+              <span id="vat-percent-error" className="field-error">
+                {calculationErrors.vatPercent}
+              </span>
+            )}
           </label>
           <label>
             전력산업기반기금 비율
             <span className="input-with-unit">
               <input
-                aria-label="전력산업기반기금 비율"
+                aria-label="전력산업기반기금 비율(%)"
+                aria-invalid={Boolean(calculationErrors.fundPercent)}
+                aria-describedby={[
+                  'fund-percent-help',
+                  calculationErrors.fundPercent ? 'fund-percent-error' : '',
+                ].filter(Boolean).join(' ')}
                 type="number"
                 step="0.1"
                 min="0"
@@ -245,6 +303,14 @@ export function RatePlanSettings({
               />
               <span>%</span>
             </span>
+            <span id="fund-percent-help" className="helper-text">
+              0~100% 범위
+            </span>
+            {calculationErrors.fundPercent && (
+              <span id="fund-percent-error" className="field-error">
+                {calculationErrors.fundPercent}
+              </span>
+            )}
           </label>
         </div>
         <p className="helper-text">

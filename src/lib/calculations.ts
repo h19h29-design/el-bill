@@ -2,13 +2,10 @@ import type {
   CalculationSettings,
   MonthlyBill,
   PeakScenario,
-  PlanComparison,
   RatePlan,
-  Recommendation,
   Season,
 } from '../types'
 import { validateBillPeriods } from './billPeriods'
-import { defaultCalculationSettings } from './calculationSettings'
 
 const fiscalMonthOrder = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2]
 
@@ -49,8 +46,8 @@ export const getBillsByFiscalYears = (bills: MonthlyBill[], years: number) => {
 export const estimateBillForPlan = (
   bill: MonthlyBill,
   plan: RatePlan,
-  scenario?: PeakScenario,
-  settings: CalculationSettings = defaultCalculationSettings,
+  scenario: PeakScenario | undefined,
+  settings: CalculationSettings,
 ) => {
   const season = getSeason(bill.month)
   const generalIncrease = scenario?.usageIncreasePercent ?? 0
@@ -80,73 +77,6 @@ export const estimateBillForPlan = (
 export const calculateUsageHours = (bill: MonthlyBill) => {
   if (!bill.appliedPowerKw) return 0
   return bill.usageKwh / bill.appliedPowerKw
-}
-
-export const comparePlans = (
-  bills: MonthlyBill[],
-  currentPlan: RatePlan,
-  candidatePlan: RatePlan,
-  scenario?: PeakScenario,
-): PlanComparison => {
-  const validation = validateBillPeriods(bills, 36)
-  const recent12 = validation.recentConsecutiveBills.slice(-12)
-  if (recent12.length < 12) {
-    return {
-      currentAnnualWon: 0,
-      candidateAnnualWon: 0,
-      savingWon: 0,
-      savingRate: 0,
-      threeYearSavingWon: 0,
-      fiveYearSavingWon: 0,
-      recommendation: '추가 검토 필요',
-      basis: '12개월 이상 자료가 부족하여 보수적으로 추가 검토 필요로 표시',
-    }
-  }
-
-  const currentAnnualWon = recent12.reduce(
-    (sum, bill) => sum + estimateBillForPlan(bill, currentPlan, scenario),
-    0,
-  )
-  const candidateAnnualWon = recent12.reduce(
-    (sum, bill) => sum + estimateBillForPlan(bill, candidatePlan, scenario),
-    0,
-  )
-  const savingWon = currentAnnualWon - candidateAnnualWon
-  const savingRate = currentAnnualWon ? savingWon / currentAnnualWon : 0
-  const threeYearBills = validation.hasRequiredConsecutiveMonths
-    ? validation.recentConsecutiveBills.slice(-36)
-    : []
-  const threeYearSavingWon = threeYearBills.reduce(
-    (sum, bill) =>
-      sum +
-      estimateBillForPlan(bill, currentPlan, scenario) -
-      estimateBillForPlan(bill, candidatePlan, scenario),
-    0,
-  )
-  const fiveYearSavingWon = savingWon * 5
-
-  let recommendation: Recommendation = '추가 검토 필요'
-  if (savingWon < 0) recommendation = '유지 추천'
-  else if (savingWon > 1_000_000 && savingRate >= 0.03 && threeYearSavingWon > 0)
-    recommendation = '변경 추천'
-
-  const basis =
-    recommendation === '변경 추천'
-      ? '최근 12개월과 최근 3년 추정 모두 절감으로 표시됨'
-      : recommendation === '유지 추천'
-        ? '변경안 적용 시 비용 증가로 추정됨'
-        : '절감폭 또는 피크 시나리오 민감도가 있어 담당자 추가 검토 필요'
-
-  return {
-    currentAnnualWon,
-    candidateAnnualWon,
-    savingWon,
-    savingRate,
-    threeYearSavingWon,
-    fiveYearSavingWon,
-    recommendation,
-    basis,
-  }
 }
 
 export const getDashboardSummary = (

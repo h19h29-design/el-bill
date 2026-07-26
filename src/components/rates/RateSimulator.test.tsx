@@ -17,6 +17,7 @@ const diagnosis = buildAutoDiagnosis({
   profile: defaultSchoolProfile,
   ratePlans: defaultRatePlans,
   scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
 })
 
 afterEach(cleanup)
@@ -77,8 +78,14 @@ describe('rate simulator usability harness', () => {
       candidateAnnualWon: 5,
       savingWon: 5,
       savingRate: 0.5,
+      annualDataAvailable: true,
+      currentThreeYearWon: 30,
+      candidateThreeYearWon: 15,
       threeYearSavingWon: 15,
+      threeYearDataAvailable: true,
       fiveYearSavingWon: 25,
+      peakScenarioCurrentAnnualWon: 10,
+      peakScenarioCandidateAnnualWon: 5,
       peakScenarioSavingWon: 5,
       calculationMode: 'billDelta',
       calculationBreakdown: [],
@@ -123,5 +130,70 @@ describe('rate simulator usability harness', () => {
     )
 
     expect(screen.getByText('계산 모드: 요금표 기반 전체 추정')).toBeTruthy()
+  })
+
+  it('switches between annual, actual three-year, and peak-scenario totals', () => {
+    const comparison: PlanCandidateComparison = {
+      ...diagnosis.comparison,
+      currentAnnualWon: 12_000_000,
+      candidateAnnualWon: 10_000_000,
+      savingWon: 2_000_000,
+      currentThreeYearWon: 40_000_000,
+      candidateThreeYearWon: 31_000_000,
+      threeYearSavingWon: 9_000_000,
+      peakScenarioCurrentAnnualWon: 15_000_000,
+      peakScenarioCandidateAnnualWon: 12_000_000,
+      peakScenarioSavingWon: 3_000_000,
+      annualDataAvailable: true,
+      threeYearDataAvailable: true,
+    }
+
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={async () => true}
+      />,
+    )
+
+    expect(screen.getByText('12,000,000원')).toBeTruthy()
+    expect(screen.getAllByText('2,000,000원')).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: '최근 3년' }))
+    expect(screen.getByText('40,000,000원')).toBeTruthy()
+    expect(screen.getByText('9,000,000원')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '피크 예상 시나리오' }))
+    expect(screen.getByText('15,000,000원')).toBeTruthy()
+    expect(screen.getAllByText('3,000,000원')).toHaveLength(2)
+  })
+
+  it('explains when actual consecutive 36-month data is unavailable', () => {
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={{
+          ...diagnosis.comparison,
+          currentThreeYearWon: 0,
+          candidateThreeYearWon: 0,
+          threeYearSavingWon: 0,
+          threeYearDataAvailable: false,
+        }}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={async () => true}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '최근 3년' }))
+    expect(
+      screen.getByText('최근 36개월의 연속된 고지서 자료가 부족합니다.'),
+    ).toBeTruthy()
   })
 })

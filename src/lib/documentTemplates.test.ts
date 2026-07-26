@@ -9,8 +9,15 @@ const comparison = {
   candidateAnnualWon: 63_260_310,
   savingWon: 3_329_490,
   savingRate: 0.05,
+  annualDataAvailable: true,
+  currentThreeYearWon: 199_769_400,
+  candidateThreeYearWon: 189_780_930,
   threeYearSavingWon: 9_988_470,
+  threeYearDataAvailable: true,
   fiveYearSavingWon: 16_647_450,
+  peakScenarioCurrentAnnualWon: 70_000_000,
+  peakScenarioCandidateAnnualWon: 65_000_000,
+  peakScenarioSavingWon: 5_000_000,
   recommendation: '변경 추천' as const,
   basis: '테스트',
 }
@@ -52,7 +59,6 @@ const candidateComparison: PlanCandidateComparison = {
   contractType: recommendedPlan.contractType,
   voltageType: recommendedPlan.voltageType,
   sameContractPriority: true,
-  peakScenarioSavingWon: 340_000,
   calculationMode: 'billDelta',
   calculationBreakdown: [
     {
@@ -147,6 +153,21 @@ describe('document template harness', () => {
       '선택요금Ⅱ -> 테스트 추천요금',
     )
     expect(bundle.calculationSummaryText).toContain('고지서 기반 차액 추정')
+    expect(bundle.calculationSummaryText).toContain(
+      '최근 3년 현재안: 199,769,400원',
+    )
+    expect(bundle.calculationSummaryText).toContain(
+      '최근 3년 추천안: 189,780,930원',
+    )
+    expect(bundle.calculationSummaryText).toContain(
+      '피크 시나리오 현재안: 70,000,000원',
+    )
+    expect(bundle.calculationSummaryText).toContain(
+      '피크 시나리오 추천안: 65,000,000원',
+    )
+    expect(bundle.calculationSummaryText).toContain(
+      '피크 시나리오 절감액: 5,000,000원',
+    )
     expect(bundle.calculationSummaryText).toContain('기본요금 차액')
     expect(bundle.calculationBreakdown[0].differenceWon).toBe(4_920_000)
     expect(bundle.checklist).toEqual(

@@ -49,6 +49,36 @@ export function RateSimulator({
   const reviewOnlyCandidate = candidates.find(
     (candidate) => candidate.candidatePlanId === candidatePlan.id,
   )
+  const selectedMetrics =
+    tab === '36'
+      ? {
+          currentWon: comparison.currentThreeYearWon,
+          candidateWon: comparison.candidateThreeYearWon,
+          savingWon: comparison.threeYearSavingWon,
+          available: comparison.threeYearDataAvailable,
+          currentLabel: `최근 3년 현재안 (${currentPlan.planName})`,
+          candidateLabel: `최근 3년 추천안 (${candidatePlan.planName})`,
+          summaryLabel: '최근 3년 절감액',
+        }
+      : tab === 'peak'
+        ? {
+            currentWon: comparison.peakScenarioCurrentAnnualWon,
+            candidateWon: comparison.peakScenarioCandidateAnnualWon,
+            savingWon: comparison.peakScenarioSavingWon,
+            available: comparison.annualDataAvailable,
+            currentLabel: `피크 시나리오 현재안 (${currentPlan.planName})`,
+            candidateLabel: `피크 시나리오 추천안 (${candidatePlan.planName})`,
+            summaryLabel: '피크 시나리오 절감액',
+          }
+        : {
+            currentWon: comparison.currentAnnualWon,
+            candidateWon: comparison.candidateAnnualWon,
+            savingWon: comparison.savingWon,
+            available: comparison.annualDataAvailable,
+            currentLabel: `최근 12개월 현재안 (${currentPlan.planName})`,
+            candidateLabel: `최근 12개월 추천안 (${candidatePlan.planName})`,
+            summaryLabel: '최근 12개월 절감액',
+          }
 
   if (reviewOnlyCandidate?.recommendation === '추가 검토 필요') {
     return (
@@ -84,10 +114,23 @@ export function RateSimulator({
         계산 모드: {getCalculationModeLabel(calculationSettings.mode)}
       </p>
 
-      <section className="comparison-grid">
+      {!selectedMetrics.available ? (
+        <section className="document-block-notice" role="status">
+          <AlertTriangle size={22} />
+          <div>
+            <strong>선택 기간 자료 부족</strong>
+            <p>
+              {tab === '36'
+                ? '최근 36개월의 연속된 고지서 자료가 부족합니다.'
+                : '최근 12개월의 연속된 고지서 자료가 부족합니다.'}
+            </p>
+          </div>
+        </section>
+      ) : (
+        <section className="comparison-grid">
         <article className="comparison-card blue">
-          <span>현재 요금제 ({currentPlan.planName})</span>
-          <strong>{formatWon(comparison.currentAnnualWon)}</strong>
+          <span>{selectedMetrics.currentLabel}</span>
+          <strong>{formatWon(selectedMetrics.currentWon)}</strong>
           <dl>
             <div>
               <dt>기본요금</dt>
@@ -100,8 +143,8 @@ export function RateSimulator({
           </dl>
         </article>
         <article className="comparison-card teal">
-          <span>추천안 ({candidatePlan.planName})</span>
-          <strong>{formatWon(comparison.candidateAnnualWon)}</strong>
+          <span>{selectedMetrics.candidateLabel}</span>
+          <strong>{formatWon(selectedMetrics.candidateWon)}</strong>
           <dl>
             <div>
               <dt>기본요금</dt>
@@ -114,20 +157,24 @@ export function RateSimulator({
           </dl>
         </article>
         <article className="comparison-card summary">
-          <span>비교 결과 요약</span>
-          <strong>{formatWon(comparison.savingWon)}</strong>
+          <span>{selectedMetrics.summaryLabel}</span>
+          <strong>{formatWon(selectedMetrics.savingWon)}</strong>
           <dl>
             <div>
-              <dt>절감률</dt>
-              <dd>{(comparison.savingRate * 100).toFixed(1)}%</dd>
+              <dt>현재안 대비</dt>
+              <dd>
+                {selectedMetrics.currentWon
+                  ? `${((selectedMetrics.savingWon / selectedMetrics.currentWon) * 100).toFixed(1)}%`
+                  : '산정 불가'}
+              </dd>
             </div>
             <div>
-              <dt>3년 누적</dt>
-              <dd>{formatWon(comparison.threeYearSavingWon)}</dd>
+              <dt>12개월 기준</dt>
+              <dd>{formatWon(comparison.savingWon)}</dd>
             </div>
             <div>
-              <dt>5년 누적</dt>
-              <dd>{formatWon(comparison.fiveYearSavingWon)}</dd>
+              <dt>피크 반영</dt>
+              <dd>{formatWon(comparison.peakScenarioSavingWon)}</dd>
             </div>
           </dl>
           <p className="recommendation">
@@ -140,6 +187,7 @@ export function RateSimulator({
           </p>
         </article>
       </section>
+      )}
 
       <section className="panel">
         <div className="panel-title">

@@ -632,6 +632,80 @@ export const startNewStorageSnapshot = (
   }).catch(() => ({ ok: false, reason: 'lock-error' }))
 }
 
+export const rotateNewStorageSnapshot = (
+  fallbackData: StorageSnapshotData,
+  patchOrUpdater: StorageSnapshotPatch | StorageSnapshotUpdater,
+  now?: number,
+  sessionId = createSessionId(),
+): Promise<StorageSnapshotWriteResult> => {
+  if (!sessionId) {
+    return Promise.resolve({ ok: false, reason: 'invalid-data' })
+  }
+  return withStorageMutationLock(() => {
+    const rotationTime = now ?? Date.now()
+    const previousActiveSessionId = readStorageActivePointer()?.sessionId
+    let baseData: StorageSnapshotData
+    if (previousActiveSessionId) {
+      const active = parseStorageSnapshot(
+        localStorage.getItem(storageSnapshotKeyFor(previousActiveSessionId)),
+        previousActiveSessionId,
+      )
+      if (!active) return { ok: false, reason: 'malformed' } as const
+      if (isSessionExpired(active.session, rotationTime)) {
+        return { ok: false, reason: 'expired' } as const
+      }
+      baseData = active.data
+    } else {
+      if (!isStorageSnapshotData(fallbackData)) {
+        return { ok: false, reason: 'invalid-data' } as const
+      }
+      baseData = fallbackData
+    }
+
+    let patch: StorageSnapshotPatch
+    try {
+      patch =
+        typeof patchOrUpdater === 'function'
+          ? patchOrUpdater(baseData)
+          : patchOrUpdater
+    } catch {
+      return { ok: false, reason: 'invalid-data' } as const
+    }
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      return { ok: false, reason: 'invalid-data' } as const
+    }
+
+    const result = commitNewActiveSnapshotUnlocked({
+      schemaVersion: 1,
+      revision: 0,
+      session: createStorageSession(rotationTime, sessionId),
+      data: { ...baseData, ...patch },
+    })
+    if (!result.ok) return result
+
+    const cleanupPendingSessionIds: string[] = []
+    if (
+      previousActiveSessionId &&
+      previousActiveSessionId !== sessionId &&
+      readStorageActivePointer()?.sessionId === sessionId &&
+      !removeSnapshotIfInactive(previousActiveSessionId)
+    ) {
+      cleanupPendingSessionIds.push(previousActiveSessionId)
+    }
+    try {
+      localStorage.removeItem(legacyAtomicStorageSnapshotKey)
+    } catch {
+      // Cleanup retries after the next mount.
+    }
+    removeLegacyPerKeyStorage()
+    return cleanupPendingSessionIds.length
+      ? { ...result, cleanupPendingSessionIds }
+      : result
+  }).catch(
+    (): StorageSnapshotWriteResult => ({ ok: false, reason: 'lock-error' }),
+  )
+}
+
 export const updateStorageSnapshot = (
   expectedSessionId: string,
   patchOrUpdater: StorageSnapshotPatch | StorageSnapshotUpdater,

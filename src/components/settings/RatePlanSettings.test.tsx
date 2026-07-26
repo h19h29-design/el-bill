@@ -79,12 +79,24 @@ describe('rate-plan settings validation', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('기후환경요금 단가'), {
+    const climateInput = screen.getByLabelText(
+      '기후환경요금 단가(원/kWh)',
+    )
+    fireEvent.change(climateInput, {
       target: { value: '101' },
     })
     expect(screen.getByRole('status').textContent).toContain('0~100원/kWh')
+    expect(climateInput.getAttribute('aria-invalid')).toBe('true')
+    const describedBy = climateInput.getAttribute('aria-describedby')
+    expect(describedBy).toBeTruthy()
+    expect(
+      describedBy
+        ?.split(' ')
+        .map((id) => document.getElementById(id)?.textContent)
+        .join(' '),
+    ).toContain('0~100원/kWh')
 
-    fireEvent.change(screen.getByLabelText('연료비조정 단가'), {
+    fireEvent.change(screen.getByLabelText('연료비조정 단가(원/kWh)'), {
       target: { value: '-4' },
     })
     await waitFor(() =>
@@ -113,7 +125,7 @@ describe('rate-plan settings validation', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('부가세율'), {
+    fireEvent.change(screen.getByLabelText('부가세율(%)'), {
       target: { value: '12' },
     })
 
@@ -121,7 +133,31 @@ describe('rate-plan settings validation', () => {
       expect(onCalculationSettingsChange).toHaveBeenCalled(),
     )
     expect(
-      (screen.getByLabelText('부가세율') as HTMLInputElement).value,
+      (screen.getByLabelText('부가세율(%)') as HTMLInputElement).value,
     ).toBe('10')
+  })
+
+  it('includes units and associated help for every correction factor', () => {
+    render(
+      <RatePlanSettings
+        plans={[plan('first', '선택요금Ⅰ')]}
+        onPlansChange={vi.fn(async () => true)}
+        calculationSettings={defaultCalculationSettings}
+        onCalculationSettingsChange={vi.fn(async () => true)}
+      />,
+    )
+
+    for (const label of [
+      '기후환경요금 단가(원/kWh)',
+      '연료비조정 단가(원/kWh)',
+      '부가세율(%)',
+      '전력산업기반기금 비율(%)',
+    ]) {
+      const input = screen.getByLabelText(label)
+      expect(input.getAttribute('aria-invalid')).toBe('false')
+      const describedBy = input.getAttribute('aria-describedby')
+      expect(describedBy).toBeTruthy()
+      expect(document.getElementById(describedBy!)).toBeTruthy()
+    }
   })
 })

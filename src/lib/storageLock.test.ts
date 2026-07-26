@@ -8,6 +8,7 @@ import {
   sampleBills,
 } from '../data/sampleBills'
 import { defaultCalculationSettings } from './calculationSettings'
+import { samplePowerPlannerDataSource } from '../data/samplePowerPlanner'
 import {
   cleanupExpiredStorageSnapshots,
   getNextStorageSnapshotExpiry,
@@ -16,6 +17,7 @@ import {
   purgeExpiredStorageSnapshot,
   readStorageSnapshot,
   removeStorageSnapshot,
+  rotateNewStorageSnapshot,
   startNewStorageSnapshot,
   storageActivePointerKey,
   storageMutationLockName,
@@ -200,6 +202,116 @@ describe('storage mutation lock and patch protocol', () => {
       }),
     )
     expect(lockNames).toHaveLength(3)
+  })
+
+  it('rotates a stale bill upload from the latest locked snapshot without overwriting settings', async () => {
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'bill-base')).ok,
+    ).toBe(true)
+    const locks = installManualLock()
+    const latestSettings = {
+      ...defaultCalculationSettings,
+      mode: 'tariffFull' as const,
+      climateEnvironmentWonPerKwh: 17,
+    }
+    const settingsEdit = updateStorageSnapshot('bill-base', {
+      calculationSettings: latestSettings,
+      profile: {
+        ...defaultSchoolProfile,
+        displaySchoolName: '최신 탭 학교',
+      },
+    })
+    const uploadedBills = sampleBills.map((bill) => ({
+      ...bill,
+      id: `new-${bill.id}`,
+    }))
+    const staleFallback = makeData()
+    const upload = rotateNewStorageSnapshot(
+      staleFallback,
+      (latest) => ({
+        bills: uploadedBills,
+        provenance: { ...latest.provenance, bills: 'uploaded' },
+      }),
+      now + 1,
+      'bill-rotation',
+    )
+
+    await locks.run(0)
+    expect((await settingsEdit).ok).toBe(true)
+    await locks.run(1)
+    expect((await upload).ok).toBe(true)
+
+    expect(readStorageSnapshot(now + 2)).toEqual(
+      expect.objectContaining({
+        revision: 0,
+        session: expect.objectContaining({ sessionId: 'bill-rotation' }),
+        data: expect.objectContaining({
+          bills: uploadedBills,
+          calculationSettings: latestSettings,
+          profile: expect.objectContaining({
+            displaySchoolName: '최신 탭 학교',
+          }),
+          powerPlanner: null,
+          provenance: {
+            bills: 'uploaded',
+            powerPlanner: 'none',
+          },
+        }),
+      }),
+    )
+  })
+
+  it('rotates a stale PowerPlanner upload while preserving every unrelated latest field', async () => {
+    const latestData = {
+      ...makeData(),
+      scenario: { ...defaultScenario, expectedPeakKw: 777 },
+      provenance: { bills: 'uploaded' as const, powerPlanner: 'none' as const },
+    }
+    expect(
+      (await startNewStorageSnapshot(latestData, now, 'planner-base')).ok,
+    ).toBe(true)
+
+    const result = await rotateNewStorageSnapshot(
+      {
+        ...makeData(),
+        provenance: { bills: 'sample', powerPlanner: 'none' },
+      },
+      (latest) => ({
+        powerPlanner: samplePowerPlannerDataSource,
+        provenance: { ...latest.provenance, powerPlanner: 'uploaded' },
+      }),
+      now + 1,
+      'planner-rotation',
+    )
+
+    expect(result.ok).toBe(true)
+    expect(readStorageSnapshot(now + 2)?.data).toEqual({
+      ...latestData,
+      powerPlanner: samplePowerPlannerDataSource,
+      provenance: { bills: 'uploaded', powerPlanner: 'uploaded' },
+    })
+  })
+
+  it('uses a validated in-memory base when no active session exists', async () => {
+    const fallback = {
+      ...makeData(),
+      profile: {
+        ...defaultSchoolProfile,
+        displaySchoolName: '메모리 기준 학교',
+      },
+    }
+    const result = await rotateNewStorageSnapshot(
+      fallback,
+      { bills: sampleBills.slice(0, 12) },
+      now,
+      'memory-rotation',
+    )
+
+    expect(result.ok).toBe(true)
+    expect(readStorageSnapshot(now)?.data).toEqual({
+      ...fallback,
+      bills: sampleBills.slice(0, 12),
+    })
   })
 
   it('serializes mutations within one tab when Web Locks are unavailable', async () => {

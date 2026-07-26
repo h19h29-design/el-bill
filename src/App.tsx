@@ -35,13 +35,14 @@ import {
   readStorageSnapshot,
   readStorageActivePointer,
   removeStorageSnapshot,
-  startNewStorageSnapshot,
+  rotateNewStorageSnapshot,
   storageActivePointerKey,
   storageSnapshotKeyFor,
   updateStorageSnapshot,
   usesSameTabStorageLockFallback,
   type StorageSnapshot,
   type StorageSnapshotData,
+  type StorageSnapshotUpdater,
   type StorageSnapshotWriteResult,
   type StorageSession,
 } from './lib/storage'
@@ -508,20 +509,16 @@ function App() {
     })
   }
 
-  const startUploadSession = async (
-    nextBills: MonthlyBill[],
-    nextPowerPlannerDataSource: PowerPlannerDataSource | null,
-    nextProvenance: DataProvenance,
-  ) => {
-    const result = await startNewStorageSnapshot({
-      bills: nextBills,
+  const startUploadSession = async (updater: StorageSnapshotUpdater) => {
+    const result = await rotateNewStorageSnapshot({
+      bills,
       profile,
       scenario,
       ratePlans,
       calculationSettings,
-      powerPlanner: nextPowerPlannerDataSource,
-      provenance: nextProvenance,
-    })
+      powerPlanner: powerPlannerDataSource,
+      provenance: dataProvenance,
+    }, updater)
     if (!result.ok) {
       handleStorageWriteFailure(result)
       return false
@@ -535,15 +532,13 @@ function App() {
   }
 
   const applyBillsAndOpenDiagnosis = async (nextBills: MonthlyBill[]) => {
-    const nextProvenance: DataProvenance = {
-      ...dataProvenance,
-      bills: 'uploaded',
-    }
-    if (!(await startUploadSession(
-      nextBills,
-      powerPlannerDataSource,
-      nextProvenance,
-    ))) {
+    if (!(await startUploadSession((latest) => ({
+      bills: nextBills,
+      provenance: {
+        ...latest.provenance,
+        bills: 'uploaded',
+      },
+    })))) {
       return false
     }
     setActiveView('diagnosis')
@@ -559,7 +554,13 @@ function App() {
       powerPlanner: origin,
     }
     if (nextDataSource && origin === 'uploaded') {
-      if (!(await startUploadSession(bills, nextDataSource, nextProvenance))) {
+      if (!(await startUploadSession((latest) => ({
+        powerPlanner: nextDataSource,
+        provenance: {
+          ...latest.provenance,
+          powerPlanner: origin,
+        },
+      })))) {
         return false
       }
     } else {

@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
 import { defaultRatePlans } from '../../data/ratePlans'
+import { defaultCalculationSettings } from '../../lib/calculationSettings'
 import { buildAutoDiagnosis } from '../../lib/diagnosis'
 import { Dashboard } from './Dashboard'
 
@@ -16,6 +17,7 @@ describe('dashboard diagnosis consistency', () => {
       profile: defaultSchoolProfile,
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
     })
     const adjustedDiagnosis = {
       ...diagnosis,
@@ -47,6 +49,7 @@ describe('dashboard diagnosis consistency', () => {
       profile: defaultSchoolProfile,
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
 

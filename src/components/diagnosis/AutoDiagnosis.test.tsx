@@ -5,11 +5,72 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
 import { buildAutoDiagnosis } from '../../lib/diagnosis'
+import { formatWon } from '../../lib/calculations'
+import { defaultCalculationSettings } from '../../lib/calculationSettings'
 import { AutoDiagnosis } from './AutoDiagnosis'
 
 afterEach(cleanup)
 
 describe('automatic diagnosis period integrity', () => {
+  it('shows separated baseline, actual 36-month, and peak scenario values', () => {
+    const calculationSettings = {
+      ...defaultCalculationSettings,
+      mode: 'tariffFull' as const,
+      climateEnvironmentWonPerKwh: 12,
+    }
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings,
+    })
+
+    render(
+      <AutoDiagnosis
+        diagnosis={diagnosis}
+        dataProvenance={{ bills: 'sample', powerPlanner: 'none' }}
+        onNavigate={() => undefined}
+      />,
+    )
+
+    expect(screen.getAllByText('최근 연속 36개월 절감액')).toHaveLength(2)
+    expect(
+      screen.getByText(
+        `현재 ${formatWon(diagnosis.comparison.currentThreeYearWon)} → 추천 ${formatWon(diagnosis.comparison.candidateThreeYearWon)}`,
+      ),
+    ).toBeTruthy()
+    expect(screen.getAllByText('피크 시나리오 절감액')).toHaveLength(2)
+    expect(
+      screen.getByText(
+        `현재 ${formatWon(diagnosis.comparison.peakScenarioCurrentAnnualWon)} → 추천 ${formatWon(diagnosis.comparison.peakScenarioCandidateAnnualWon)}`,
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText(/기후환경 12원\/kWh/)).toBeTruthy()
+  })
+
+  it('does not present a zero three-year value when 36 months are unavailable', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills.slice(-12),
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+    })
+
+    render(
+      <AutoDiagnosis
+        diagnosis={diagnosis}
+        dataProvenance={{ bills: 'sample', powerPlanner: 'none' }}
+        onNavigate={() => undefined}
+      />,
+    )
+
+    expect(screen.getAllByText('최근 연속 36개월 절감액')).toHaveLength(2)
+    expect(screen.getByText('36개월 연속 자료 부족')).toBeTruthy()
+    expect(screen.getAllByText('36개월 자료 부족').length).toBeGreaterThan(0)
+  })
+
   it.each([
     {
       label: 'duplicate period',
@@ -30,6 +91,7 @@ describe('automatic diagnosis period integrity', () => {
       profile: defaultSchoolProfile,
       ratePlans: defaultRatePlans,
       scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
       billsAreUserUploaded: true,
     })
 

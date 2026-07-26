@@ -89,7 +89,7 @@ describe('data provenance persistence', () => {
       ).checked,
     ).toBe(true)
     expect(
-      (screen.getByLabelText('부가세율') as HTMLInputElement).value,
+      (screen.getByLabelText('부가세율(%)') as HTMLInputElement).value,
     ).toBe('12')
   })
 

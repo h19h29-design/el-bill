@@ -25,7 +25,6 @@ export const buildDocumentBundle = (
   const activeComparison = diagnosis?.comparison ?? comparison
   const recommendedPlanName = diagnosis?.recommendedPlan?.planName ?? '추천 요금제'
   const currentPlanName = diagnosis?.currentPlan?.planName ?? profile.currentPlan
-  const peakScenarioSavingWon = diagnosis?.comparison.peakScenarioSavingWon ?? 0
   const calculationModeLabel = getCalculationModeLabel(
     diagnosis?.calculationMode ?? 'billDelta',
   )
@@ -74,8 +73,12 @@ export const buildDocumentBundle = (
     `- 현재 요금제(${currentPlanName}) 기준 연간 예상액: ${formatWon(activeComparison.currentAnnualWon)}`,
     `- 추천 요금제(${recommendedPlanName}) 기준 연간 예상액: ${formatWon(activeComparison.candidateAnnualWon)}`,
     `- 최근 12개월 기준 절감 예상액: ${formatWon(activeComparison.savingWon)}`,
+    `- 최근 3년 현재 요금제 예상액: ${formatWon(activeComparison.currentThreeYearWon)}`,
+    `- 최근 3년 추천 요금제 예상액: ${formatWon(activeComparison.candidateThreeYearWon)}`,
     `- 최근 3년 기준 절감 예상액: ${formatWon(activeComparison.threeYearSavingWon)}`,
-    `- 예상 피크값 반영 후 절감액: ${formatWon(peakScenarioSavingWon)}`,
+    `- 피크 시나리오 현재 요금제 예상액: ${formatWon(activeComparison.peakScenarioCurrentAnnualWon)}`,
+    `- 피크 시나리오 추천 요금제 예상액: ${formatWon(activeComparison.peakScenarioCandidateAnnualWon)}`,
+    `- 예상 피크값 반영 후 절감액: ${formatWon(activeComparison.peakScenarioSavingWon)}`,
     `- 절감률: ${(activeComparison.savingRate * 100).toFixed(1)}%`,
     `- 판단: ${activeComparison.recommendation}`,
     `- 계산 신뢰도: ${diagnosis?.dataConfidence ?? '보통'}`,
@@ -143,9 +146,15 @@ export const buildDocumentBundle = (
     ...correctionFactorLines,
     `- 데이터 인식률: ${diagnosis?.dataRecognitionRate ?? 0}%`,
     `- 인식 월수: ${diagnosis?.recognizedMonths ?? 0}개월`,
+    `- 최근 12개월 현재안: ${formatWon(activeComparison.currentAnnualWon)}`,
+    `- 최근 12개월 추천안: ${formatWon(activeComparison.candidateAnnualWon)}`,
     `- 최근 12개월 절감액: ${formatWon(activeComparison.savingWon)}`,
+    `- 최근 3년 현재안: ${formatWon(activeComparison.currentThreeYearWon)}`,
+    `- 최근 3년 추천안: ${formatWon(activeComparison.candidateThreeYearWon)}`,
     `- 최근 3년 절감액: ${formatWon(activeComparison.threeYearSavingWon)}`,
-    `- 예상 피크값 반영 후 절감액: ${formatWon(peakScenarioSavingWon)}`,
+    `- 피크 시나리오 현재안: ${formatWon(activeComparison.peakScenarioCurrentAnnualWon)}`,
+    `- 피크 시나리오 추천안: ${formatWon(activeComparison.peakScenarioCandidateAnnualWon)}`,
+    `- 피크 시나리오 절감액: ${formatWon(activeComparison.peakScenarioSavingWon)}`,
     ...calculationBreakdown.flatMap((row) => [
       `- ${row.label}: 현재 ${formatWon(row.currentWon)} / 추천 ${formatWon(row.candidateWon)} / 차액 ${formatWon(row.differenceWon)}`,
       `  · ${row.note}`,

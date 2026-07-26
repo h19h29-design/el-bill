@@ -21,7 +21,6 @@ import {
 } from './calculations'
 import { validateBillPeriods } from './billPeriods'
 import { rateChangeCaution } from './documentTemplates'
-import { defaultCalculationSettings } from './calculationSettings'
 
 const optionalBillColumns = [
   '요금적용전력',
@@ -110,8 +109,15 @@ const createConfigurationBlockedComparison = (
   candidateAnnualWon: 0,
   savingWon: 0,
   savingRate: 0,
+  annualDataAvailable: false,
+  currentThreeYearWon: 0,
+  candidateThreeYearWon: 0,
   threeYearSavingWon: 0,
+  threeYearDataAvailable: false,
   fiveYearSavingWon: 0,
+  peakScenarioCurrentAnnualWon: 0,
+  peakScenarioCandidateAnnualWon: 0,
+  peakScenarioSavingWon: 0,
   recommendation: '추가 검토 필요',
   basis: configurationRequiredMessage,
   candidatePlanId: '',
@@ -119,7 +125,6 @@ const createConfigurationBlockedComparison = (
   contractType: profile.contractType,
   voltageType: profile.voltageType,
   sameContractPriority: false,
-  peakScenarioSavingWon: 0,
   calculationMode: mode,
   calculationBreakdown: [],
   reviewReason: configurationRequiredMessage,
@@ -295,7 +300,7 @@ const buildCalculationBreakdown = (
       label: '기본요금 차액',
       currentWon: currentBaseWon,
       candidateWon: candidateBaseWon,
-      note: '요금적용전력과 예상 피크값 중 큰 값을 기준으로 kW 단가를 비교합니다.',
+      note: '최근 고지서의 요금적용전력을 기준으로 kW 단가를 비교합니다.',
     },
     {
       label: '전력량요금 차액',
@@ -330,14 +335,9 @@ export const comparePlansForDiagnosis = (
   bills: MonthlyBill[],
   currentPlan: RatePlan,
   candidatePlan: RatePlan,
-  scenario?: PeakScenario,
-  settingsOrMode: CalculationSettings | CalculationMode =
-    defaultCalculationSettings,
+  scenario: PeakScenario | undefined,
+  settings: CalculationSettings,
 ): PlanCandidateComparison => {
-  const settings =
-    typeof settingsOrMode === 'string'
-      ? { ...defaultCalculationSettings, mode: settingsOrMode }
-      : settingsOrMode
   const mode = settings.mode
   const validation = validateBillPeriods(bills, 36)
   const recent12 = validation.recentConsecutiveBills.slice(-12)
@@ -348,7 +348,7 @@ export const comparePlansForDiagnosis = (
 
   const currentAnnualWon = recent12.reduce(
     (sum, bill) =>
-      sum + estimateCurrentBillByMode(bill, currentPlan, scenario, settings),
+      sum + estimateCurrentBillByMode(bill, currentPlan, undefined, settings),
     0,
   )
   const candidateAnnualWon = recent12.reduce(
@@ -358,17 +358,39 @@ export const comparePlansForDiagnosis = (
         bill,
         currentPlan,
         candidatePlan,
-        scenario,
+        undefined,
         settings,
       ),
     0,
   )
   const savingWon = currentAnnualWon - candidateAnnualWon
   const savingRate = currentAnnualWon ? savingWon / currentAnnualWon : 0
-  const threeYearSavingWon = threeYearBills.reduce(
+  const currentThreeYearWon = threeYearBills.reduce(
+    (sum, bill) =>
+      sum + estimateCurrentBillByMode(bill, currentPlan, undefined, settings),
+    0,
+  )
+  const candidateThreeYearWon = threeYearBills.reduce(
     (sum, bill) =>
       sum +
-      estimateCurrentBillByMode(bill, currentPlan, scenario, settings) -
+      estimateCandidateBillByMode(
+        bill,
+        currentPlan,
+        candidatePlan,
+        undefined,
+        settings,
+      ),
+    0,
+  )
+  const threeYearSavingWon = currentThreeYearWon - candidateThreeYearWon
+  const peakScenarioCurrentAnnualWon = recent12.reduce(
+    (sum, bill) =>
+      sum + estimateCurrentBillByMode(bill, currentPlan, scenario, settings),
+    0,
+  )
+  const peakScenarioCandidateAnnualWon = recent12.reduce(
+    (sum, bill) =>
+      sum +
       estimateCandidateBillByMode(
         bill,
         currentPlan,
@@ -378,13 +400,13 @@ export const comparePlansForDiagnosis = (
       ),
     0,
   )
-
-  const peakScenarioSavingWon = scenario ? savingWon : 0
+  const peakScenarioSavingWon =
+    peakScenarioCurrentAnnualWon - peakScenarioCandidateAnnualWon
   const calculationBreakdown = buildCalculationBreakdown(
     recent12,
     currentPlan,
     candidatePlan,
-    scenario,
+    undefined,
     settings,
     currentAnnualWon,
     candidateAnnualWon,
@@ -409,8 +431,15 @@ export const comparePlansForDiagnosis = (
     candidateAnnualWon,
     savingWon,
     savingRate,
+    annualDataAvailable: hasTwelveConsecutiveMonths,
+    currentThreeYearWon,
+    candidateThreeYearWon,
     threeYearSavingWon,
+    threeYearDataAvailable: threeYearBills.length === 36,
     fiveYearSavingWon: savingWon * 5,
+    peakScenarioCurrentAnnualWon,
+    peakScenarioCandidateAnnualWon,
+    peakScenarioSavingWon,
     recommendation,
     basis,
     candidatePlanId: candidatePlan.id,
@@ -418,7 +447,6 @@ export const comparePlansForDiagnosis = (
     contractType: candidatePlan.contractType,
     voltageType: candidatePlan.voltageType,
     sameContractPriority: false,
-    peakScenarioSavingWon,
     calculationMode: mode,
     calculationBreakdown,
     reviewReason: '',
@@ -432,7 +460,7 @@ export const buildAutoDiagnosis = ({
   scenario,
   powerPlannerDataSource,
   billsAreUserUploaded = false,
-  calculationSettings = defaultCalculationSettings,
+  calculationSettings,
 }: {
   bills: MonthlyBill[]
   profile: SchoolProfile
@@ -440,7 +468,7 @@ export const buildAutoDiagnosis = ({
   scenario: PeakScenario
   powerPlannerDataSource?: PowerPlannerDataSource | null
   billsAreUserUploaded?: boolean
-  calculationSettings?: CalculationSettings
+  calculationSettings: CalculationSettings
 }): AutoDiagnosisResult => {
   const mode = calculationSettings.mode
   const periodValidation = validateBillPeriods(bills, 12)

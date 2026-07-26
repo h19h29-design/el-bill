@@ -112,7 +112,7 @@ test('tariff-full calculation mode persists into diagnosis and documents after r
     exact: true,
   }).click()
   await page.getByText('요금표 기반 전체 추정', { exact: true }).click()
-  await page.getByLabel('기후환경요금 단가').fill('10')
+  await page.getByLabel('기후환경요금 단가(원/kWh)').fill('10')
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -151,7 +151,7 @@ test('tariff-full calculation mode persists into diagnosis and documents after r
   await expect(
     page.getByRole('radio', { name: '요금표 기반 전체 추정' }),
   ).toBeChecked()
-  await expect(page.getByLabel('기후환경요금 단가')).toHaveValue('10')
+  await expect(page.getByLabel('기후환경요금 단가(원/kWh)')).toHaveValue('10')
 
   await page.locator('.sidebar-nav').getByRole('button', {
     name: '자동진단',

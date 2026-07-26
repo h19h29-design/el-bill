@@ -186,6 +186,62 @@ describe('App session-scoped storage integration', () => {
     expect(globalThis.crypto.randomUUID).not.toBe(originalRandomUuid)
   })
 
+  it('preserves newer cross-tab settings and PowerPlanner data during a stale bill upload', async () => {
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'stale-upload-tab')).ok,
+    ).toBe(true)
+    render(<App />)
+    const latestSettings = {
+      ...defaultCalculationSettings,
+      mode: 'tariffFull' as const,
+      climateEnvironmentWonPerKwh: 21,
+    }
+    expect(
+      (
+        await updateStorageSnapshot('stale-upload-tab', {
+          calculationSettings: latestSettings,
+          powerPlanner: samplePowerPlannerDataSource,
+          provenance: { bills: 'sample', powerPlanner: 'uploaded' },
+        })
+      ).ok,
+    ).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: /^고지서 입력$/ }))
+    const input = await waitFor(() => {
+      const element = document.querySelector<HTMLInputElement>(
+        'input[accept=".csv"]',
+      )
+      expect(element).not.toBeNull()
+      return element as HTMLInputElement
+    })
+    fireEvent.change(input, {
+      target: {
+        files: [new File([monthlyCsv], 'billing.csv', { type: 'text/csv' })],
+      },
+    })
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '이 매핑으로 분석 시작',
+      }),
+    )
+
+    await waitFor(() =>
+      expect(readStorageSnapshot(now)?.session.sessionId).not.toBe(
+        'stale-upload-tab',
+      ),
+    )
+    expect(readStorageSnapshot(now)?.data).toEqual(
+      expect.objectContaining({
+        calculationSettings: latestSettings,
+        powerPlanner: samplePowerPlannerDataSource,
+        provenance: {
+          bills: 'uploaded',
+          powerPlanner: 'uploaded',
+        },
+      }),
+    )
+  })
+
   it('adopts a new pointer winner and ignores events for inactive snapshot keys', async () => {
     expect(
       (await startNewStorageSnapshot(makeData(), now, 'first-tab')).ok,

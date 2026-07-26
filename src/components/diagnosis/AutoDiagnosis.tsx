@@ -170,24 +170,57 @@ export function AutoDiagnosis({
         </article>
         <article className="diagnosis-result-card">
           <span>최근 12개월 절감액</span>
-          <strong>{formatWon(comparison.savingWon)}</strong>
-          <p>{getCalculationModeLabel(diagnosis.calculationMode)}</p>
+          <strong>
+            {comparison.annualDataAvailable
+              ? formatWon(comparison.savingWon)
+              : '12개월 연속 자료 부족'}
+          </strong>
+          <p>
+            현재 {formatWon(comparison.currentAnnualWon)} → 추천{' '}
+            {formatWon(comparison.candidateAnnualWon)}
+          </p>
         </article>
         <article className="diagnosis-result-card">
-          <span>최근 3년 절감액</span>
-          <strong>{formatWon(comparison.threeYearSavingWon)}</strong>
-          <p>최근 최대 36개월 반영</p>
+          <span>최근 연속 36개월 절감액</span>
+          <strong>
+            {comparison.threeYearDataAvailable
+              ? formatWon(comparison.threeYearSavingWon)
+              : '36개월 연속 자료 부족'}
+          </strong>
+          {comparison.threeYearDataAvailable && (
+            <p>
+              현재 {formatWon(comparison.currentThreeYearWon)} → 추천{' '}
+              {formatWon(comparison.candidateThreeYearWon)}
+            </p>
+          )}
         </article>
         <article className="diagnosis-result-card">
-          <span>피크 반영 결과</span>
+          <span>피크 시나리오 절감액</span>
           <strong>{formatWon(comparison.peakScenarioSavingWon)}</strong>
-          <p>예상 피크값 반영 후 절감액</p>
+          <p>
+            현재 {formatWon(comparison.peakScenarioCurrentAnnualWon)} → 추천{' '}
+            {formatWon(comparison.peakScenarioCandidateAnnualWon)}
+          </p>
         </article>
         <article className={`diagnosis-result-card judgement ${judgementClass}`}>
           <span>최종 판단</span>
           <strong>{diagnosis.finalJudgement}</strong>
           <p>{diagnosis.dataConfidence} · 인식률 {diagnosis.dataRecognitionRate}%</p>
         </article>
+      </section>
+
+      <section className="panel muted-panel">
+        <strong>
+          계산 모드: {getCalculationModeLabel(diagnosis.calculationMode)}
+        </strong>
+        {diagnosis.calculationMode === 'tariffFull' && (
+          <p>
+            기후환경 {diagnosis.calculationSettings.climateEnvironmentWonPerKwh}원/kWh ·
+            연료비조정 {diagnosis.calculationSettings.fuelAdjustmentWonPerKwh}원/kWh ·
+            부가세 {diagnosis.calculationSettings.vatPercent}% ·
+            전력산업기반기금 {diagnosis.calculationSettings.fundPercent}%
+          </p>
+        )}
       </section>
 
       <section className="panel">

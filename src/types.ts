@@ -232,8 +232,15 @@ export interface PlanComparison {
   candidateAnnualWon: number
   savingWon: number
   savingRate: number
+  annualDataAvailable: boolean
+  currentThreeYearWon: number
+  candidateThreeYearWon: number
   threeYearSavingWon: number
+  threeYearDataAvailable: boolean
   fiveYearSavingWon: number
+  peakScenarioCurrentAnnualWon: number
+  peakScenarioCandidateAnnualWon: number
+  peakScenarioSavingWon: number
   recommendation: Recommendation
   basis: string
 }
@@ -252,7 +259,6 @@ export interface PlanCandidateComparison extends PlanComparison {
   contractType: string
   voltageType: string
   sameContractPriority: boolean
-  peakScenarioSavingWon: number
   calculationMode: CalculationMode
   calculationBreakdown: CalculationBreakdownRow[]
   reviewReason: string
