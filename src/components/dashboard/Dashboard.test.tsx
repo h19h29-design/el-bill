@@ -30,7 +30,7 @@ describe('dashboard diagnosis consistency', () => {
         candidatePlan={diagnosis.recommendedPlan}
         scenario={defaultScenario}
         diagnosis={adjustedDiagnosis}
-        dataMode="sample"
+        dataProvenance={{ bills: 'sample', powerPlanner: 'none' }}
         onStartDiagnosis={() => undefined}
       />,
     )

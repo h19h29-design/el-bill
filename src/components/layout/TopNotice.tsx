@@ -1,13 +1,13 @@
 import { Info, RotateCw } from 'lucide-react'
-import type { DataMode } from '../../types'
+import type { DataProvenance } from '../../types'
 
 interface TopNoticeProps {
   expiresAt?: string
-  dataMode: DataMode
+  dataProvenance: DataProvenance
   onReset: () => void
 }
 
-export function TopNotice({ expiresAt, dataMode, onReset }: TopNoticeProps) {
+export function TopNotice({ expiresAt, dataProvenance, onReset }: TopNoticeProps) {
   const expiresText = expiresAt
     ? new Date(expiresAt).toLocaleString('ko-KR', {
         month: '2-digit',
@@ -24,7 +24,18 @@ export function TopNotice({ expiresAt, dataMode, onReset }: TopNoticeProps) {
         브라우저 저장 데이터는 24시간 후 자동 삭제
       </span>
       <span className="notice-detail">
-        {dataMode === 'sample' ? '현재: 시연 샘플' : '현재: 사용자 업로드'} · 만료 예정: {expiresText}
+        <span>고지서: {dataProvenance.bills === 'sample' ? '시연 샘플' : '사용자 업로드'}</span>
+        {' · '}
+        <span>
+          파워플래너: {
+            dataProvenance.powerPlanner === 'uploaded'
+              ? '사용자 업로드'
+              : dataProvenance.powerPlanner === 'sample'
+                ? '시연 샘플'
+                : '미사용'
+          }
+        </span>
+        {' · '}만료 예정: {expiresText}
       </span>
       <button type="button" className="ghost-button" onClick={onReset}>
         <RotateCw size={15} />

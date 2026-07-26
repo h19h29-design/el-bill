@@ -210,12 +210,25 @@ describe('automatic diagnosis harness', () => {
       },
       ratePlans: [currentPlan, expensivePlan],
       scenario: defaultScenario,
+      billsAreUserUploaded: true,
     })
 
     expect(diagnosis.finalJudgement).toBe('유지 추천')
     expect(diagnosis.canGenerateChangeDocuments).toBe(false)
     expect(diagnosis.documentBlockReason).toContain('변경 추천')
     expect(diagnosis.availableDocumentCount).toBe(2)
+  })
+
+  it('blocks change documents when the diagnosis uses only sample bills', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+    })
+
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(diagnosis.documentBlockReason).toContain('사용자 고지서 업로드 후 생성 가능')
   })
 
   it('does not complete diagnosis or unlock documents from duplicate billing rows', () => {

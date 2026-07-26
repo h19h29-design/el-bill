@@ -23,7 +23,7 @@ import {
 } from 'recharts'
 import type {
   AutoDiagnosisResult,
-  DataMode,
+  DataProvenance,
   MonthlyBill,
   PeakScenario,
   RatePlan,
@@ -41,7 +41,7 @@ interface DashboardProps {
   candidatePlan: RatePlan | null
   scenario: PeakScenario
   diagnosis: AutoDiagnosisResult
-  dataMode: DataMode
+  dataProvenance: DataProvenance
   onStartDiagnosis: () => void
 }
 
@@ -54,7 +54,7 @@ export function Dashboard({
   candidatePlan,
   scenario,
   diagnosis,
-  dataMode,
+  dataProvenance,
   onStartDiagnosis,
 }: DashboardProps) {
   if (!currentPlan || !candidatePlan) {
@@ -108,14 +108,23 @@ export function Dashboard({
           </div>
           <span>자동진단 상태</span>
           <strong>
-            {dataMode === 'sample'
+            {dataProvenance.bills === 'sample'
               ? '시연 샘플'
               : diagnosis.completed
                 ? '분석 완료'
                 : '자료 필요'}
           </strong>
           <small>
-            {dataMode === 'sample' ? '실제 자료 업로드 전 예시 결과' : diagnosis.dataConfidence}
+            {dataProvenance.bills === 'sample'
+              ? '실제 자료 업로드 전 예시 결과'
+              : diagnosis.dataConfidence}
+            {' · '}파워플래너: {
+              dataProvenance.powerPlanner === 'uploaded'
+                ? '사용자 업로드'
+                : dataProvenance.powerPlanner === 'sample'
+                  ? '시연 샘플'
+                  : '미사용'
+            }
             {' · '}인식률 {diagnosis.dataRecognitionRate}%
           </small>
         </article>

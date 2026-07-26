@@ -12,6 +12,7 @@ import {
   UploadCloud,
 } from 'lucide-react'
 import type {
+  DataProvenance,
   PowerPlannerDataSource,
   PowerPlannerDataType,
 } from '../../types'
@@ -39,7 +40,10 @@ import { samplePowerPlannerDataSource } from '../../data/samplePowerPlanner'
 
 interface PowerPlannerUploadProps {
   dataSource: PowerPlannerDataSource | null
-  onDataSourceChange: (dataSource: PowerPlannerDataSource | null) => void
+  onDataSourceChange: (
+    dataSource: PowerPlannerDataSource | null,
+    origin: DataProvenance['powerPlanner'],
+  ) => void
 }
 
 const dataTypes = Object.entries(powerPlannerDataTypeLabels) as Array<
@@ -135,7 +139,7 @@ export function PowerPlannerUpload({
       sourceName,
       `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건 반영`,
     )
-    onDataSourceChange(next)
+    onDataSourceChange(next, 'uploaded')
     setMessage(
       `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건을 반영했습니다. 기존 자료와 합쳐 총 ${next.records.length.toLocaleString('ko-KR')}건입니다.`,
     )
@@ -213,7 +217,7 @@ export function PowerPlannerUpload({
             type="button"
             className="ghost-button"
             onClick={() => {
-              onDataSourceChange(samplePowerPlannerDataSource)
+              onDataSourceChange(samplePowerPlannerDataSource, 'sample')
               setMessage('시연용 시간대별 파워플래너 샘플을 적용했습니다.')
             }}
           >
@@ -327,7 +331,7 @@ export function PowerPlannerUpload({
             type="button"
             className="ghost-button"
             onClick={() => {
-              onDataSourceChange(null)
+              onDataSourceChange(null, 'none')
               setMessage('파워플래너 업로드 자료를 초기화했습니다.')
             }}
           >

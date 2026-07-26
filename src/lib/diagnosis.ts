@@ -382,6 +382,7 @@ export const buildAutoDiagnosis = ({
   ratePlans,
   scenario,
   powerPlannerDataSource,
+  billsAreUserUploaded = false,
   mode = 'billDelta',
 }: {
   bills: MonthlyBill[]
@@ -389,6 +390,7 @@ export const buildAutoDiagnosis = ({
   ratePlans: RatePlan[]
   scenario: PeakScenario
   powerPlannerDataSource?: PowerPlannerDataSource | null
+  billsAreUserUploaded?: boolean
   mode?: CalculationMode
 }): AutoDiagnosisResult => {
   const periodValidation = validateBillPeriods(bills, 12)
@@ -469,12 +471,15 @@ export const buildAutoDiagnosis = ({
   const recommendedPlan =
     ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ?? currentPlan
   const canGenerateChangeDocuments =
+    billsAreUserUploaded &&
     periodValidation.hasRequiredConsecutiveMonths &&
     comparison.sameContractPriority &&
     comparison.recommendation === '변경 추천'
   const documentBlockReason = canGenerateChangeDocuments
     ? ''
-    : '최종 판단이 변경 추천이고 현재 계약종별·수전전압과 일치하는 후보인 경우에만 변경신청 문서를 생성할 수 있습니다.'
+    : !billsAreUserUploaded
+      ? '사용자 고지서 업로드 후 생성 가능'
+      : '최종 판단이 변경 추천이고 현재 계약종별·수전전압과 일치하는 후보인 경우에만 변경신청 문서를 생성할 수 있습니다.'
   const missingDataNotes = [
     ...(!periodValidation.hasRequiredConsecutiveMonths
       ? ['최근 12개월의 연속된 고지서 자료가 부족합니다.']

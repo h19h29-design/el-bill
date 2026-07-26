@@ -8,14 +8,14 @@ import {
   TrendingDown,
   UploadCloud,
 } from 'lucide-react'
-import type { AutoDiagnosisResult, DataMode, ViewKey } from '../../types'
+import type { AutoDiagnosisResult, DataProvenance, ViewKey } from '../../types'
 import { formatWon } from '../../lib/calculations'
 import { rateChangeCaution } from '../../lib/documentTemplates'
 import { PlanCandidateTable } from './PlanCandidateTable'
 
 interface AutoDiagnosisProps {
   diagnosis: AutoDiagnosisResult
-  dataMode: DataMode
+  dataProvenance: DataProvenance
   onNavigate: (view: ViewKey) => void
 }
 
@@ -29,7 +29,7 @@ const steps = [
 
 export function AutoDiagnosis({
   diagnosis,
-  dataMode,
+  dataProvenance,
   onNavigate,
 }: AutoDiagnosisProps) {
   const comparison = diagnosis.comparison
@@ -76,7 +76,11 @@ export function AutoDiagnosis({
       <section className="diagnosis-hero">
         <div>
           <span className="flow-label">
-            {dataMode === 'sample' ? '시연 샘플 분석' : '사용자 업로드 분석'}
+            {dataProvenance.bills === 'sample' ? '시연 샘플 고지서 분석' : '사용자 고지서 분석'}
+            {' · '}
+            {dataProvenance.powerPlanner === 'none'
+              ? '파워플래너 미사용'
+              : `파워플래너 ${dataProvenance.powerPlanner === 'sample' ? '시연 샘플' : '사용자 업로드'}`}
           </span>
           <h2>전기요금 자동진단 시작</h2>
           <p>

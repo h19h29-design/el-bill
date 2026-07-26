@@ -17,7 +17,14 @@ export type CalculationMode = 'billDelta' | 'tariffFull'
 
 export type DataConfidence = '데이터 충분' | '보통' | '낮음'
 
-export type DataMode = 'sample' | 'uploaded'
+export type BillDataOrigin = 'sample' | 'uploaded'
+
+export type PowerPlannerDataOrigin = 'none' | 'sample' | 'uploaded'
+
+export interface DataProvenance {
+  bills: BillDataOrigin
+  powerPlanner: PowerPlannerDataOrigin
+}
 
 export interface SchoolProfile {
   schoolName: string

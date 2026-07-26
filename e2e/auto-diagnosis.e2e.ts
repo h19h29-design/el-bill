@@ -2,20 +2,10 @@ import { expect, test } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 import JSZip from 'jszip'
 
-const billMonths = [
-  [2025, 8],
-  [2025, 9],
-  [2025, 10],
-  [2025, 11],
-  [2025, 12],
-  [2026, 1],
-  [2026, 2],
-  [2026, 3],
-  [2026, 4],
-  [2026, 5],
-  [2026, 6],
-  [2026, 7],
-] as const
+const billMonths = Array.from({ length: 36 }, (_, index) => {
+  const monthIndex = 2023 * 12 + 7 + index
+  return [Math.floor(monthIndex / 12), (monthIndex % 12) + 1] as const
+})
 
 const powerPlannerBillRows = billMonths
   .map(([year, month], index) => {
@@ -50,6 +40,34 @@ const powerPlannerHtmlFixture = `
     </table>
   </body>
 </html>`
+
+test('PowerPlanner-only upload does not claim uploaded-bill diagnosis', async ({ page }, testInfo) => {
+  const powerPlannerCsv = testInfo.outputPath('power-planner-hourly.csv')
+  await writeFile(
+    powerPlannerCsv,
+    [
+      '일자,시간,사용량(kWh)',
+      '2026-07-01,13,420',
+      '2026-07-01,14,460',
+    ].join('\n'),
+  )
+
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+
+  await page.locator('.sidebar-nav').getByRole('button', { name: '파워플래너', exact: true }).click()
+  await page.locator('input[type="file"][accept=".xlsx,.xls,.csv"]').setInputFiles(powerPlannerCsv)
+  await page.getByRole('button', { name: '매핑 적용' }).click()
+
+  await expect(page.getByText('고지서: 시연 샘플', { exact: true })).toBeVisible()
+  await expect(page.getByText('파워플래너: 사용자 업로드', { exact: true })).toBeVisible()
+
+  await page.locator('.sidebar-nav').getByRole('button', { name: '문서생성', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'PDF 미리보기' }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '전체 다운로드 (ZIP)' })).toBeDisabled()
+  await expect(page.getByText('사용자 고지서 업로드 후 생성 가능', { exact: true })).toBeVisible()
+})
 
 test('automatic diagnosis flow remains usable end to end', async ({ page }, testInfo) => {
   const billXls = testInfo.outputPath('power-planner-bill.xls')
@@ -94,7 +112,7 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await expect(page.getByRole('heading', { name: '현재 적용 데이터' })).toBeVisible()
   await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
   await expectViewHeading('자동진단')
-  await expect(page.getByText('사용자 업로드 분석', { exact: true })).toBeVisible()
+  await expect(page.getByText('사용자 고지서 분석', { exact: false })).toBeVisible()
   await expect(page.getByRole('heading', { name: '계산 근거 분해' })).toBeVisible()
 
   await clickSidebar('파워플래너')

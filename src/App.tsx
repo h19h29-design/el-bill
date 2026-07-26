@@ -17,7 +17,7 @@ import {
   sampleBills,
 } from './data/sampleBills'
 import type {
-  DataMode,
+  DataProvenance,
   MonthlyBill,
   PeakScenario,
   RatePlan,
@@ -35,14 +35,14 @@ const profileKey = 'el-bill:profile'
 const scenarioKey = 'el-bill:scenario'
 const ratePlansKey = 'el-bill:rate-plans'
 const powerPlannerKey = 'el-bill:power-planner'
-const dataModeKey = 'el-bill:data-mode'
+const dataProvenanceKey = 'el-bill:data-provenance'
 const storageKeys = [
   billsKey,
   profileKey,
   scenarioKey,
   ratePlansKey,
   powerPlannerKey,
-  dataModeKey,
+  dataProvenanceKey,
 ]
 
 function App() {
@@ -53,7 +53,7 @@ function App() {
   const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
   const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
   const loadedPowerPlanner = loadWithExpiry<PowerPlannerDataSource>(powerPlannerKey)
-  const loadedDataMode = loadWithExpiry<DataMode>(dataModeKey)
+  const loadedDataProvenance = loadWithExpiry<DataProvenance>(dataProvenanceKey)
 
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [bills, setBills] = useState<MonthlyBill[]>(loadedBills?.data ?? sampleBills)
@@ -68,8 +68,8 @@ function App() {
   )
   const [powerPlannerDataSource, setPowerPlannerDataSource] =
     useState<PowerPlannerDataSource | null>(loadedPowerPlanner?.data ?? null)
-  const [dataMode, setDataMode] = useState<DataMode>(
-    loadedDataMode?.data ?? 'sample',
+  const [dataProvenance, setDataProvenance] = useState<DataProvenance>(
+    loadedDataProvenance?.data ?? { bills: 'sample', powerPlanner: 'none' },
   )
   const [expiresAt, setExpiresAt] = useState(
     loadedBills?.expiresAt ?? createExpiry().expiresAt,
@@ -101,8 +101,8 @@ function App() {
   }, [powerPlannerDataSource])
 
   useEffect(() => {
-    saveWithExpiry(dataModeKey, dataMode)
-  }, [dataMode])
+    saveWithExpiry(dataProvenanceKey, dataProvenance)
+  }, [dataProvenance])
 
   const sortedBills = useMemo(() => sortBillsChronologically(bills), [bills])
   const latestBill = sortedBills.at(-1)
@@ -114,8 +114,9 @@ function App() {
         ratePlans,
         scenario,
         powerPlannerDataSource,
+        billsAreUserUploaded: dataProvenance.bills === 'uploaded',
       }),
-    [bills, profile, ratePlans, scenario, powerPlannerDataSource],
+    [bills, profile, ratePlans, scenario, powerPlannerDataSource, dataProvenance.bills],
   )
   const currentPlan = diagnosis.currentPlan
   const candidatePlan = diagnosis.recommendedPlan
@@ -131,27 +132,28 @@ function App() {
     localStorage.removeItem(scenarioKey)
     localStorage.removeItem(ratePlansKey)
     localStorage.removeItem(powerPlannerKey)
-    localStorage.removeItem(dataModeKey)
+    localStorage.removeItem(dataProvenanceKey)
     setBills(sampleBills)
     setProfile(defaultSchoolProfile)
     setScenario(defaultScenario)
     setRatePlans(defaultRatePlans)
     setPowerPlannerDataSource(null)
-    setDataMode('sample')
+    setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
   }
 
   const applyBillsAndOpenDiagnosis = (nextBills: MonthlyBill[]) => {
     setBills(nextBills)
-    setDataMode('uploaded')
+    setDataProvenance((current) => ({ ...current, bills: 'uploaded' }))
     setActiveView('diagnosis')
   }
 
   const applyPowerPlannerAndOpenDiagnosis = (
     nextDataSource: PowerPlannerDataSource | null,
+    origin: DataProvenance['powerPlanner'],
   ) => {
     setPowerPlannerDataSource(nextDataSource)
+    setDataProvenance((current) => ({ ...current, powerPlanner: origin }))
     if (nextDataSource) {
-      setDataMode('uploaded')
       setActiveView('diagnosis')
     }
   }
@@ -165,7 +167,11 @@ function App() {
             <h1>서울교육 전기요금 절감 진단·피크관리 플랫폼</h1>
             <p>학교별 한전고지서 분석 · 요금제 비교 · 피크관리 · 한전 변경신청서 PDF 생성</p>
           </div>
-          <TopNotice expiresAt={expiresAt} dataMode={dataMode} onReset={resetSample} />
+          <TopNotice
+            expiresAt={expiresAt}
+            dataProvenance={dataProvenance}
+            onReset={resetSample}
+          />
         </header>
 
         <section className="view-frame">
@@ -184,14 +190,14 @@ function App() {
               candidatePlan={candidatePlan}
               scenario={scenario}
               diagnosis={diagnosis}
-              dataMode={dataMode}
+              dataProvenance={dataProvenance}
               onStartDiagnosis={() => setActiveView('diagnosis')}
             />
           )}
           {activeView === 'diagnosis' && (
             <AutoDiagnosis
               diagnosis={diagnosis}
-              dataMode={dataMode}
+              dataProvenance={dataProvenance}
               onNavigate={setActiveView}
             />
           )}
