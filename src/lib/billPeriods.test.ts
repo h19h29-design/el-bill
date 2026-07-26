@@ -38,9 +38,25 @@ describe('billing period validation', () => {
     const duplicate = Array.from({ length: 12 }, () => bill(2026, 1))
     const result = validateBillPeriods(duplicate, 12)
 
-    expect(result.distinctMonthCount).toBe(1)
+    expect(result.distinctMonthCount).toBe(0)
     expect(result.hasRequiredConsecutiveMonths).toBe(false)
     expect(result.issues.map((issue) => issue.code)).toContain('duplicate-period')
+  })
+
+  it('excludes every duplicate period independently of input order', () => {
+    const duplicateFirst = { ...bill(2026, 2), id: 'duplicate-first', usageKwh: 1_000 }
+    const duplicateSecond = { ...bill(2026, 2), id: 'duplicate-second', usageKwh: 9_999 }
+    const unique = [bill(2026, 1), bill(2026, 3)]
+
+    const firstOrder = validateBillPeriods([duplicateFirst, ...unique, duplicateSecond])
+    const swappedOrder = validateBillPeriods([duplicateSecond, ...unique, duplicateFirst])
+
+    expect(firstOrder.normalizedBills).toEqual(unique)
+    expect(swappedOrder.normalizedBills).toEqual(unique)
+    expect(firstOrder.issues).toEqual(swappedOrder.issues)
+    expect(firstOrder.issues).toContainEqual(
+      expect.objectContaining({ code: 'duplicate-period', period: '2026-2' }),
+    )
   })
 
   it('reports invalid periods and omits them from normalized bills', () => {

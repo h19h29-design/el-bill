@@ -281,9 +281,28 @@ export const mergePowerPlannerRecords = (
   existing: PowerPlannerRecord[],
   incoming: PowerPlannerRecord[],
 ): PowerPlannerMergeResult => {
-  const fingerprints = new Set(existing.map(getPowerPlannerRecordFingerprint))
+  const deduplicate = (records: PowerPlannerRecord[]) => {
+    const fingerprints = new Set<string>()
+    const uniqueRecords: PowerPlannerRecord[] = []
+    let duplicates = 0
+
+    for (const record of records) {
+      const fingerprint = getPowerPlannerRecordFingerprint(record)
+      if (fingerprints.has(fingerprint)) {
+        duplicates += 1
+        continue
+      }
+      fingerprints.add(fingerprint)
+      uniqueRecords.push(record)
+    }
+
+    return { fingerprints, uniqueRecords, duplicates }
+  }
+
+  const normalizedExisting = deduplicate(existing)
+  const fingerprints = normalizedExisting.fingerprints
   const uniqueIncoming: PowerPlannerRecord[] = []
-  let duplicateCount = 0
+  let duplicateCount = normalizedExisting.duplicates
 
   for (const record of incoming) {
     const fingerprint = getPowerPlannerRecordFingerprint(record)
@@ -295,7 +314,10 @@ export const mergePowerPlannerRecords = (
     uniqueIncoming.push(record)
   }
 
-  if (existing.length + uniqueIncoming.length > POWER_PLANNER_AGGREGATE_RECORD_LIMIT) {
+  if (
+    normalizedExisting.uniqueRecords.length + uniqueIncoming.length >
+    POWER_PLANNER_AGGREGATE_RECORD_LIMIT
+  ) {
     return {
       accepted: false,
       records: existing,
@@ -306,7 +328,7 @@ export const mergePowerPlannerRecords = (
 
   return {
     accepted: true,
-    records: [...existing, ...uniqueIncoming],
+    records: [...normalizedExisting.uniqueRecords, ...uniqueIncoming],
     duplicateCount,
   }
 }

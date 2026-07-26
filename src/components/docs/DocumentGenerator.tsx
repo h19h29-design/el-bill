@@ -82,7 +82,8 @@ export function DocumentGenerator({
   const documentsUnavailable =
     diagnosis.configurationRequired ||
     !diagnosis.currentPlan ||
-    !diagnosis.recommendedPlan
+    !diagnosis.recommendedPlan ||
+    diagnosis.documentBlockReason.includes('고지서 기간 문제')
   const bundle = useMemo(
     () =>
       documentsUnavailable

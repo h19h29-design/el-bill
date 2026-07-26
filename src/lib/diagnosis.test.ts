@@ -293,7 +293,7 @@ describe('automatic diagnosis harness', () => {
     })
 
     expect(duplicateDiagnosis.completed).toBe(false)
-    expect(duplicateDiagnosis.recognizedMonths).toBe(1)
+    expect(duplicateDiagnosis.recognizedMonths).toBe(0)
     expect(duplicateDiagnosis.canGenerateChangeDocuments).toBe(false)
     expect(duplicateDiagnosis.missingDataNotes.join(' ')).toContain('중복')
     expect(gappedDiagnosis.completed).toBe(false)
@@ -332,6 +332,32 @@ describe('automatic diagnosis harness', () => {
     }
     expect(duplicateDiagnosis.missingDataNotes.join(' ')).toContain('중복')
     expect(gappedDiagnosis.missingDataNotes.join(' ')).toContain('누락')
+  })
+
+  it('turns every candidate into review-only data when a period issue exists', () => {
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: currentPlan.contractType,
+      voltageType: currentPlan.voltageType,
+      currentPlan: currentPlan.planName,
+    }
+    const validBills = consecutiveBills(2023, 8, 36)
+    const diagnosis = buildAutoDiagnosis({
+      bills: [...validBills, { ...validBills.at(-1)!, id: 'duplicate-latest' }],
+      profile,
+      ratePlans: [currentPlan, cheaperPlan, expensivePlan],
+      scenario: defaultScenario,
+      billsAreUserUploaded: true,
+    })
+
+    expect(diagnosis.recommendedPlan).toBeNull()
+    expect(diagnosis.comparison.recommendation).toBe('추가 검토 필요')
+    expect(diagnosis.comparison.basis).toContain('고지서 기간 문제')
+    for (const candidate of [...diagnosis.topCandidates, ...diagnosis.additionalCandidates]) {
+      expect(candidate.recommendation).toBe('추가 검토 필요')
+      expect(candidate.basis).toContain('고지서 기간 문제')
+      expect(candidate.reviewReason).toContain('고지서 기간 문제')
+    }
   })
 
   it('recalculates savings when expected peak changes', () => {

@@ -42,7 +42,7 @@ export function AutoDiagnosis({
         ? 'hold'
         : 'review'
 
-  if (diagnosis.configurationRequired || !currentPlan || !recommendedPlan) {
+  if (diagnosis.configurationRequired || !currentPlan) {
     return (
       <div className="view-stack">
         <section className="diagnosis-hero">
@@ -64,6 +64,35 @@ export function AutoDiagnosis({
           <ShieldAlert size={22} />
           <div>
             <strong>요금제 자동 비교 및 변경신청 문서 생성 보류</strong>
+            <p>{diagnosis.documentBlockReason}</p>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  if (!recommendedPlan) {
+    return (
+      <div className="view-stack">
+        <section className="diagnosis-hero">
+          <div>
+            <span className="flow-label">고지서 기간 확인 필요</span>
+            <h2>자동진단 결과를 확정할 수 없습니다</h2>
+            <p>{diagnosis.judgementBasis}</p>
+          </div>
+          <button
+            type="button"
+            className="primary-button diagnosis-start"
+            onClick={() => onNavigate('bills')}
+          >
+            <ShieldAlert size={20} />
+            고지서 기간 확인
+          </button>
+        </section>
+        <section className="document-block-notice" role="status">
+          <ShieldAlert size={22} />
+          <div>
+            <strong>요금제 추천 및 변경신청 문서 생성 보류</strong>
             <p>{diagnosis.documentBlockReason}</p>
           </div>
         </section>

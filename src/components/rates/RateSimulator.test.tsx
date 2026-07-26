@@ -1,14 +1,16 @@
 /* @vitest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { defaultScenario, sampleBills } from '../../data/sampleBills'
-import type { PeakScenario } from '../../types'
+import type { PeakScenario, PlanCandidateComparison } from '../../types'
 import { RateSimulator } from './RateSimulator'
 
 const currentPlan = defaultRatePlans.find((plan) => plan.id === 'edu-a-high-a-2')!
 const candidatePlan = defaultRatePlans.find((plan) => plan.id === 'edu-a-high-a-1')!
+
+afterEach(cleanup)
 
 describe('rate simulator usability harness', () => {
   it('preserves peak operation fields when saving scenario settings', async () => {
@@ -52,5 +54,41 @@ describe('rate simulator usability harness', () => {
         }),
       ),
     )
+  })
+
+  it('does not show a recommended-plan simulation when the active candidate is review-only', () => {
+    const reviewOnlyCandidate: PlanCandidateComparison = {
+      candidatePlanId: candidatePlan.id,
+      candidatePlanName: candidatePlan.planName,
+      contractType: candidatePlan.contractType,
+      voltageType: candidatePlan.voltageType,
+      sameContractPriority: true,
+      currentAnnualWon: 10,
+      candidateAnnualWon: 5,
+      savingWon: 5,
+      savingRate: 0.5,
+      threeYearSavingWon: 15,
+      fiveYearSavingWon: 25,
+      peakScenarioSavingWon: 5,
+      calculationMode: 'billDelta',
+      calculationBreakdown: [],
+      recommendation: '추가 검토 필요',
+      basis: '고지서 기간 문제: 2026-7 고지서 기간이 중복되었습니다.',
+      reviewReason: '고지서 기간 문제: 2026-7 고지서 기간이 중복되었습니다.',
+    }
+
+    render(
+      <RateSimulator
+        bills={sampleBills}
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[reviewOnlyCandidate]}
+        scenario={defaultScenario}
+        onScenarioChange={() => undefined}
+      />,
+    )
+
+    expect(screen.getByText(reviewOnlyCandidate.basis)).toBeTruthy()
+    expect(screen.queryByText(`추천안 (${candidatePlan.planName})`)).toBeNull()
   })
 })

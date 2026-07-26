@@ -41,10 +41,11 @@ describe('automatic diagnosis period integrity', () => {
       />,
     )
 
-    expect(screen.getAllByText('추가 검토 필요').length).toBeGreaterThan(0)
-    expect(screen.getByText('추가 자료 필요')).toBeTruthy()
+    expect(screen.getByText('자동진단 결과를 확정할 수 없습니다')).toBeTruthy()
+    expect(screen.getByText('요금제 추천 및 변경신청 문서 생성 보류')).toBeTruthy()
     expect(
       screen.getAllByText(new RegExp(`고지서 기간 문제: .*${issue}`)).length,
     ).toBeGreaterThan(0)
+    expect(screen.queryByText('추천 요금제')).toBeNull()
   })
 })

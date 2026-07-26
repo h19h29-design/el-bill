@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import type { PowerPlannerRecord } from '../types'
 import {
   createPowerPlannerDataSource,
   getMissingPowerPlannerMappings,
   getHourlyUsageRecords,
+  getPowerPlannerRecordFingerprint,
   getPowerPlannerSummary,
   guessPowerPlannerDataType,
   guessPowerPlannerMapping,
@@ -151,6 +153,56 @@ describe('power planner data source harness', () => {
     expect(merged.records).toBe(existing)
     expect(merged.message).toContain('10,000건')
   })
+
+  it('normalizes legacy duplicate records before evaluating the aggregate cap', () => {
+    const unique = Array.from({ length: POWER_PLANNER_AGGREGATE_RECORD_LIMIT }, (_, index) => ({
+      id: `existing-${index}`,
+      dataType: 'hourlyUsage' as const,
+      date: `2026-06-${String((index % 28) + 1).padStart(2, '0')}`,
+      hour: index % 24,
+      usageKwh: index,
+      sourceRowIndex: index,
+    }))
+    const duplicatedExisting = [
+      ...unique,
+      { ...unique[0], id: 'legacy-duplicate', sourceRowIndex: 99_999 },
+    ]
+
+    const merged = mergePowerPlannerRecords(duplicatedExisting, [
+      { ...unique[0], id: 'incoming-duplicate', sourceRowIndex: 0 },
+    ])
+
+    expect(merged.accepted).toBe(true)
+    expect(merged.records).toHaveLength(POWER_PLANNER_AGGREGATE_RECORD_LIMIT)
+    expect(merged.records[0].id).toBe('existing-0')
+    expect(merged.duplicateCount).toBe(2)
+  })
+
+  it.each([
+    ['monthlyUsage', { date: '2026-07', usageKwh: 100, appliedPowerKw: 500 }, 'appliedPowerKw', 501],
+    ['dailyUsage', { date: '2026-07-01', usageKwh: 100, loadType: '급식실' }, 'loadType', '강당'],
+    ['hourlyUsage', { date: '2026-07-01', hour: 13, usageKwh: 100, patternLabel: '피크' }, 'patternLabel', '절감'],
+    ['maxDemand', { date: '2026-07-01', maxDemandKw: 500, contractPowerKw: 700 }, 'contractPowerKw', 701],
+    ['estimatedBill', { estimatedBillWon: 1_000_000, usageDays: 30 }, 'usageDays', 31],
+    ['patternAnalysis', { patternSummary: '오후 피크', leadingPowerFactorPercent: 98 }, 'leadingPowerFactorPercent', 97],
+  ] as const)(
+    'uses semantic optional fields in %s fingerprints while ignoring generated metadata',
+    (dataType, values, changedField, changedValue) => {
+      const record: PowerPlannerRecord = {
+        id: 'first-id',
+        dataType,
+        sourceRowIndex: 1,
+        ...values,
+      }
+
+      expect(getPowerPlannerRecordFingerprint(record)).toBe(
+        getPowerPlannerRecordFingerprint({ ...record, id: 'second-id', sourceRowIndex: 999 }),
+      )
+      expect(getPowerPlannerRecordFingerprint(record)).not.toBe(
+        getPowerPlannerRecordFingerprint({ ...record, [changedField]: changedValue }),
+      )
+    },
+  )
 
   it('keeps the MVP guardrails visible as reusable copy', () => {
     expect(powerPlannerMvpGuardrail).toContain('자동 로그인')

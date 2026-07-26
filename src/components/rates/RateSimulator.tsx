@@ -47,6 +47,21 @@ export function RateSimulator({
   const form = useForm<PeakScenario>({
     defaultValues: scenario,
   })
+  const reviewOnlyCandidate = candidates.find(
+    (candidate) => candidate.candidatePlanId === candidatePlan.id,
+  )
+
+  if (reviewOnlyCandidate?.recommendation === '추가 검토 필요') {
+    return (
+      <section className="document-block-notice" role="status">
+        <AlertTriangle size={22} />
+        <div>
+          <strong>요금제 비교 보류</strong>
+          <p>{reviewOnlyCandidate.basis}</p>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <div className="view-stack">

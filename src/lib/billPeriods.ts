@@ -20,7 +20,7 @@ export const validateBillPeriods = (
   requiredMonths = 12,
 ): BillPeriodValidation => {
   const issues: BillPeriodIssue[] = []
-  const uniqueBills = new Map<number, MonthlyBill>()
+  const billsByPeriod = new Map<number, MonthlyBill[]>()
 
   for (const bill of bills) {
     if (!isValidPeriod(bill)) {
@@ -33,8 +33,14 @@ export const validateBillPeriods = (
     }
 
     const index = getCalendarMonthIndex(bill.year, bill.month)
-    const period = formatPeriod(bill.year, bill.month)
-    if (uniqueBills.has(index)) {
+    billsByPeriod.set(index, [...(billsByPeriod.get(index) ?? []), bill])
+  }
+
+  const uniqueBills = new Map<number, MonthlyBill>()
+  for (const [index, periodBills] of billsByPeriod) {
+    const [bill] = periodBills
+    if (periodBills.length > 1) {
+      const period = formatPeriod(bill.year, bill.month)
       issues.push({
         code: 'duplicate-period',
         period,
@@ -87,6 +93,11 @@ export const validateBillPeriods = (
     }
     recentConsecutiveBills.unshift(bill)
   }
+
+  issues.sort(
+    (left, right) =>
+      `${left.code}:${left.period ?? ''}`.localeCompare(`${right.code}:${right.period ?? ''}`),
+  )
 
   return {
     normalizedBills,

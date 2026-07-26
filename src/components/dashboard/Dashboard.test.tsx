@@ -1,11 +1,13 @@
 /* @vitest-environment jsdom */
 
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { buildAutoDiagnosis } from '../../lib/diagnosis'
 import { Dashboard } from './Dashboard'
+
+afterEach(cleanup)
 
 describe('dashboard diagnosis consistency', () => {
   it('shows the automatic diagnosis savings value in the annual savings KPI', () => {
@@ -37,5 +39,31 @@ describe('dashboard diagnosis consistency', () => {
 
     expect(screen.getByText('123,456,789원')).toBeTruthy()
     expect(screen.getByText('고지서 기반 차액 추정')).toBeTruthy()
+  })
+
+  it('shows a period review hold instead of a recommended tariff when billing periods are invalid', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: [...sampleBills, { ...sampleBills.at(-1)!, id: 'duplicate-period' }],
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      billsAreUserUploaded: true,
+    })
+
+    render(
+      <Dashboard
+        bills={sampleBills}
+        currentPlan={diagnosis.currentPlan}
+        candidatePlan={diagnosis.recommendedPlan}
+        scenario={defaultScenario}
+        diagnosis={diagnosis}
+        dataProvenance={{ bills: 'uploaded', powerPlanner: 'none' }}
+        onStartDiagnosis={() => undefined}
+      />,
+    )
+
+    expect(screen.getByText('요금제 추천 보류')).toBeTruthy()
+    expect(screen.getByText(/고지서 기간 문제/)).toBeTruthy()
+    expect(screen.queryByText('추천 요금제')).toBeNull()
   })
 })

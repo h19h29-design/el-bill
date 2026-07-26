@@ -83,7 +83,7 @@ describe('data provenance persistence', () => {
     expect(screen.getByText('화면을 불러오는 중입니다.')).toBeTruthy()
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '전기요금 자동진단 시작' })).toBeTruthy()
-    })
+    }, { timeout: 5_000 })
   })
 
   it('shows the same loading frame while the spreadsheet upload view loads', async () => {

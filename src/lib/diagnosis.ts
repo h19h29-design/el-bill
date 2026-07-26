@@ -458,7 +458,13 @@ export const buildAutoDiagnosis = ({
 
   const schoolPlans = ratePlans.filter((plan) => plan.contractType.includes('교육용'))
   const candidates = schoolPlans.filter((plan) => plan.id !== currentPlan.id)
-  const ranked = candidates
+  const hasPeriodIssues = periodValidation.issues.length > 0
+  const periodIssueReason = hasPeriodIssues
+    ? `고지서 기간 문제: ${periodValidation.issues
+        .map((issue) => describePeriodIssue(issue.code, issue.period))
+        .join(' ')}`
+    : ''
+  const rankedBeforePeriodReview = candidates
     .map((candidate) => {
       const sameContractPriority =
         matches(candidate.contractType, profile.contractType) &&
@@ -492,20 +498,26 @@ export const buildAutoDiagnosis = ({
         b.savingWon - a.savingWon,
     )
 
+  const applyPeriodReview = (candidate: PlanCandidateComparison) =>
+    hasPeriodIssues
+      ? {
+          ...candidate,
+          recommendation: '추가 검토 필요' as const,
+          basis: periodIssueReason,
+          reviewReason: periodIssueReason,
+        }
+      : candidate
+  const ranked = rankedBeforePeriodReview.map(applyPeriodReview)
   const topCandidates = ranked.slice(0, 3)
-  const comparison =
-    topCandidates[0] ??
-    comparePlansForDiagnosis(normalizedBills, currentPlan, currentPlan, scenario, mode)
-  const recommendedPlan =
-    ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ?? currentPlan
-  const hasPeriodIssues = periodValidation.issues.length > 0
+  const fallbackComparison = applyPeriodReview(
+    comparePlansForDiagnosis(normalizedBills, currentPlan, currentPlan, scenario, mode),
+  )
+  const comparison = topCandidates[0] ?? fallbackComparison
+  const recommendedPlan = hasPeriodIssues
+    ? null
+    : ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ?? currentPlan
   const hasValidRequiredPeriods =
     periodValidation.hasRequiredConsecutiveMonths && !hasPeriodIssues
-  const periodIssueReason = hasPeriodIssues
-    ? `고지서 기간 문제: ${periodValidation.issues
-        .map((issue) => describePeriodIssue(issue.code, issue.period))
-        .join(' ')}`
-    : ''
   const canGenerateChangeDocuments =
     billsAreUserUploaded &&
     hasValidRequiredPeriods &&

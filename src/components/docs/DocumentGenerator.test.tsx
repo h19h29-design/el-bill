@@ -109,6 +109,31 @@ describe('document generation eligibility', () => {
     ).toBeTruthy()
   })
 
+  it('does not construct a plausible change-document preview when periods require review', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: [...sampleBills, { ...sampleBills.at(-1)!, id: 'duplicate-period' }],
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      billsAreUserUploaded: true,
+    })
+
+    render(
+      <DocumentGenerator
+        profile={defaultSchoolProfile}
+        latestBill={sampleBills.at(-1)}
+        comparison={diagnosis.comparison}
+        scenario={defaultScenario}
+        diagnosis={diagnosis}
+        peakOperationPlan={buildPeakOperationPlan(defaultScenario)}
+      />,
+    )
+
+    expect(screen.getByText(/고지서 기간 문제/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'PDF 미리보기' })).toBeNull()
+    expect(screen.queryByText('추천 요금제')).toBeNull()
+  })
+
   it('does not construct previews or document actions without an exact active plan', () => {
     const configurationDiagnosis = buildAutoDiagnosis({
       bills: sampleBills,
