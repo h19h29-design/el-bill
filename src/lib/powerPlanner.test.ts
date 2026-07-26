@@ -31,10 +31,15 @@ describe('power planner data source harness', () => {
     expect(records).toHaveLength(3)
     expect(records[1]).toMatchObject({
       date: '2026-06-01',
+      year: 2026,
+      month: 6,
+      day: 1,
       hour: 11,
       usageKwh: 186,
       dataType: 'hourlyUsage',
     })
+    expect(records[1].usageDays).toBeUndefined()
+    expect(records[1].contractPowerKw).toBeUndefined()
   })
 
   it('maps Power Planner monthly bill rows that use a combined year-month column', () => {

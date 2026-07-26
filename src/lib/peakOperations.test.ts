@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { defaultScenario } from '../data/sampleBills'
 import { getPeakRiskLevel } from './peak'
-import { buildPeakOperationPlan } from './peakOperations'
+import {
+  buildPeakOperationPlan,
+  normalizeEhpGroupCount,
+} from './peakOperations'
 
 describe('peak operation sequencing', () => {
   it('invalid peak target is rejected as 위험', () => {
@@ -29,6 +32,29 @@ describe('peak operation sequencing', () => {
       '13:20 별관 EHP 2그룹 기동',
       '특별실 및 강당은 예냉 후 유지운전',
     ])
+  })
+
+  it.each([
+    [0, 5],
+    [-1, 5],
+    [1.5, 5],
+    [Number.NaN, 5],
+    [101, 100],
+    [1_000_000, 100],
+  ])('normalizes unsafe EHP group count %s to %s', (value, expected) => {
+    expect(normalizeEhpGroupCount(value, 5)).toBe(expected)
+  })
+
+  it('never allocates more than the configured EHP safety cap', () => {
+    const plan = buildPeakOperationPlan({
+      ...defaultScenario,
+      mainBuildingEhpGroups: 1_000_000,
+      annexEhpGroups: 1_000_000,
+    })
+
+    expect(plan.sequentialOrder).toHaveLength(202)
+    expect(plan.todayPlan).toContain('본관 EHP 100개 그룹')
+    expect(plan.todayPlan).toContain('별관 100개 그룹')
   })
 
   it('returns tariff and school operating windows for overlap review', () => {

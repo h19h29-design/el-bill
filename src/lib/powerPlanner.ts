@@ -29,6 +29,7 @@ const normalize = (value: unknown) => String(value ?? '').trim()
 const asNumber = (value: unknown) => {
   if (typeof value === 'number') return value
   const cleaned = normalize(value).replace(/,/g, '')
+  if (!cleaned) return undefined
   const parsed = Number(cleaned)
   return Number.isFinite(parsed) ? parsed : undefined
 }

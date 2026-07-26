@@ -21,6 +21,10 @@ import {
 } from './calculations'
 import { validateBillPeriods } from './billPeriods'
 import { rateChangeCaution } from './documentTemplates'
+import {
+  isValidMonthlyBill,
+  isValidRatePlan,
+} from './domainValidation'
 
 const optionalBillColumns = [
   '요금적용전력',
@@ -74,12 +78,13 @@ export const resolveCurrentPlan = (
   profile: SchoolProfile,
   ratePlans: RatePlan[],
 ): CurrentPlanResolution => {
-  const matchingPlans = ratePlans.filter(
+  const tupleMatches = ratePlans.filter(
     (candidate) =>
       matches(candidate.contractType, profile.contractType) &&
       matches(candidate.voltageType, profile.voltageType) &&
       matches(candidate.planName, profile.currentPlan),
   )
+  const matchingPlans = tupleMatches.filter(isValidRatePlan)
 
   if (matchingPlans.length === 1) return { plan: matchingPlans[0], exact: true }
 
@@ -87,7 +92,9 @@ export const resolveCurrentPlan = (
     plan: null,
     exact: false,
     issue:
-      matchingPlans.length > 1
+      tupleMatches.length > 0 && matchingPlans.length === 0
+        ? '현재 요금제 단가가 올바르지 않습니다. 요금표의 모든 필수 단가를 확인해 주세요.'
+        : matchingPlans.length > 1
         ? '현재 요금제 설정이 중복됩니다. 요금표에서 계약종별·수전전압·요금제 조합을 하나만 남겨 주세요.'
         : '현재 요금제를 요금표에서 확인해 주세요.',
   }
@@ -543,6 +550,41 @@ export const buildAutoDiagnosis = ({
   calculationSettings: CalculationSettings
 }): AutoDiagnosisResult => {
   const mode = calculationSettings.mode
+  const invalidBillCount = bills.filter(
+    (bill) => !isValidMonthlyBill(bill),
+  ).length
+  if (invalidBillCount > 0) {
+    const reason =
+      `고지서 ${invalidBillCount.toLocaleString('ko-KR')}개 행의 필수 값이 올바르지 않습니다. ` +
+      '연도·월·사용량·총 전기요금·요금적용전력과 요금 구성요소를 확인해 주세요.'
+    const comparison = {
+      ...createConfigurationBlockedComparison(profile, mode),
+      candidatePlanName: '고지서 확인 필요',
+      basis: reason,
+      reviewReason: reason,
+    }
+    return {
+      completed: false,
+      configurationRequired: false,
+      currentPlan: null,
+      recommendedPlan: null,
+      topCandidates: [],
+      additionalCandidates: [],
+      comparison,
+      calculationMode: mode,
+      calculationSettings,
+      dataConfidence: '낮음',
+      dataRecognitionRate: 0,
+      recognizedMonths: 0,
+      lastUploadLabel: '유효하지 않은 고지서 자료',
+      availableDocumentCount: 0,
+      canGenerateChangeDocuments: false,
+      documentBlockReason: reason,
+      finalJudgement: '추가 검토 필요',
+      judgementBasis: reason,
+      missingDataNotes: [reason, rateChangeCaution],
+    }
+  }
   const periodValidation = validateBillPeriods(bills, 12)
   const normalizedBills = periodValidation.normalizedBills
   const currentPlanResolution = resolveCurrentPlan(profile, ratePlans)
@@ -584,7 +626,9 @@ export const buildAutoDiagnosis = ({
     }
   }
 
-  const schoolPlans = ratePlans.filter((plan) => plan.contractType.includes('교육용'))
+  const schoolPlans = ratePlans.filter(
+    (plan) => plan.contractType.includes('교육용') && isValidRatePlan(plan),
+  )
   const candidates = schoolPlans.filter((plan) => plan.id !== currentPlan.id)
   const hasPeriodIssues = periodValidation.issues.length > 0
   const hasAnnualData = periodValidation.hasRequiredConsecutiveMonths
@@ -652,9 +696,13 @@ export const buildAutoDiagnosis = ({
     ),
   )
   const comparison = topCandidates[0] ?? fallbackComparison
-  const recommendedPlan = hasPeriodIssues || !comparison.annualDataAvailable
-    ? null
-    : ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ?? currentPlan
+  const recommendedPlan =
+    hasPeriodIssues ||
+    !comparison.annualDataAvailable ||
+    topCandidates.length === 0
+      ? null
+      : ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ??
+        currentPlan
   const hasValidRequiredPeriods =
     periodValidation.hasRequiredConsecutiveMonths && !hasPeriodIssues
   const canGenerateChangeDocuments =

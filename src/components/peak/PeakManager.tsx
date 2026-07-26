@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Gauge, Target } from 'lucide-react'
 import {
   Bar,
@@ -23,7 +23,11 @@ import {
   getHourlyUsageRecords,
   getPowerPlannerSummary,
 } from '../../lib/powerPlanner'
-import type { PeakOperationPlan } from '../../lib/peakOperations'
+import {
+  EHP_GROUP_MAX,
+  EHP_GROUP_MIN,
+  type PeakOperationPlan,
+} from '../../lib/peakOperations'
 
 interface PeakManagerProps {
   scenario: PeakScenario
@@ -45,6 +49,9 @@ export function PeakManager({
   powerPlannerDataSource,
   peakOperationPlan,
 }: PeakManagerProps) {
+  const [ehpInputError, setEhpInputError] = useState<
+    'mainBuildingEhpGroups' | 'annexEhpGroups' | null
+  >(null)
   const ratio = getPeakRatio(scenario.targetPeakKw, scenario.expectedPeakKw)
   const level = getPeakRiskLevel(scenario.targetPeakKw, scenario.expectedPeakKw)
   const tone = getPeakRiskTone(level)
@@ -80,6 +87,18 @@ export function PeakManager({
 
   const update = (key: keyof PeakScenario, value: string | boolean) => {
     const numericValue = Number(value)
+    if (
+      (key === 'mainBuildingEhpGroups' || key === 'annexEhpGroups') &&
+      (!Number.isInteger(numericValue) ||
+        numericValue < EHP_GROUP_MIN ||
+        numericValue > EHP_GROUP_MAX)
+    ) {
+      setEhpInputError(key)
+      return
+    }
+    if (key === 'mainBuildingEhpGroups' || key === 'annexEhpGroups') {
+      setEhpInputError(null)
+    }
     if (
       (key === 'targetPeakKw' || key === 'expectedPeakKw') &&
       (!Number.isFinite(numericValue) || numericValue <= 0)
@@ -234,6 +253,16 @@ export function PeakManager({
             본관 EHP 그룹 수
             <input
               type="number"
+              min={EHP_GROUP_MIN}
+              max={EHP_GROUP_MAX}
+              step={1}
+              aria-label="본관 EHP 그룹 수"
+              aria-invalid={ehpInputError === 'mainBuildingEhpGroups'}
+              aria-describedby={
+                ehpInputError === 'mainBuildingEhpGroups'
+                  ? 'ehp-group-validation-status'
+                  : undefined
+              }
               value={scenario.mainBuildingEhpGroups ?? 5}
               onChange={(event) => update('mainBuildingEhpGroups', event.target.value)}
             />
@@ -242,10 +271,29 @@ export function PeakManager({
             별관 EHP 그룹 수
             <input
               type="number"
+              min={EHP_GROUP_MIN}
+              max={EHP_GROUP_MAX}
+              step={1}
+              aria-label="별관 EHP 그룹 수"
+              aria-invalid={ehpInputError === 'annexEhpGroups'}
+              aria-describedby={
+                ehpInputError === 'annexEhpGroups'
+                  ? 'ehp-group-validation-status'
+                  : undefined
+              }
               value={scenario.annexEhpGroups ?? 2}
               onChange={(event) => update('annexEhpGroups', event.target.value)}
             />
           </label>
+          {ehpInputError && (
+            <p
+              id="ehp-group-validation-status"
+              className="status-line"
+              role="status"
+            >
+              EHP 그룹 수는 1~100 사이 정수로 입력해 주세요.
+            </p>
+          )}
           <label className="checkbox-label">
             <input
               type="checkbox"

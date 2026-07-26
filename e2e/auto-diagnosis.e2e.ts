@@ -67,6 +67,34 @@ const readActiveStorageState = (page: Page) =>
     }
   })
 
+test('production preview serves hashed entry and lazy chunks', async ({ page }) => {
+  await page.goto('/')
+
+  const entryScript = await page
+    .locator('script[type="module"][src]')
+    .getAttribute('src')
+  expect(entryScript).toMatch(/^\/assets\/index-[A-Za-z0-9_-]+\.js$/)
+
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '고지서 입력',
+    exact: true,
+  }).click()
+  await expect(page.getByRole('heading', { name: '고지서 업로드' })).toBeVisible()
+
+  const scriptAssets = await page.evaluate(() =>
+    performance
+      .getEntriesByType('resource')
+      .map((entry) => entry.name)
+      .filter((name) => /\/assets\/.+\.js$/.test(name)),
+  )
+  expect(scriptAssets.length).toBeGreaterThan(1)
+  expect(
+    scriptAssets.every((name) =>
+      /\/assets\/[A-Za-z0-9_-]+-[A-Za-z0-9_-]+\.js$/.test(name),
+    ),
+  ).toBe(true)
+})
+
 test('checked-in synthetic XLSX reaches recognized mapping and analysis state', async ({ page }) => {
   await page.goto('/')
   await page.evaluate(() => localStorage.clear())

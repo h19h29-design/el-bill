@@ -616,6 +616,91 @@ describe('automatic diagnosis harness', () => {
     expect(diagnosis.missingDataNotes).toContain('현재 요금제를 요금표에서 확인해 주세요.')
   })
 
+  it('blocks diagnosis and documents when every uploaded bill has negative usage', () => {
+    const invalidBills = thirtySixConsecutiveBills.map((bill) => ({
+      ...bill,
+      usageKwh: -bill.usageKwh,
+    }))
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: currentPlan.contractType,
+      voltageType: currentPlan.voltageType,
+      currentPlan: currentPlan.planName,
+    }
+
+    const diagnosis = buildAutoDiagnosis({
+      bills: invalidBills,
+      profile,
+      ratePlans: [currentPlan, cheaperPlan],
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+      billsAreUserUploaded: true,
+    })
+
+    expect(diagnosis.completed).toBe(false)
+    expect(diagnosis.finalJudgement).toBe('추가 검토 필요')
+    expect(diagnosis.recommendedPlan).toBeNull()
+    expect(diagnosis.topCandidates).toEqual([])
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(diagnosis.documentBlockReason).toContain('고지서')
+  })
+
+  it('excludes an invalid negative-rate candidate and never recommends it', () => {
+    const invalidCandidate = {
+      ...cheaperPlan,
+      id: 'negative-candidate',
+      baseRateWonPerKw: -10_000,
+      seasonRates: {
+        springAutumn: -1_000,
+        summer: -1_000,
+        winter: -1_000,
+      },
+    }
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: currentPlan.contractType,
+      voltageType: currentPlan.voltageType,
+      currentPlan: currentPlan.planName,
+    }
+
+    const diagnosis = buildAutoDiagnosis({
+      bills: thirtySixConsecutiveBills,
+      profile,
+      ratePlans: [currentPlan, invalidCandidate],
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+      billsAreUserUploaded: true,
+    })
+
+    expect(diagnosis.topCandidates).toEqual([])
+    expect(diagnosis.recommendedPlan).toBeNull()
+    expect(diagnosis.finalJudgement).not.toBe('변경 추천')
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+  })
+
+  it('blocks diagnosis when the exact current plan has an invalid rate', () => {
+    const invalidCurrent = { ...currentPlan, baseRateWonPerKw: 0 }
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: currentPlan.contractType,
+      voltageType: currentPlan.voltageType,
+      currentPlan: currentPlan.planName,
+    }
+
+    const diagnosis = buildAutoDiagnosis({
+      bills: thirtySixConsecutiveBills,
+      profile,
+      ratePlans: [invalidCurrent, cheaperPlan],
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+      billsAreUserUploaded: true,
+    })
+
+    expect(diagnosis.configurationRequired).toBe(true)
+    expect(diagnosis.currentPlan).toBeNull()
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+  })
+
   it('does not calculate a three-year estimate from gapped calendar periods', () => {
     const comparison = comparePlansForDiagnosis(
       [...consecutiveBills(2022, 1, 24), ...consecutiveBills(2026, 1, 12)],

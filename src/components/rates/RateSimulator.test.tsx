@@ -68,6 +68,36 @@ describe('rate simulator usability harness', () => {
     )
   })
 
+  it.each([
+    ['예상 최대수요전력(kW)', '0'],
+    ['사용량 증가율(%)', '101'],
+    ['분석 기준 연도', '2036'],
+    ['분석 기준 연도', '2025.5'],
+  ])('shows accessible validation and does not persist invalid %s', async (label, value) => {
+    const onScenarioChange = vi.fn(async () => true)
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={onScenarioChange}
+      />,
+    )
+
+    const input = screen.getByLabelText(label)
+    fireEvent.change(input, { target: { value } })
+    fireEvent.click(screen.getByRole('button', { name: '시뮬레이션 설정' }))
+
+    expect(onScenarioChange).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(input.getAttribute('aria-invalid')).toBe('true'),
+    )
+    expect(screen.getByRole('status').textContent).toContain('입력')
+  })
+
   it('does not show a recommended-plan simulation when the active candidate is review-only', () => {
     const reviewOnlyCandidate: PlanCandidateComparison = {
       candidatePlanId: candidatePlan.id,

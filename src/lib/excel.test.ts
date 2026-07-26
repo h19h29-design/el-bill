@@ -59,6 +59,16 @@ const createFormulaWorkbook = async () => {
   return toArrayBuffer(await workbook.xlsx.writeBuffer())
 }
 
+const createInvalidRequiredWorkbook = async () => {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('2026 시연')
+  sheet.addRows([
+    ['월분', '사용량(kWh)', '2026학년도'],
+    [6, -42_000, 6_420_000],
+  ])
+  return toArrayBuffer(await workbook.xlsx.writeBuffer())
+}
+
 const createWorkbookWithShape = async (rows: number, columns: number) => {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('2026 시연')
@@ -560,6 +570,14 @@ describe('synthetic workbook parser harness', () => {
     })
   })
 
+  it('rejects invalid automatic required values even before tariff context is available', async () => {
+    const result = await parseWorkbook(await createInvalidRequiredWorkbook())
+
+    expect(result.autoRows).toEqual([])
+    expect(result.diagnostics.join(' ')).toContain('사용량')
+    expect(result.diagnostics.join(' ')).toContain('제외')
+  })
+
   it('treats blank Power Planner applied power as an inferred profile fallback', async () => {
     const blankAppliedPowerFixture = powerPlannerHtmlFixture.replace(
       'title="450" aria-describedby="grid_JOJ_KW">450',
@@ -638,6 +656,38 @@ describe('synthetic workbook parser harness', () => {
     expect(bill?.observedFields).not.toContain('maxDemandKw')
     expect(bill?.baseChargeWon).toBe(620 * currentPlan.baseRateWonPerKw)
     expect(bill?.energyChargeWon).toBe(Math.round(42_000 * currentPlan.seasonRates.summer))
+  })
+
+  it.each([
+    ['negative usage', { 사용량: -42_000 }],
+    ['non-finite total', { '총 전기요금': Number.POSITIVE_INFINITY }],
+    ['negative optional charge', { 부가세: -1 }],
+    ['zero applied power', { 요금적용전력: 0 }],
+  ])('rejects manual mapping rows with %s', (_label, patch) => {
+    const bills = mapRowsToBills(
+      [
+        {
+          연도: 2026,
+          월: 6,
+          사용량: 42_000,
+          '총 전기요금': 6_420_000,
+          요금적용전력: 450,
+          부가세: 640_000,
+          ...patch,
+        },
+      ],
+      {
+        year: '연도',
+        month: '월',
+        usageKwh: '사용량',
+        totalBillWon: '총 전기요금',
+        appliedPowerKw: '요금적용전력',
+        vatWon: '부가세',
+      },
+      { appliedPowerKw: 620, currentPlan },
+    )
+
+    expect(bills).toEqual([])
   })
 
   it('keeps Korean headers intact when reading a UTF-8 Power Planner CSV', async () => {

@@ -13,6 +13,14 @@ import {
   defaultCalculationSettings,
   isCalculationSettings,
 } from './calculationSettings'
+import {
+  isValidMonthlyBill,
+  isValidRatePlan,
+} from './domainValidation'
+import {
+  getPowerPlannerRecordFingerprint,
+  POWER_PLANNER_AGGREGATE_RECORD_LIMIT,
+} from './powerPlanner'
 
 const dayMs = 24 * 60 * 60 * 1000
 
@@ -203,33 +211,8 @@ const isOptionalFiniteNumber = (value: unknown) =>
 const isOptionalString = (value: unknown) =>
   value === undefined || typeof value === 'string'
 
-const billNumberFields: Array<keyof MonthlyBill> = [
-  'year',
-  'month',
-  'usageKwh',
-  'totalBillWon',
-  'baseChargeWon',
-  'energyChargeWon',
-  'appliedPowerKw',
-  'maxDemandKw',
-  'powerFactorChargeWon',
-  'climateChargeWon',
-  'fuelAdjustmentWon',
-  'vatWon',
-  'fundWon',
-]
-
 const isStoredMonthlyBill = (value: unknown): value is MonthlyBill => {
-  if (!value || typeof value !== 'object') return false
-  const bill = value as Record<string, unknown>
-  return (
-    typeof bill.id === 'string' &&
-    billNumberFields.every((field) => isFiniteNumber(bill[field])) &&
-    (bill.note === undefined || typeof bill.note === 'string') &&
-    (bill.observedFields === undefined ||
-      (Array.isArray(bill.observedFields) &&
-        bill.observedFields.every((field) => typeof field === 'string')))
-  )
+  return isValidMonthlyBill(value)
 }
 
 const isCompleteMonthlyBill = (value: unknown): value is MonthlyBill => {
@@ -296,22 +279,7 @@ const isPeakScenario = (value: unknown): value is PeakScenario => {
 }
 
 const isRatePlan = (value: unknown): value is RatePlan => {
-  if (!value || typeof value !== 'object') return false
-  const plan = value as Record<string, unknown>
-  const seasonRates = plan.seasonRates as Record<string, unknown> | undefined
-  return (
-    ['id', 'contractType', 'voltageType', 'planName', 'effectiveFrom', 'memo'].every(
-      (field) => typeof plan[field] === 'string',
-    ) &&
-    isFiniteNumber(plan.baseRateWonPerKw) &&
-    Boolean(seasonRates) &&
-    isFiniteNumber(seasonRates?.springAutumn) &&
-    isFiniteNumber(seasonRates?.summer) &&
-    isFiniteNumber(seasonRates?.winter) &&
-    isOptionalFiniteNumber(plan.lightLoadRate) &&
-    isOptionalFiniteNumber(plan.midLoadRate) &&
-    isOptionalFiniteNumber(plan.peakLoadRate)
-  )
+  return isValidRatePlan(value)
 }
 
 const powerPlannerDataTypes = new Set<PowerPlannerDataType>([
@@ -354,6 +322,37 @@ const isValidPowerPlannerRecord = (
   if (!numericFields.every((field) => isOptionalFiniteNumber(record[field]))) {
     return false
   }
+  const optionalNumberInRange = (
+    field: string,
+    minimum: number,
+    maximum: number,
+    integer = false,
+  ) => {
+    const value = record[field]
+    return (
+      value === undefined ||
+      (isFiniteNumber(value) &&
+        value >= minimum &&
+        value <= maximum &&
+        (!integer || Number.isInteger(value)))
+    )
+  }
+  if (
+    !optionalNumberInRange('year', 2000, 2100, true) ||
+    !optionalNumberInRange('month', 1, 12, true) ||
+    !optionalNumberInRange('day', 1, 31, true) ||
+    !optionalNumberInRange('hour', 0, 23, true) ||
+    !optionalNumberInRange('usageKwh', 0, 1_000_000_000) ||
+    !optionalNumberInRange('maxDemandKw', 0, 10_000_000) ||
+    !optionalNumberInRange('estimatedBillWon', 0, 1_000_000_000_000) ||
+    !optionalNumberInRange('contractPowerKw', 0, 10_000_000) ||
+    !optionalNumberInRange('appliedPowerKw', 0, 10_000_000) ||
+    !optionalNumberInRange('usageDays', 0, 366, true) ||
+    !optionalNumberInRange('laggingPowerFactorPercent', 0, 100) ||
+    !optionalNumberInRange('leadingPowerFactorPercent', 0, 100)
+  ) {
+    return false
+  }
   if (
     !['date', 'loadType', 'patternLabel', 'patternSummary'].every((field) =>
       isOptionalString(record[field]),
@@ -386,12 +385,14 @@ const isValidPowerPlannerRecord = (
   }
 }
 
-const isValidPowerPlannerDataSource = (
+const normalizePowerPlannerDataSource = (
   value: unknown,
-): value is PowerPlannerDataSource => {
-  if (!value || typeof value !== 'object') return false
+): { dataSource: PowerPlannerDataSource | null; changed: boolean } => {
+  if (!value || typeof value !== 'object') {
+    return { dataSource: null, changed: value !== null }
+  }
   const source = value as Record<string, unknown>
-  return (
+  const metadataIsValid =
     typeof source.id === 'string' &&
     Boolean(source.id) &&
     source.provider === 'kepco-power-planner' &&
@@ -405,7 +406,35 @@ const isValidPowerPlannerDataSource = (
     Array.isArray(source.records) &&
     source.records.length > 0 &&
     source.records.every(isValidPowerPlannerRecord)
-  )
+  if (!metadataIsValid) return { dataSource: null, changed: true }
+
+  const sourceRecords = source.records as PowerPlannerRecord[]
+  const fingerprints = new Set<string>()
+  const uniqueRecords: PowerPlannerRecord[] = []
+  for (const record of sourceRecords) {
+    const fingerprint = getPowerPlannerRecordFingerprint(record)
+    if (fingerprints.has(fingerprint)) continue
+    fingerprints.add(fingerprint)
+    uniqueRecords.push(record)
+    if (uniqueRecords.length > POWER_PLANNER_AGGREGATE_RECORD_LIMIT) {
+      return { dataSource: null, changed: true }
+    }
+  }
+
+  return {
+    dataSource: {
+      ...(source as unknown as PowerPlannerDataSource),
+      records: uniqueRecords,
+    },
+    changed: uniqueRecords.length !== sourceRecords.length,
+  }
+}
+
+const isValidPowerPlannerDataSource = (
+  value: unknown,
+): value is PowerPlannerDataSource => {
+  const normalized = normalizePowerPlannerDataSource(value)
+  return normalized.dataSource !== null && !normalized.changed
 }
 
 const isStorageSnapshotData = (
@@ -445,10 +474,35 @@ const parseStorageSnapshot = (
     const value = JSON.parse(raw) as unknown
     if (!value || typeof value !== 'object') return null
     const candidate = value as Record<string, unknown>
+    const rawData =
+      candidate.data && typeof candidate.data === 'object'
+        ? (candidate.data as Record<string, unknown>)
+        : null
+    const normalizedPowerPlanner = normalizePowerPlannerDataSource(
+      rawData?.powerPlanner,
+    )
+    const rawProvenance =
+      rawData?.provenance && typeof rawData.provenance === 'object'
+        ? (rawData.provenance as DataProvenance)
+        : null
+    const sanitizedData = rawData
+      ? {
+          ...rawData,
+          powerPlanner: normalizedPowerPlanner.dataSource,
+          provenance: rawProvenance
+            ? {
+                ...rawProvenance,
+                powerPlanner: normalizedPowerPlanner.dataSource
+                  ? rawProvenance.powerPlanner
+                  : 'none',
+              }
+            : rawData.provenance,
+        }
+      : candidate.data
     if (
       candidate.schemaVersion !== 1 ||
       !isStorageSession(candidate.session) ||
-      !isStorageSnapshotData(candidate.data, true) ||
+      !isStorageSnapshotData(sanitizedData, true) ||
       (candidate.revision !== undefined &&
         (!Number.isInteger(candidate.revision) ||
           Number(candidate.revision) < 0))
@@ -459,12 +513,12 @@ const parseStorageSnapshot = (
       ...candidate,
       revision: candidate.revision ?? 0,
       data: {
-        ...(candidate.data as StorageSnapshotData),
+        ...(sanitizedData as StorageSnapshotData),
         calculationSettings: isCalculationSettings(
-          (candidate.data as unknown as Record<string, unknown>)
+          (sanitizedData as unknown as Record<string, unknown>)
             .calculationSettings,
         )
-          ? (candidate.data as StorageSnapshotData).calculationSettings
+          ? (sanitizedData as StorageSnapshotData).calculationSettings
           : defaultCalculationSettings,
       },
     } as unknown as StorageSnapshot

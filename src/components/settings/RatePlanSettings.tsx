@@ -5,6 +5,7 @@ import type {
   RatePlan,
   Season,
 } from '../../types'
+import { validateRatePlan } from '../../lib/domainValidation'
 import {
   defaultCalculationSettings,
   validateCalculationSettings,
@@ -47,6 +48,10 @@ export function RatePlanSettings({
 }: RatePlanSettingsProps) {
   type CalculationFactorField = Exclude<keyof CalculationSettings, 'mode'>
   const [validationMessage, setValidationMessage] = useState('')
+  const [invalidPlanField, setInvalidPlanField] = useState<{
+    planId: string
+    field: string
+  } | null>(null)
   const [calculationErrors, setCalculationErrors] = useState<
     Partial<Record<CalculationFactorField, string>>
   >({})
@@ -55,12 +60,22 @@ export function RatePlanSettings({
   const updatePlan = (
     planId: string,
     updater: (plan: RatePlan) => RatePlan,
+    field: string,
   ) => {
     const nextPlans = plans.map((plan) => (plan.id === planId ? updater(plan) : plan))
+    const nextPlan = nextPlans.find((plan) => plan.id === planId)
+    const validation = validateRatePlan(nextPlan)
+    if (!validation.valid) {
+      setInvalidPlanField({ planId, field })
+      setValidationMessage(validation.issues[0] ?? '요금제 값을 확인해 주세요.')
+      return
+    }
     if (hasDuplicateTuple(nextPlans)) {
+      setInvalidPlanField({ planId, field })
       setValidationMessage('계약종별·수전전압·요금제명 조합이 중복됩니다. 기존 요금제와 다른 조합으로 입력해 주세요.')
       return
     }
+    setInvalidPlanField(null)
     setValidationMessage('')
     void onPlansChange(nextPlans).catch(() => undefined)
   }
@@ -335,7 +350,7 @@ export function RatePlanSettings({
                     updatePlan(plan.id, (current) => ({
                       ...current,
                       contractType: event.target.value,
-                    }))
+                    }), 'contractType')
                   }
                 />
                 <input
@@ -345,7 +360,7 @@ export function RatePlanSettings({
                     updatePlan(plan.id, (current) => ({
                       ...current,
                       voltageType: event.target.value,
-                    }))
+                    }), 'voltageType')
                   }
                 />
                 <input
@@ -355,19 +370,26 @@ export function RatePlanSettings({
                     updatePlan(plan.id, (current) => ({
                       ...current,
                       planName: event.target.value,
-                    }))
+                    }), 'planName')
                   }
                 />
                 <label>
                   기본요금
                   <input
                     type="number"
+                    aria-label="기본요금"
+                    min={0.01}
+                    max={1_000_000}
+                    aria-invalid={
+                      invalidPlanField?.planId === plan.id &&
+                      invalidPlanField.field === 'baseRateWonPerKw'
+                    }
                     value={plan.baseRateWonPerKw}
                     onChange={(event) =>
                       updatePlan(plan.id, (current) => ({
                         ...current,
                         baseRateWonPerKw: Number(event.target.value),
-                      }))
+                      }), 'baseRateWonPerKw')
                     }
                   />
                 </label>
@@ -378,7 +400,14 @@ export function RatePlanSettings({
                     {seasonLabels[season]}
                     <input
                       type="number"
+                      aria-label={seasonLabels[season]}
                       step="0.1"
+                      min={0.01}
+                      max={1_000_000}
+                      aria-invalid={
+                        invalidPlanField?.planId === plan.id &&
+                        invalidPlanField.field === season
+                      }
                       value={plan.seasonRates[season]}
                       onChange={(event) =>
                         updatePlan(plan.id, (current) => ({
@@ -387,7 +416,7 @@ export function RatePlanSettings({
                             ...current.seasonRates,
                             [season]: Number(event.target.value),
                           },
-                        }))
+                        }), season)
                       }
                     />
                   </label>
@@ -398,10 +427,10 @@ export function RatePlanSettings({
                     type="date"
                     value={plan.effectiveFrom}
                     onChange={(event) =>
-                      updatePlan(plan.id, (current) => ({
-                        ...current,
-                        effectiveFrom: event.target.value,
-                      }))
+                    updatePlan(plan.id, (current) => ({
+                      ...current,
+                      effectiveFrom: event.target.value,
+                    }), 'effectiveFrom')
                     }
                   />
                 </label>
@@ -413,7 +442,7 @@ export function RatePlanSettings({
                   updatePlan(plan.id, (current) => ({
                     ...current,
                     memo: event.target.value,
-                  }))
+                  }), 'memo')
                 }
               />
             </article>

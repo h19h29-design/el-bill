@@ -19,7 +19,7 @@ const scenarioSchema = z.object({
   usageIncreasePercent: z.coerce.number().min(-30).max(100),
   summerIncreasePercent: z.coerce.number().min(-30).max(100),
   winterIncreasePercent: z.coerce.number().min(-30).max(100),
-  analysisYear: z.coerce.number().min(2020).max(2035),
+  analysisYear: z.coerce.number().int().min(2020).max(2035),
   memo: z.string(),
 })
 
@@ -51,10 +51,36 @@ export function RateSimulator({
   onScenarioChange,
 }: RateSimulatorProps) {
   const [tab, setTab] = useState<ComparisonTab>('12')
+  const [scenarioErrors, setScenarioErrors] = useState<
+    Partial<Record<keyof PeakScenario, string>>
+  >({})
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const form = useForm<PeakScenario>({
     defaultValues: scenario,
   })
+  const submitScenario = async (values: PeakScenario) => {
+    const parsed = scenarioSchema.safeParse(values)
+    if (!parsed.success) {
+      const errors: Partial<Record<keyof PeakScenario, string>> = {}
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0] as keyof PeakScenario | undefined
+        if (!field || errors[field]) continue
+        errors[field] =
+          field === 'analysisYear'
+            ? '분석 기준 연도는 2020~2035 사이로 입력해 주세요.'
+            : field === 'expectedPeakKw' || field === 'targetPeakKw'
+              ? '피크 입력값은 0보다 커야 합니다.'
+              : '증가율 입력값은 -30~100% 사이여야 합니다.'
+      }
+      setScenarioErrors(errors)
+      return
+    }
+    setScenarioErrors({})
+    await onScenarioChange({
+      ...scenario,
+      ...parsed.data,
+    }).catch(() => undefined)
+  }
   const reviewOnlyCandidate = candidates.find(
     (candidate) => candidate.candidatePlanId === candidatePlan.id,
   )
@@ -249,32 +275,72 @@ export function RateSimulator({
         </div>
         <form
           className="scenario-form"
-          onSubmit={form.handleSubmit((values) => {
-            void onScenarioChange({
-              ...scenario,
-              ...scenarioSchema.parse(values),
-            }).catch(() => undefined)
-          })}
+          noValidate
+          onSubmit={form.handleSubmit(submitScenario)}
         >
           <label>
             예상 최대수요전력(kW)
-            <input type="number" {...form.register('expectedPeakKw')} />
+            <input
+              type="number"
+              min={1}
+              aria-invalid={Boolean(scenarioErrors.expectedPeakKw)}
+              aria-describedby={
+                scenarioErrors.expectedPeakKw ? 'scenario-validation-status' : undefined
+              }
+              {...form.register('expectedPeakKw')}
+            />
           </label>
           <label>
             사용량 증가율(%)
-            <input type="number" {...form.register('usageIncreasePercent')} />
+            <input
+              type="number"
+              min={-30}
+              max={100}
+              aria-invalid={Boolean(scenarioErrors.usageIncreasePercent)}
+              aria-describedby={
+                scenarioErrors.usageIncreasePercent ? 'scenario-validation-status' : undefined
+              }
+              {...form.register('usageIncreasePercent')}
+            />
           </label>
           <label>
             여름 증가율(%)
-            <input type="number" {...form.register('summerIncreasePercent')} />
+            <input
+              type="number"
+              min={-30}
+              max={100}
+              aria-invalid={Boolean(scenarioErrors.summerIncreasePercent)}
+              aria-describedby={
+                scenarioErrors.summerIncreasePercent ? 'scenario-validation-status' : undefined
+              }
+              {...form.register('summerIncreasePercent')}
+            />
           </label>
           <label>
             겨울 증가율(%)
-            <input type="number" {...form.register('winterIncreasePercent')} />
+            <input
+              type="number"
+              min={-30}
+              max={100}
+              aria-invalid={Boolean(scenarioErrors.winterIncreasePercent)}
+              aria-describedby={
+                scenarioErrors.winterIncreasePercent ? 'scenario-validation-status' : undefined
+              }
+              {...form.register('winterIncreasePercent')}
+            />
           </label>
           <label>
             분석 기준 연도
-            <input type="number" {...form.register('analysisYear')} />
+            <input
+              type="number"
+              min={2020}
+              max={2035}
+              aria-invalid={Boolean(scenarioErrors.analysisYear)}
+              aria-describedby={
+                scenarioErrors.analysisYear ? 'scenario-validation-status' : undefined
+              }
+              {...form.register('analysisYear')}
+            />
           </label>
           <label className="wide-field">
             EHP 증설 메모
@@ -285,6 +351,11 @@ export function RateSimulator({
             시뮬레이션 설정
           </button>
         </form>
+        {Object.keys(scenarioErrors).length > 0 && (
+          <p id="scenario-validation-status" className="status-line" role="status">
+            {Object.values(scenarioErrors)[0]} 입력값을 확인한 뒤 다시 시도해 주세요.
+          </p>
+        )}
         <p className="warning-note">
           {rateChangeCaution} 본 결과는 학교 내부 진단용 추정입니다.
         </p>

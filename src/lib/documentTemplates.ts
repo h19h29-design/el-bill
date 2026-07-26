@@ -183,6 +183,8 @@ export const buildDocumentBundle = (
       선택요금변경: `${currentPlanName} -> ${recommendedPlanName}`,
       요금적용희망일: '익월 검침일 이후',
       청구방법: '기존 청구방법 유지',
+      계산용도안내: '학교 내부 진단용 추정',
+      제출전검토안내: '실제 제출 전 담당자 검토 필요',
       신중검토안내: rateChangeCaution,
       서명직인: '수기 확인 필요',
       개인정보동의: '수기 확인 필요',

@@ -169,7 +169,9 @@ export function BillUpload({
     }
     const mapped = mapRowsToBills(selectedSheet.rows, mapping, importContext)
     if (!mapped.length) {
-      setMessage('필수 매핑 결과가 없습니다. 연도, 월, 사용량, 총 전기요금을 확인해 주세요.')
+      setMessage(
+        '유효한 필수 매핑 결과가 없습니다. 연도와 월을 확인해 주세요. 사용량은 0보다 큰 값, 총 전기요금도 0보다 큰 값으로 직접 지정해야 합니다.',
+      )
       return
     }
     let saved = false

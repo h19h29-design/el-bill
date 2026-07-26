@@ -138,6 +138,26 @@ describe('document template harness', () => {
     expect(bundle.applicationPreviewData.신중검토안내).toBe(rateChangeCaution)
   })
 
+  it('includes mandatory estimate and review cautions in application data', () => {
+    const bundle = buildDocumentBundle(
+      defaultSchoolProfile,
+      sampleBills.at(-1),
+      comparison,
+      defaultScenario,
+      diagnosis,
+    )
+
+    expect(Object.values(bundle.applicationPreviewData)).toContain(
+      '학교 내부 진단용 추정',
+    )
+    expect(Object.values(bundle.applicationPreviewData)).toContain(
+      '실제 제출 전 담당자 검토 필요',
+    )
+    expect(bundle.applicationPreviewData.신중검토안내).toContain(
+      '1년에 한 번만 가능',
+    )
+  })
+
   it('uses the actual recommended plan name in generated documents', () => {
     const bundle = buildDocumentBundle(
       defaultSchoolProfile,

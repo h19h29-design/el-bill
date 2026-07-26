@@ -45,6 +45,32 @@ describe('document generation eligibility', () => {
     expect(within(container).getAllByText('테스트고등학교')).toHaveLength(3)
   })
 
+  it('shows every mandatory caution inside the application PDF source node', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+    })
+    const { container } = render(
+      <DocumentGenerator
+        profile={defaultSchoolProfile}
+        latestBill={sampleBills.at(-1)}
+        comparison={diagnosis.comparison}
+        scenario={defaultScenario}
+        diagnosis={diagnosis}
+        peakOperationPlan={buildPeakOperationPlan(defaultScenario)}
+      />,
+    )
+    const application = container.querySelector('#application-preview')
+
+    expect(application).toBeTruthy()
+    expect(application?.textContent).toContain('학교 내부 진단용 추정')
+    expect(application?.textContent).toContain('실제 제출 전 담당자 검토 필요')
+    expect(application?.textContent).toContain('1년에 한 번만 가능')
+  })
+
   it('keeps reserved filename characters in visible document identity only', () => {
     const displaySchoolName = '테스트/고등학교: 2026'
     const diagnosis = buildAutoDiagnosis({

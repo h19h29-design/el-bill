@@ -433,7 +433,10 @@ export function DocumentGenerator({
                 ))}
               </tbody>
             </table>
-            <footer>{rateChangeCaution} 서명, 직인, 개인정보동의는 수기 확인 필요.</footer>
+            <footer>
+              학교 내부 진단용 추정. 실제 제출 전 담당자 검토 필요.{' '}
+              {rateChangeCaution} 서명, 직인, 개인정보동의는 수기 확인 필요.
+            </footer>
           </div>
         </div>
         {status && <p className="status-line">{status}</p>}

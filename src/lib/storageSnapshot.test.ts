@@ -326,6 +326,124 @@ describe('locked session-scoped snapshots', () => {
     expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
   })
 
+  it('normalizes legacy PowerPlanner duplicates and persists the sanitized snapshot', async () => {
+    const duplicateRecord = {
+      id: 'hourly-1',
+      dataType: 'hourlyUsage' as const,
+      date: '2026-07-01',
+      hour: 13,
+      usageKwh: 120,
+      sourceRowIndex: 0,
+    }
+    const powerPlanner = {
+      id: 'legacy-power-planner',
+      provider: 'kepco-power-planner' as const,
+      sourceName: 'power-planner.csv',
+      sourceLabel: '파워플래너 자료',
+      importedAt: '2026-07-26T00:00:00.000Z',
+      records: [
+        duplicateRecord,
+        { ...duplicateRecord, id: 'hourly-duplicate', sourceRowIndex: 1 },
+      ],
+      memo: '중복 레거시',
+    }
+    const sessionId = 'duplicate-power-planner'
+    const legacy = snapshot(sessionId, {
+      ...makeData({ bills: 'uploaded', powerPlanner: 'uploaded' }),
+      powerPlanner,
+    })
+    localStorage.setItem(storageSnapshotKeyFor(sessionId), JSON.stringify(legacy))
+    localStorage.setItem(storageActivePointerKey, pointer(sessionId))
+
+    const initialized = await initializeStorageAfterMount(makeData(), now)
+
+    expect(initialized?.data.powerPlanner?.records).toHaveLength(1)
+    expect(initialized?.data.provenance.powerPlanner).toBe('uploaded')
+    const persisted = JSON.parse(
+      localStorage.getItem(storageSnapshotKeyFor(sessionId)) ?? '{}',
+    )
+    expect(persisted.data.powerPlanner.records).toHaveLength(1)
+  })
+
+  it('drops only PowerPlanner data when restored unique records exceed 10,000', async () => {
+    const records = Array.from({ length: 10_001 }, (_, index) => ({
+      id: `hourly-${index}`,
+      dataType: 'hourlyUsage' as const,
+      date: `2026-07-${String((index % 28) + 1).padStart(2, '0')}`,
+      hour: index % 24,
+      usageKwh: index + 1,
+      sourceRowIndex: index,
+    }))
+    const sessionId = 'oversized-power-planner'
+    const legacy = snapshot(sessionId, {
+      ...makeData({ bills: 'uploaded', powerPlanner: 'uploaded' }),
+      powerPlanner: {
+        id: 'oversized',
+        provider: 'kepco-power-planner',
+        sourceName: 'oversized.csv',
+        sourceLabel: '파워플래너 자료',
+        importedAt: '2026-07-26T00:00:00.000Z',
+        records,
+        memo: '레거시 초과',
+      },
+    })
+    localStorage.setItem(storageSnapshotKeyFor(sessionId), JSON.stringify(legacy))
+    localStorage.setItem(storageActivePointerKey, pointer(sessionId))
+
+    const initialized = await initializeStorageAfterMount(makeData(), now)
+
+    expect(initialized?.data.bills).toEqual(sampleBills)
+    expect(initialized?.data.profile).toEqual(defaultSchoolProfile)
+    expect(initialized?.data.powerPlanner).toBeNull()
+    expect(initialized?.data.provenance.powerPlanner).toBe('none')
+  })
+
+  it('drops only PowerPlanner data when a restored record has negative usage', async () => {
+    const sessionId = 'invalid-power-planner-record'
+    const legacy = snapshot(sessionId, {
+      ...makeData({ bills: 'uploaded', powerPlanner: 'uploaded' }),
+      powerPlanner: {
+        id: 'invalid-record-source',
+        provider: 'kepco-power-planner',
+        sourceName: 'invalid.csv',
+        sourceLabel: '파워플래너 자료',
+        importedAt: '2026-07-26T00:00:00.000Z',
+        records: [
+          {
+            id: 'negative-usage',
+            dataType: 'hourlyUsage',
+            date: '2026-07-01',
+            hour: 13,
+            usageKwh: -1,
+            sourceRowIndex: 0,
+          },
+        ],
+        memo: '잘못된 레거시',
+      },
+    })
+    localStorage.setItem(storageSnapshotKeyFor(sessionId), JSON.stringify(legacy))
+    localStorage.setItem(storageActivePointerKey, pointer(sessionId))
+
+    const initialized = await initializeStorageAfterMount(makeData(), now)
+
+    expect(initialized?.data.bills).toEqual(sampleBills)
+    expect(initialized?.data.powerPlanner).toBeNull()
+    expect(initialized?.data.provenance.powerPlanner).toBe('none')
+  })
+
+  it.each([
+    ['negative bill usage', { bills: sampleBills.map((bill) => ({ ...bill, usageKwh: -1 })) }],
+    ['non-finite bill total', { bills: sampleBills.map((bill) => ({ ...bill, totalBillWon: Number.POSITIVE_INFINITY })) }],
+    ['negative tariff', { ratePlans: defaultRatePlans.map((plan, index) => index === 0 ? { ...plan, baseRateWonPerKw: -1 } : plan) }],
+  ])('does not restore a snapshot containing %s', (_label, patch) => {
+    const sessionId = 'invalid-domain-data'
+    const invalid = snapshot(sessionId, { ...makeData(), ...patch })
+    localStorage.setItem(storageSnapshotKeyFor(sessionId), JSON.stringify(invalid))
+    localStorage.setItem(storageActivePointerKey, pointer(sessionId))
+
+    expect(readStorageSnapshot(now)).toBeNull()
+  })
+
   it('purges a malformed active pointer only after the mount initializer runs', async () => {
     localStorage.setItem(storageActivePointerKey, '{"schemaVersion":1')
 

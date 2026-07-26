@@ -15,8 +15,22 @@ export interface PeakOperationPlan {
   }>
 }
 
-const getNumber = (value: number | undefined, fallback: number) =>
-  Number.isFinite(value) && value ? Number(value) : fallback
+export const EHP_GROUP_MIN = 1
+export const EHP_GROUP_MAX = 100
+
+export const normalizeEhpGroupCount = (
+  value: number | undefined,
+  fallback: number,
+) => {
+  if (
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    Number(value) < EHP_GROUP_MIN
+  ) {
+    return fallback
+  }
+  return Math.min(Number(value), EHP_GROUP_MAX)
+}
 
 const formatStartTime = (offset: number) => {
   const minutes = 13 * 60 + offset * 5
@@ -26,8 +40,8 @@ const formatStartTime = (offset: number) => {
 export const buildPeakOperationPlan = (
   scenario: PeakScenario,
 ): PeakOperationPlan => {
-  const mainGroups = getNumber(scenario.mainBuildingEhpGroups, 5)
-  const annexGroups = getNumber(scenario.annexEhpGroups, 2)
+  const mainGroups = normalizeEhpGroupCount(scenario.mainBuildingEhpGroups, 5)
+  const annexGroups = normalizeEhpGroupCount(scenario.annexEhpGroups, 2)
   const cafeteriaTime = scenario.cafeteriaHighPowerTime || '11:00~13:00'
   const specialRoomTime = scenario.specialRoomTime || '14:00~16:00'
   const exemptSpaces = scenario.exemptSpaces || '보건실, 서버실, 특수학급'

@@ -5,6 +5,10 @@ import type {
   MonthlyBill,
   MonthlyBillObservedField,
 } from '../types'
+import {
+  isValidMonthlyBill,
+  validateBillRequiredValues,
+} from './domainValidation'
 
 export interface ParsedSheet {
   name: string
@@ -572,8 +576,26 @@ const parseYearlyBillWorkbook = (
       const month = asMonth(row[monthCol])
       const totalBillWon = asNumber(row[amountCol])
       const usageKwh = asNumber(row[usageCol])
-      if (!month || !totalBillWon || !usageKwh) return
-      rows.push(makeImportedBill(year, month, usageKwh, totalBillWon, context))
+      const requiredValidation = validateBillRequiredValues({
+        year,
+        month,
+        usageKwh,
+        totalBillWon,
+      })
+      if (!requiredValidation.valid) {
+        diagnostics.push(
+          `${sheetName}: ${month || '확인 불가'}월 행의 ${requiredValidation.issues.join(' ')} 해당 행을 제외했습니다.`,
+        )
+        return
+      }
+      const bill = makeImportedBill(year, month, usageKwh, totalBillWon, context)
+      if (!context || isValidMonthlyBill(bill)) {
+        rows.push(bill)
+      } else {
+        diagnostics.push(
+          `${sheetName}: ${month}월 행의 사용량·총 전기요금·요금적용전력 또는 요금 구성요소가 올바르지 않아 제외했습니다.`,
+        )
+      }
     })
   })
 
@@ -599,7 +621,16 @@ const parsePowerPlannerMonthlyBills = (
       const rawAppliedPowerKw = getRowValue(row, '요금적용전력')
       const appliedPowerKw = asNumber(rawAppliedPowerKw)
       const hasObservedAppliedPower = hasNumericValue(rawAppliedPowerKw)
-      if (!year || !month || !usageKwh || !totalBillWon) return null
+      if (
+        !validateBillRequiredValues({
+          year,
+          month,
+          usageKwh,
+          totalBillWon,
+        }).valid
+      ) {
+        return null
+      }
 
       const bill = makeImportedBill(year, month, usageKwh, totalBillWon, context)
       const baseChargeWon = hasObservedAppliedPower
@@ -617,7 +648,10 @@ const parsePowerPlannerMonthlyBills = (
         note: '파워플래너 월별청구요금 업로드',
       }
     })
-    .filter((bill): bill is MonthlyBill => Boolean(bill))
+    .filter(
+      (bill): bill is MonthlyBill =>
+        Boolean(bill) && (!context || isValidMonthlyBill(bill)),
+    )
 
 const isPowerPlannerHtmlExport = (text: string) =>
   /ui-jqgrid/i.test(text) &&
@@ -758,7 +792,16 @@ export const mapRowsToBills = (
       const month = asMonth(row[mapping.month])
       const usageKwh = asNumber(row[mapping.usageKwh])
       const totalBillWon = asNumber(row[mapping.totalBillWon])
-      if (!year || !month || !usageKwh || !totalBillWon) return null
+      if (
+        !validateBillRequiredValues({
+          year,
+          month,
+          usageKwh,
+          totalBillWon,
+        }).valid
+      ) {
+        return null
+      }
 
       const hasMappedValue = (field: string) => {
         const column = mapping[field]
@@ -822,4 +865,7 @@ export const mapRowsToBills = (
         note: normalize(row[mapping.note]) || '컬럼 매핑 입력',
       }
     })
-    .filter((bill): bill is MonthlyBill => Boolean(bill))
+    .filter(
+      (bill): bill is MonthlyBill =>
+        Boolean(bill) && (!context || isValidMonthlyBill(bill)),
+    )

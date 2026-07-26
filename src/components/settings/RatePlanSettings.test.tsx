@@ -45,6 +45,30 @@ describe('rate-plan settings validation', () => {
     expect(screen.getByRole('status').textContent).toContain('중복')
   })
 
+  it.each([
+    ['기본요금', '0'],
+    ['기본요금', '-1'],
+    ['봄·가을', '0'],
+    ['여름', '-100'],
+  ])('rejects an invalid %s rate of %s with accessible guidance', (label, value) => {
+    const onPlansChange = vi.fn(async () => true)
+    render(
+      <RatePlanSettings
+        plans={[plan('first', '선택요금Ⅰ')]}
+        onPlansChange={onPlansChange}
+        calculationSettings={defaultCalculationSettings}
+        onCalculationSettingsChange={vi.fn(async () => true)}
+      />,
+    )
+
+    const input = screen.getByLabelText(label)
+    fireEvent.change(input, { target: { value } })
+
+    expect(onPlansChange).not.toHaveBeenCalled()
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByRole('status').textContent).toContain('0')
+  })
+
   it('selects tariff-full mode, validates factors, and resets defaults', async () => {
     const onCalculationSettingsChange = vi.fn(async () => true)
     const { rerender } = render(
