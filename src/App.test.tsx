@@ -77,6 +77,25 @@ describe('data provenance persistence', () => {
     expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 시연 샘플')
   })
 
+  it('shows a stable loading frame while a heavy dashboard view is loaded', async () => {
+    render(<App />)
+
+    expect(screen.getByText('화면을 불러오는 중입니다.')).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '전기요금 자동진단 시작' })).toBeTruthy()
+    })
+  })
+
+  it('shows the same loading frame while the spreadsheet upload view loads', async () => {
+    render(<App />)
+
+    await screen.findByRole('button', { name: '전기요금 자동진단 시작' })
+    fireEvent.click(screen.getByRole('button', { name: /^고지서 입력$/ }))
+
+    expect(screen.getByText('화면을 불러오는 중입니다.')).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: '월별 한전고지서 입력' })).toBeTruthy()
+  })
+
   it('keeps legacy uploaded mode with stored bills and PowerPlanner data locked to the sample', async () => {
     localStorage.setItem('el-bill:data-mode', stored('uploaded'))
     localStorage.setItem('el-bill:bills', stored(sampleBills))
@@ -91,17 +110,17 @@ describe('data provenance persistence', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
     expect(
-      screen.getByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
+      await screen.findByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
     ).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^피크관리$/ }))
     expect(
-      screen.getByText(/파워플래너 자료가 없으므로 기존 한전 고지서 월별 데이터와 예상 피크 입력값으로 진단합니다/),
+      await screen.findByText(/파워플래너 자료가 없으므로 기존 한전 고지서 월별 데이터와 예상 피크 입력값으로 진단합니다/),
     ).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^문서생성$/ }))
-    expect(screen.getByText('사용자 고지서 업로드 후 생성 가능')).toBeTruthy()
+    expect(await screen.findByText('사용자 고지서 업로드 후 생성 가능')).toBeTruthy()
   })
 
-  it('restores PowerPlanner records for a new explicit provenance session', () => {
+  it('restores PowerPlanner records for a new explicit provenance session', async () => {
     startCommittedSnapshot(
       { bills: 'sample', powerPlanner: 'uploaded' },
       samplePowerPlannerDataSource,
@@ -111,7 +130,7 @@ describe('data provenance persistence', () => {
 
     expect(document.querySelector('.notice-detail')?.textContent).toContain('파워플래너: 사용자 업로드')
     fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
-    expect(screen.getByText('25건')).toBeTruthy()
+    expect(await screen.findByText('25건')).toBeTruthy()
     expect(localStorage.getItem('el-bill:power-planner')).not.toBeNull()
   })
 
@@ -137,7 +156,7 @@ describe('data provenance persistence', () => {
     expect(localStorage.getItem('el-bill:data-provenance')).toBeNull()
   })
 
-  it('rejects malformed explicit PowerPlanner payloads before they reach the view', () => {
+  it('rejects malformed explicit PowerPlanner payloads before they reach the view', async () => {
     startCommittedSnapshot(
       { bills: 'sample', powerPlanner: 'uploaded' },
       samplePowerPlannerDataSource,
@@ -161,11 +180,11 @@ describe('data provenance persistence', () => {
     expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
     expect(
-      screen.getByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
+      await screen.findByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
     ).toBeTruthy()
   })
 
-  it('clears PowerPlanner data after an expired legacy mode without explicit provenance', () => {
+  it('clears PowerPlanner data after an expired legacy mode without explicit provenance', async () => {
     localStorage.setItem('el-bill:data-mode', expiredStored('uploaded'))
     localStorage.setItem('el-bill:power-planner', stored(samplePowerPlannerDataSource))
 
@@ -175,7 +194,7 @@ describe('data provenance persistence', () => {
     expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
     expect(
-      screen.getByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
+      await screen.findByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
     ).toBeTruthy()
   })
 

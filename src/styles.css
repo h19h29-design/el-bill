@@ -296,6 +296,14 @@ button:disabled {
   gap: 14px;
 }
 
+.view-loading {
+  display: grid;
+  min-height: 520px;
+  place-items: center;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(150px, 1fr));

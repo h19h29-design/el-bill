@@ -31,9 +31,10 @@ const consecutiveBills = (year: number, month: number, count: number) =>
   })
 
 describe('electricity calculation harness', () => {
-  it('keeps recent 12 month data available for recommendation', () => {
-    const recent = getRecentBills(sampleBills, 12)
+  it('calendar rollover selects the true recent 12 months', () => {
+    const recent = getRecentBills([...sampleBills].reverse(), 12)
     expect(recent).toHaveLength(12)
+    expect(recent[0]).toMatchObject({ year: 2025, month: 8 })
     expect(recent.at(-1)?.year).toBe(2026)
     expect(recent.at(-1)?.month).toBe(7)
   })

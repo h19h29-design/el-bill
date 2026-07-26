@@ -4,7 +4,7 @@ import { getPeakRiskLevel } from './peak'
 import { buildPeakOperationPlan } from './peakOperations'
 
 describe('peak operation sequencing', () => {
-  it('never reports non-positive or non-finite peaks as safe', () => {
+  it('invalid peak target is rejected as 위험', () => {
     expect(getPeakRiskLevel(0, 400)).toBe('위험')
     expect(getPeakRiskLevel(-1, 400)).toBe('위험')
     expect(getPeakRiskLevel(500, 0)).toBe('위험')

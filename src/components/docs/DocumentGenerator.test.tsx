@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { buildAutoDiagnosis } from '../../lib/diagnosis'
-import { sanitizeDownloadStem } from '../../lib/downloadNames'
+import { getDocumentFileNames, sanitizeDownloadStem } from '../../lib/downloadNames'
 import { buildPeakOperationPlan } from '../../lib/peakOperations'
 import { DocumentGenerator } from './DocumentGenerator'
 
@@ -18,7 +18,10 @@ describe('document generation eligibility', () => {
     expect(sanitizeDownloadStem('../CON')).toBe('학교')
   })
 
-  it('uses the configured display name in the document masthead', () => {
+  it('custom display name reaches preview and ZIP filename', () => {
+    expect(getDocumentFileNames('테스트/고등학교: 2026').zip).toBe(
+      '테스트 고등학교 2026_전기요금_변경_문서묶음.zip',
+    )
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills,
       profile: { ...defaultSchoolProfile, displaySchoolName: '테스트고등학교' },

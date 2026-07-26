@@ -65,7 +65,7 @@ test('checked-in synthetic XLSX reaches recognized mapping and analysis state', 
   await expect(page.getByText('사용자 고지서 분석', { exact: false })).toBeVisible()
 })
 
-test('PowerPlanner-only upload does not claim uploaded-bill diagnosis', async ({ page }, testInfo) => {
+test('PowerPlanner-only upload stays sample-bill mode', async ({ page }, testInfo) => {
   const powerPlannerCsv = testInfo.outputPath('power-planner-hourly.csv')
   await writeFile(
     powerPlannerCsv,
@@ -191,8 +191,11 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await expect(page.getByText('본관 EHP 8개 그룹')).toBeVisible()
   await expect(page.getByLabel('예상 피크(kW)')).toHaveValue('650')
 
+  await clickSidebar('학교정보')
+  await page.getByLabel('화면 표시명').fill('테스트고등학교2026')
   await clickSidebar('문서생성')
   await expectViewHeading('변경신청 패키지 자동 생성')
+  await expect(page.locator('#plan-preview .doc-masthead strong')).toHaveText('테스트고등학교2026')
   await page.getByRole('button', { name: '변경신청서' }).click()
   await expect(page.locator('#application-preview.visible')).toBeVisible()
   await expect(page.getByText('자동 입력 가능 항목과 수기 확인 필요 항목을 구분했습니다.')).toBeVisible()
@@ -200,7 +203,7 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   const zipDownload = page.waitForEvent('download')
   await page.getByRole('button', { name: '전체 다운로드 (ZIP)' }).click()
   const downloadedZip = await zipDownload
-  const documentStem = 'A고등학교'
+  const documentStem = '테스트고등학교2026'
   await expect(downloadedZip.suggestedFilename()).toBe(`${documentStem}_전기요금_변경_문서묶음.zip`)
   const zipPath = testInfo.outputPath('document-package.zip')
   await downloadedZip.saveAs(zipPath)
@@ -236,6 +239,20 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
     expect(pdfBytes.subarray(0, 4).toString()).toBe('%PDF')
     expect(pdfBytes.byteLength).toBeGreaterThan(100_000)
   }
+})
+
+test('invalid peak target is rejected', async ({ page }) => {
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+
+  await page.locator('.sidebar-nav').getByRole('button', { name: '피크관리', exact: true }).click()
+  await page.getByLabel('목표 피크(kW)').fill('0')
+  await page.getByLabel('예상 피크(kW)').fill('-1')
+
+  await expect(page.getByLabel('목표 피크(kW)')).toHaveValue('500')
+  await expect(page.getByLabel('예상 피크(kW)')).toHaveValue('485')
+  await expect(page.getByText('위험도', { exact: true })).toBeVisible()
 })
 
 test('mobile core workflow keeps navigation and wide content usable', async ({ page }) => {

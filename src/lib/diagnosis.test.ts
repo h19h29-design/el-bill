@@ -182,7 +182,7 @@ describe('automatic diagnosis harness', () => {
     expect(diagnosis.canGenerateChangeDocuments).toBe(false)
   })
 
-  it('blocks diagnosis and documents when no exact active plan is configured', () => {
+  it('unknown current plan blocks diagnosis', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills,
       profile: { ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' },
@@ -268,23 +268,37 @@ describe('automatic diagnosis harness', () => {
     expect(diagnosis.documentBlockReason).toContain('사용자 고지서 업로드 후 생성 가능')
   })
 
-  it('does not complete diagnosis or unlock documents from duplicate billing rows', () => {
-    const diagnosis = buildAutoDiagnosis({
+  it('duplicate and gapped months block change documents', () => {
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: currentPlan.contractType,
+      voltageType: currentPlan.voltageType,
+      currentPlan: currentPlan.planName,
+    }
+    const duplicateDiagnosis = buildAutoDiagnosis({
       bills: Array.from({ length: 12 }, () => makeBill(1)),
+      profile,
+      ratePlans: [currentPlan, cheaperPlan],
+      scenario: defaultScenario,
+      billsAreUserUploaded: true,
+    })
+    const gappedDiagnosis = buildAutoDiagnosis({
+      bills: [...consecutiveBills(2025, 1, 6), ...consecutiveBills(2025, 8, 6)],
       profile: {
-        ...defaultSchoolProfile,
-        contractType: currentPlan.contractType,
-        voltageType: currentPlan.voltageType,
-        currentPlan: currentPlan.planName,
+        ...profile,
       },
       ratePlans: [currentPlan, cheaperPlan],
       scenario: defaultScenario,
+      billsAreUserUploaded: true,
     })
 
-    expect(diagnosis.completed).toBe(false)
-    expect(diagnosis.recognizedMonths).toBe(1)
-    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
-    expect(diagnosis.missingDataNotes.join(' ')).toContain('중복')
+    expect(duplicateDiagnosis.completed).toBe(false)
+    expect(duplicateDiagnosis.recognizedMonths).toBe(1)
+    expect(duplicateDiagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(duplicateDiagnosis.missingDataNotes.join(' ')).toContain('중복')
+    expect(gappedDiagnosis.completed).toBe(false)
+    expect(gappedDiagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(gappedDiagnosis.missingDataNotes.join(' ')).toContain('누락')
   })
 
   it('recalculates savings when expected peak changes', () => {
