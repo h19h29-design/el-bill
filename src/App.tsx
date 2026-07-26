@@ -31,6 +31,7 @@ import { buildPeakOperationPlan } from './lib/peakOperations'
 import {
   createExpiry,
   dataProvenanceStorageKey,
+  isStoredMonthlyBillCollection,
   legacyDataModeStorageKey,
   loadDataProvenance,
   loadWithExpiry,
@@ -56,7 +57,11 @@ const storageKeys = [
 function App() {
   purgeExpiredKeys(storageKeys)
 
-  const loadedBills = loadWithExpiry<MonthlyBill[]>(billsKey)
+  const loadedBillsPayload = loadWithExpiry<unknown>(billsKey)
+  const loadedBills = isStoredMonthlyBillCollection(loadedBillsPayload?.data)
+    ? { ...loadedBillsPayload, data: loadedBillsPayload.data }
+    : null
+  if (loadedBillsPayload && !loadedBills) localStorage.removeItem(billsKey)
   const loadedProfile = loadWithExpiry<SchoolProfile>(profileKey)
   const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
   const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
@@ -76,7 +81,7 @@ function App() {
   const [powerPlannerDataSource, setPowerPlannerDataSource] =
     useState<PowerPlannerDataSource | null>(loadedPowerPlanner?.data ?? null)
   const [dataProvenance, setDataProvenance] = useState<DataProvenance>(
-    loadDataProvenance,
+    () => loadDataProvenance(loadedBills?.data),
   )
   const [expiresAt, setExpiresAt] = useState(
     loadedBills?.expiresAt ?? createExpiry().expiresAt,

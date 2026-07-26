@@ -1,4 +1,5 @@
-import type { DataProvenance } from '../types'
+import type { DataProvenance, MonthlyBill } from '../types'
+import { validateBillPeriods } from './billPeriods'
 
 const dayMs = 24 * 60 * 60 * 1000
 
@@ -24,6 +25,41 @@ const isDataProvenance = (value: unknown): value is DataProvenance => {
       provenance.powerPlanner === 'sample' ||
       provenance.powerPlanner === 'uploaded')
   )
+}
+
+const billNumberFields: Array<keyof MonthlyBill> = [
+  'year',
+  'month',
+  'usageKwh',
+  'totalBillWon',
+  'baseChargeWon',
+  'energyChargeWon',
+  'appliedPowerKw',
+  'maxDemandKw',
+  'powerFactorChargeWon',
+  'climateChargeWon',
+  'fuelAdjustmentWon',
+  'vatWon',
+  'fundWon',
+]
+
+const isStoredMonthlyBill = (value: unknown): value is MonthlyBill => {
+  if (!value || typeof value !== 'object') return false
+  const bill = value as Record<string, unknown>
+  return (
+    typeof bill.id === 'string' &&
+    billNumberFields.every((field) => Number.isFinite(bill[field]))
+  )
+}
+
+export const isStoredMonthlyBillCollection = (
+  value: unknown,
+): value is MonthlyBill[] => Array.isArray(value) && value.every(isStoredMonthlyBill)
+
+const hasSafeLegacyUploadBills = (value: unknown) => {
+  if (!isStoredMonthlyBillCollection(value) || !value.length) return false
+  const validation = validateBillPeriods(value, 12)
+  return validation.hasRequiredConsecutiveMonths && validation.issues.length === 0
 }
 
 export const createExpiry = () => {
@@ -67,10 +103,26 @@ export const loadWithExpiry = <T>(key: string): StoredPayload<T> | null => {
   }
 }
 
-export const loadDataProvenance = (): DataProvenance => {
+export const loadDataProvenance = (storedBills?: unknown): DataProvenance => {
   const storedProvenance = loadWithExpiry<unknown>(dataProvenanceStorageKey)
   if (storedProvenance) {
-    if (isDataProvenance(storedProvenance.data)) return storedProvenance.data
+    if (isDataProvenance(storedProvenance.data)) {
+      if (
+        storedProvenance.data.bills !== 'uploaded' ||
+        isStoredMonthlyBillCollection(storedBills)
+      ) {
+        return storedProvenance.data
+      }
+      const safeProvenance: DataProvenance = {
+        ...storedProvenance.data,
+        bills: 'sample',
+      }
+      localStorage.setItem(
+        dataProvenanceStorageKey,
+        JSON.stringify({ ...storedProvenance, data: safeProvenance }),
+      )
+      return safeProvenance
+    }
     localStorage.removeItem(dataProvenanceStorageKey)
   }
 
@@ -81,7 +133,10 @@ export const loadDataProvenance = (): DataProvenance => {
   }
 
   const migrated: DataProvenance = {
-    bills: legacyMode.data,
+    bills:
+      legacyMode.data === 'uploaded' && hasSafeLegacyUploadBills(storedBills)
+        ? 'uploaded'
+        : 'sample',
     powerPlanner: 'none',
   }
   localStorage.setItem(
