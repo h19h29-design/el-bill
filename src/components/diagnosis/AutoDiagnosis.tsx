@@ -175,10 +175,14 @@ export function AutoDiagnosis({
               ? formatWon(comparison.savingWon)
               : '12개월 연속 자료 부족'}
           </strong>
-          <p>
-            현재 {formatWon(comparison.currentAnnualWon)} → 추천{' '}
-            {formatWon(comparison.candidateAnnualWon)}
-          </p>
+          {comparison.annualDataAvailable ? (
+            <p>
+              현재 {formatWon(comparison.currentAnnualWon)} → 추천{' '}
+              {formatWon(comparison.candidateAnnualWon)}
+            </p>
+          ) : (
+            <p>최근 12개월의 연속된 고지서 자료를 업로드해 주세요.</p>
+          )}
         </article>
         <article className="diagnosis-result-card">
           <span>최근 연속 36개월 절감액</span>
@@ -196,11 +200,19 @@ export function AutoDiagnosis({
         </article>
         <article className="diagnosis-result-card">
           <span>피크 시나리오 절감액</span>
-          <strong>{formatWon(comparison.peakScenarioSavingWon)}</strong>
-          <p>
-            현재 {formatWon(comparison.peakScenarioCurrentAnnualWon)} → 추천{' '}
-            {formatWon(comparison.peakScenarioCandidateAnnualWon)}
-          </p>
+          <strong>
+            {comparison.peakScenarioDataAvailable
+              ? formatWon(comparison.peakScenarioSavingWon)
+              : '피크 시나리오 자료 부족'}
+          </strong>
+          {comparison.peakScenarioDataAvailable ? (
+            <p>
+              현재 {formatWon(comparison.peakScenarioCurrentAnnualWon)} → 추천{' '}
+              {formatWon(comparison.peakScenarioCandidateAnnualWon)}
+            </p>
+          ) : (
+            <p>최근 12개월 자료와 유효한 피크 시나리오가 필요합니다.</p>
+          )}
         </article>
         <article className={`diagnosis-result-card judgement ${judgementClass}`}>
           <span>최종 판단</span>
@@ -236,27 +248,31 @@ export function AutoDiagnosis({
           <h2>계산 근거 분해</h2>
           <span>최근 12개월 기준</span>
         </div>
-        <div className="breakdown-grid">
-          {comparison.calculationBreakdown.map((row) => (
-            <article key={row.label}>
-              <span>{row.label}</span>
-              <strong className={row.differenceWon >= 0 ? 'positive' : 'danger-text'}>
-                {formatWon(row.differenceWon)}
-              </strong>
-              <dl>
-                <div>
-                  <dt>현재</dt>
-                  <dd>{formatWon(row.currentWon)}</dd>
-                </div>
-                <div>
-                  <dt>추천</dt>
-                  <dd>{formatWon(row.candidateWon)}</dd>
-                </div>
-              </dl>
-              <p>{row.note}</p>
-            </article>
-          ))}
-        </div>
+        {comparison.annualDataAvailable ? (
+          <div className="breakdown-grid">
+            {comparison.calculationBreakdown.map((row) => (
+              <article key={row.label}>
+                <span>{row.label}</span>
+                <strong className={row.differenceWon >= 0 ? 'positive' : 'danger-text'}>
+                  {formatWon(row.differenceWon)}
+                </strong>
+                <dl>
+                  <div>
+                    <dt>현재</dt>
+                    <dd>{formatWon(row.currentWon)}</dd>
+                  </div>
+                  <div>
+                    <dt>추천</dt>
+                    <dd>{formatWon(row.candidateWon)}</dd>
+                  </div>
+                </dl>
+                <p>{row.note}</p>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-state">최근 12개월 연속 자료가 있어야 계산 근거를 표시할 수 있습니다.</p>
+        )}
       </section>
 
       <section className="diagnosis-note-grid">

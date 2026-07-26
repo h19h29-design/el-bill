@@ -118,6 +118,7 @@ const createConfigurationBlockedComparison = (
   peakScenarioCurrentAnnualWon: 0,
   peakScenarioCandidateAnnualWon: 0,
   peakScenarioSavingWon: 0,
+  peakScenarioDataAvailable: false,
   recommendation: '추가 검토 필요',
   basis: configurationRequiredMessage,
   candidatePlanId: '',
@@ -163,9 +164,29 @@ export const getDataRecognitionRate = (bills: MonthlyBill[]) => {
   return Math.round((score / (bills.length * maxScore)) * 100)
 }
 
-const getBillAdjustmentRatio = (bill: MonthlyBill) => {
-  const base = bill.baseChargeWon + bill.energyChargeWon
-  if (base <= 0) return 0.137
+const getObservedBillComponents = (
+  bill: MonthlyBill,
+  currentPlan: RatePlan,
+) => {
+  const season = getSeason(bill.month)
+  const baseChargeWon =
+    bill.baseChargeWon > 0 && hasObservedBillField(bill, 'baseChargeWon')
+      ? bill.baseChargeWon
+      : bill.appliedPowerKw * currentPlan.baseRateWonPerKw
+  const energyChargeWon =
+    bill.energyChargeWon > 0 && hasObservedBillField(bill, 'energyChargeWon')
+      ? bill.energyChargeWon
+      : bill.usageKwh * currentPlan.seasonRates[season]
+  return { baseChargeWon, energyChargeWon }
+}
+
+const getBillAdjustmentRatio = (
+  bill: MonthlyBill,
+  currentPlan: RatePlan,
+) => {
+  const components = getObservedBillComponents(bill, currentPlan)
+  const base = components.baseChargeWon + components.energyChargeWon
+  if (base <= 0) return 0
   const knownAdjustments =
     bill.powerFactorChargeWon +
     bill.climateChargeWon +
@@ -198,24 +219,33 @@ const estimateBillDeltaForPlan = (
   const billingPowerKw = scenario?.expectedPeakKw
     ? Math.max(bill.appliedPowerKw, scenario.expectedPeakKw)
     : bill.appliedPowerKw
-  const ratio = getBillAdjustmentRatio(bill)
-
-  const originalCurrentEnergy =
-    bill.energyChargeWon || bill.usageKwh * currentPlan.seasonRates[season]
-  const adjustedCurrentEnergy = adjustedUsage * currentPlan.seasonRates[season]
-  const currentBase = billingPowerKw * currentPlan.baseRateWonPerKw
+  const ratio = getBillAdjustmentRatio(bill, currentPlan)
+  const observed = getObservedBillComponents(bill, currentPlan)
+  const currentBase = scenario
+    ? billingPowerKw * currentPlan.baseRateWonPerKw
+    : observed.baseChargeWon
+  const currentEnergy = scenario
+    ? adjustedUsage * currentPlan.seasonRates[season]
+    : observed.energyChargeWon
   const candidateBase = billingPowerKw * candidatePlan.baseRateWonPerKw
   const candidateEnergy = adjustedUsage * candidatePlan.seasonRates[season]
 
-  const scenarioCurrent = Math.max(
-    0,
-    bill.totalBillWon + (adjustedCurrentEnergy - originalCurrentEnergy) * (1 + ratio),
-  )
+  const scenarioCurrent = scenario
+    ? Math.max(
+        0,
+        bill.totalBillWon +
+          (currentBase -
+            observed.baseChargeWon +
+            currentEnergy -
+            observed.energyChargeWon) *
+            (1 + ratio),
+      )
+    : bill.totalBillWon
   const delta =
     candidateBase -
     currentBase +
     candidateEnergy -
-    adjustedCurrentEnergy
+    currentEnergy
 
   return Math.max(0, Math.round(scenarioCurrent + delta * (1 + ratio)))
 }
@@ -229,16 +259,26 @@ const estimateCurrentBillByMode = (
   if (settings.mode === 'tariffFull') {
     return estimateBillForPlan(bill, currentPlan, scenario, settings)
   }
+  if (!scenario) return bill.totalBillWon
 
   const season = getSeason(bill.month)
-  const ratio = getBillAdjustmentRatio(bill)
-  const adjustedUsage = getAdjustedUsage(bill, scenario)
-  const originalCurrentEnergy =
-    bill.energyChargeWon || bill.usageKwh * currentPlan.seasonRates[season]
-  const adjustedCurrentEnergy = adjustedUsage * currentPlan.seasonRates[season]
+  const ratio = getBillAdjustmentRatio(bill, currentPlan)
+  const observed = getObservedBillComponents(bill, currentPlan)
+  const adjustedBase =
+    Math.max(bill.appliedPowerKw, scenario.expectedPeakKw) *
+    currentPlan.baseRateWonPerKw
+  const adjustedEnergy =
+    getAdjustedUsage(bill, scenario) * currentPlan.seasonRates[season]
   return Math.max(
     0,
-    Math.round(bill.totalBillWon + (adjustedCurrentEnergy - originalCurrentEnergy) * (1 + ratio)),
+    Math.round(
+      bill.totalBillWon +
+        (adjustedBase -
+          observed.baseChargeWon +
+          adjustedEnergy -
+          observed.energyChargeWon) *
+          (1 + ratio),
+    ),
   )
 }
 
@@ -342,16 +382,40 @@ export const comparePlansForDiagnosis = (
   const validation = validateBillPeriods(bills, 36)
   const recent12 = validation.recentConsecutiveBills.slice(-12)
   const hasTwelveConsecutiveMonths = recent12.length >= 12
+  const annualBills = hasTwelveConsecutiveMonths ? recent12 : []
   const threeYearBills = validation.hasRequiredConsecutiveMonths
     ? validation.recentConsecutiveBills.slice(-36)
     : []
+  const hasValidScenario =
+    Boolean(scenario) &&
+    [
+      scenario?.targetPeakKw,
+      scenario?.expectedPeakKw,
+      scenario?.usageIncreasePercent,
+      scenario?.summerIncreasePercent,
+      scenario?.winterIncreasePercent,
+      scenario?.analysisYear,
+    ].every((value) => typeof value === 'number' && Number.isFinite(value)) &&
+    scenario!.targetPeakKw > 0 &&
+    scenario!.expectedPeakKw > 0 &&
+    scenario!.usageIncreasePercent >= -30 &&
+    scenario!.usageIncreasePercent <= 100 &&
+    scenario!.summerIncreasePercent >= -30 &&
+    scenario!.summerIncreasePercent <= 100 &&
+    scenario!.winterIncreasePercent >= -30 &&
+    scenario!.winterIncreasePercent <= 100 &&
+    scenario!.analysisYear >= 2020 &&
+    scenario!.analysisYear <= 2035
+  const peakScenarioDataAvailable =
+    hasTwelveConsecutiveMonths && hasValidScenario
+  const peakScenarioBills = peakScenarioDataAvailable ? annualBills : []
 
-  const currentAnnualWon = recent12.reduce(
+  const currentAnnualWon = annualBills.reduce(
     (sum, bill) =>
       sum + estimateCurrentBillByMode(bill, currentPlan, undefined, settings),
     0,
   )
-  const candidateAnnualWon = recent12.reduce(
+  const candidateAnnualWon = annualBills.reduce(
     (sum, bill) =>
       sum +
       estimateCandidateBillByMode(
@@ -383,12 +447,12 @@ export const comparePlansForDiagnosis = (
     0,
   )
   const threeYearSavingWon = currentThreeYearWon - candidateThreeYearWon
-  const peakScenarioCurrentAnnualWon = recent12.reduce(
+  const peakScenarioCurrentAnnualWon = peakScenarioBills.reduce(
     (sum, bill) =>
       sum + estimateCurrentBillByMode(bill, currentPlan, scenario, settings),
     0,
   )
-  const peakScenarioCandidateAnnualWon = recent12.reduce(
+  const peakScenarioCandidateAnnualWon = peakScenarioBills.reduce(
     (sum, bill) =>
       sum +
       estimateCandidateBillByMode(
@@ -402,15 +466,17 @@ export const comparePlansForDiagnosis = (
   )
   const peakScenarioSavingWon =
     peakScenarioCurrentAnnualWon - peakScenarioCandidateAnnualWon
-  const calculationBreakdown = buildCalculationBreakdown(
-    recent12,
-    currentPlan,
-    candidatePlan,
-    undefined,
-    settings,
-    currentAnnualWon,
-    candidateAnnualWon,
-  )
+  const calculationBreakdown = hasTwelveConsecutiveMonths
+    ? buildCalculationBreakdown(
+        annualBills,
+        currentPlan,
+        candidatePlan,
+        undefined,
+        settings,
+        currentAnnualWon,
+        candidateAnnualWon,
+      )
+    : []
 
   let recommendation: Recommendation = '추가 검토 필요'
   if (!hasTwelveConsecutiveMonths) recommendation = '추가 검토 필요'
@@ -440,6 +506,7 @@ export const comparePlansForDiagnosis = (
     peakScenarioCurrentAnnualWon,
     peakScenarioCandidateAnnualWon,
     peakScenarioSavingWon,
+    peakScenarioDataAvailable,
     recommendation,
     basis,
     candidatePlanId: candidatePlan.id,
@@ -589,6 +656,8 @@ export const buildAutoDiagnosis = ({
     ? ''
     : hasPeriodIssues
       ? periodIssueReason
+      : !comparison.annualDataAvailable
+        ? '최근 12개월의 연속된 고지서 자료가 부족하여 변경신청 문서를 생성할 수 없습니다.'
       : !billsAreUserUploaded
         ? '사용자 고지서 업로드 후 생성 가능'
         : '최종 판단이 변경 추천이고 현재 계약종별·수전전압과 일치하는 후보인 경우에만 변경신청 문서를 생성할 수 있습니다.'

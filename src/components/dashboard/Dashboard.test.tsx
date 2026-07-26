@@ -69,4 +69,32 @@ describe('dashboard diagnosis consistency', () => {
     expect(screen.getByText(/고지서 기간 문제/)).toBeTruthy()
     expect(screen.queryByText('추천 요금제')).toBeNull()
   })
+
+  it('shows insufficient data instead of zero annual savings before 12 months', () => {
+    const bills = sampleBills.slice(-11)
+    const diagnosis = buildAutoDiagnosis({
+      bills,
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+    })
+
+    render(
+      <Dashboard
+        bills={bills}
+        currentPlan={diagnosis.currentPlan}
+        candidatePlan={diagnosis.recommendedPlan}
+        scenario={defaultScenario}
+        diagnosis={diagnosis}
+        dataProvenance={{ bills: 'sample', powerPlanner: 'none' }}
+        onStartDiagnosis={() => undefined}
+      />,
+    )
+
+    const annualCard = screen.getByText('예상 연간 절감액').closest('article')
+    expect(annualCard).not.toBeNull()
+    expect(annualCard?.textContent).toContain('자료 부족')
+    expect(annualCard?.textContent).not.toContain('0원')
+  })
 })

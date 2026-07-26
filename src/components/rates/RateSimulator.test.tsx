@@ -87,6 +87,7 @@ describe('rate simulator usability harness', () => {
       peakScenarioCurrentAnnualWon: 10,
       peakScenarioCandidateAnnualWon: 5,
       peakScenarioSavingWon: 5,
+      peakScenarioDataAvailable: true,
       calculationMode: 'billDelta',
       calculationBreakdown: [],
       recommendation: '추가 검토 필요',
@@ -146,6 +147,7 @@ describe('rate simulator usability harness', () => {
       peakScenarioSavingWon: 3_000_000,
       annualDataAvailable: true,
       threeYearDataAvailable: true,
+      peakScenarioDataAvailable: true,
     }
 
     render(
@@ -163,11 +165,11 @@ describe('rate simulator usability harness', () => {
     expect(screen.getByText('12,000,000원')).toBeTruthy()
     expect(screen.getAllByText('2,000,000원')).toHaveLength(2)
 
-    fireEvent.click(screen.getByRole('button', { name: '최근 3년' }))
+    fireEvent.click(screen.getByRole('tab', { name: '최근 3년' }))
     expect(screen.getByText('40,000,000원')).toBeTruthy()
     expect(screen.getByText('9,000,000원')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: '피크 예상 시나리오' }))
+    fireEvent.click(screen.getByRole('tab', { name: '피크 예상 시나리오' }))
     expect(screen.getByText('15,000,000원')).toBeTruthy()
     expect(screen.getAllByText('3,000,000원')).toHaveLength(2)
   })
@@ -191,9 +193,70 @@ describe('rate simulator usability harness', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '최근 3년' }))
+    fireEvent.click(screen.getByRole('tab', { name: '최근 3년' }))
     expect(
       screen.getByText('최근 36개월의 연속된 고지서 자료가 부족합니다.'),
     ).toBeTruthy()
+  })
+
+  it('uses accessible tab semantics and associates the selected panel', () => {
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={diagnosis.comparison}
+        calculationSettings={defaultCalculationSettings}
+        scenario={defaultScenario}
+        onScenarioChange={async () => true}
+      />,
+    )
+
+    const tablist = screen.getByRole('tablist', { name: '요금 비교 범위' })
+    const annualTab = screen.getByRole('tab', { name: '최근 12개월' })
+    const threeYearTab = screen.getByRole('tab', { name: '최근 3년' })
+
+    expect(tablist.contains(annualTab)).toBe(true)
+    expect(annualTab.getAttribute('aria-selected')).toBe('true')
+    expect(threeYearTab.getAttribute('aria-selected')).toBe('false')
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(
+      annualTab.id,
+    )
+
+    fireEvent.click(threeYearTab)
+
+    expect(annualTab.getAttribute('aria-selected')).toBe('false')
+    expect(threeYearTab.getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(
+      threeYearTab.id,
+    )
+  })
+
+  it('explains when a valid peak scenario result is unavailable', () => {
+    render(
+      <RateSimulator
+        currentPlan={currentPlan}
+        candidatePlan={candidatePlan}
+        candidates={[]}
+        comparison={{
+          ...diagnosis.comparison,
+          peakScenarioCurrentAnnualWon: 0,
+          peakScenarioCandidateAnnualWon: 0,
+          peakScenarioSavingWon: 0,
+          peakScenarioDataAvailable: false,
+        }}
+        calculationSettings={defaultCalculationSettings}
+        scenario={{ ...defaultScenario, expectedPeakKw: 0 }}
+        onScenarioChange={async () => true}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '피크 예상 시나리오' }))
+    expect(
+      screen.getByText(
+        '최근 12개월의 연속된 고지서와 유효한 피크 시나리오가 필요합니다.',
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByText('0원')).toBeNull()
   })
 })

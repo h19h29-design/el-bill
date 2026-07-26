@@ -241,6 +241,7 @@ export interface PlanComparison {
   peakScenarioCurrentAnnualWon: number
   peakScenarioCandidateAnnualWon: number
   peakScenarioSavingWon: number
+  peakScenarioDataAvailable: boolean
   recommendation: Recommendation
   basis: string
 }

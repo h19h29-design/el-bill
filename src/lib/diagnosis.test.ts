@@ -83,8 +83,193 @@ const consecutiveBills = (year: number, month: number, count: number) =>
 const currentPlan = makePlan('current', '선택요금Ⅱ', 1000, 100)
 const cheaperPlan = makePlan('cheap', '선택요금Ⅰ', 500, 80)
 const expensivePlan = makePlan('expensive', '고비용요금', 2000, 160)
+const zeroGrowthScenario = {
+  ...defaultScenario,
+  expectedPeakKw: 500,
+  usageIncreasePercent: 0,
+  summerIncreasePercent: 0,
+  winterIncreasePercent: 0,
+}
+const exactBill = (
+  year: number,
+  month: number,
+  overrides: Partial<MonthlyBill> = {},
+): MonthlyBill => ({
+  ...makeBill(month),
+  id: `exact-${year}-${month}`,
+  year,
+  totalBillWon: 1_650_000,
+  baseChargeWon: 500_000,
+  energyChargeWon: 1_000_000,
+  climateChargeWon: 50_000,
+  fuelAdjustmentWon: 0,
+  vatWon: 100_000,
+  fundWon: 0,
+  ...overrides,
+})
+const exactTwelveBills = Array.from({ length: 12 }, (_, index) =>
+  exactBill(2026, index + 1),
+)
 
 describe('automatic diagnosis harness', () => {
+  it.each([
+    [1, false, false, false],
+    [11, false, false, false],
+    [12, true, false, true],
+    [35, true, false, true],
+    [36, true, true, true],
+  ] as const)(
+    'exposes availability semantics for %i consecutive months',
+    (monthCount, annualAvailable, threeYearAvailable, peakAvailable) => {
+      const comparison = comparePlansForDiagnosis(
+        consecutiveBills(2023, 1, monthCount),
+        currentPlan,
+        cheaperPlan,
+        zeroGrowthScenario,
+        defaultCalculationSettings,
+      )
+
+      expect(comparison.annualDataAvailable).toBe(annualAvailable)
+      expect(comparison.threeYearDataAvailable).toBe(threeYearAvailable)
+      expect(comparison.peakScenarioDataAvailable).toBe(peakAvailable)
+      if (!annualAvailable) {
+        expect(comparison.currentAnnualWon).toBe(0)
+        expect(comparison.candidateAnnualWon).toBe(0)
+        expect(comparison.savingWon).toBe(0)
+        expect(comparison.calculationBreakdown).toEqual([])
+      }
+      if (!threeYearAvailable) {
+        expect(comparison.currentThreeYearWon).toBe(0)
+        expect(comparison.candidateThreeYearWon).toBe(0)
+        expect(comparison.threeYearSavingWon).toBe(0)
+      }
+      if (!peakAvailable) {
+        expect(comparison.peakScenarioCurrentAnnualWon).toBe(0)
+        expect(comparison.peakScenarioCandidateAnnualWon).toBe(0)
+        expect(comparison.peakScenarioSavingWon).toBe(0)
+      }
+    },
+  )
+
+  it('requires a valid scenario before exposing peak results', () => {
+    const comparison = comparePlansForDiagnosis(
+      exactTwelveBills,
+      currentPlan,
+      cheaperPlan,
+      { ...zeroGrowthScenario, expectedPeakKw: 0 },
+      defaultCalculationSettings,
+    )
+
+    expect(comparison.annualDataAvailable).toBe(true)
+    expect(comparison.peakScenarioDataAvailable).toBe(false)
+    expect(comparison.peakScenarioCurrentAnnualWon).toBe(0)
+    expect(comparison.peakScenarioCandidateAnnualWon).toBe(0)
+    expect(comparison.peakScenarioSavingWon).toBe(0)
+  })
+
+  it('uses actual uploaded totals exactly for bill-delta baseline current totals', () => {
+    const comparison = comparePlansForDiagnosis(
+      exactTwelveBills,
+      currentPlan,
+      cheaperPlan,
+      zeroGrowthScenario,
+      defaultCalculationSettings,
+    )
+
+    expect(comparison.currentAnnualWon).toBe(19_800_000)
+  })
+
+  it('uses actual uploaded totals exactly across 36 bill-delta months', () => {
+    const bills = consecutiveBills(2023, 1, 36).map((bill, index) => ({
+      ...exactBill(bill.year, bill.month),
+      totalBillWon: 1_000_000 + index,
+    }))
+    const comparison = comparePlansForDiagnosis(
+      bills,
+      currentPlan,
+      cheaperPlan,
+      zeroGrowthScenario,
+      defaultCalculationSettings,
+    )
+
+    expect(comparison.currentThreeYearWon).toBe(
+      bills.reduce((sum, bill) => sum + bill.totalBillWon, 0),
+    )
+  })
+
+  it('applies peak billing-power increase to current and candidate without double counting', () => {
+    const comparison = comparePlansForDiagnosis(
+      exactTwelveBills,
+      currentPlan,
+      cheaperPlan,
+      { ...zeroGrowthScenario, expectedPeakKw: 600 },
+      defaultCalculationSettings,
+    )
+
+    expect(comparison.peakScenarioCurrentAnnualWon).toBe(1_760_000 * 12)
+    expect(comparison.peakScenarioCandidateAnnualWon).toBe(1_210_000 * 12)
+  })
+
+  it('applies usage increase to current and candidate from the same scenario basis', () => {
+    const comparison = comparePlansForDiagnosis(
+      exactTwelveBills,
+      currentPlan,
+      cheaperPlan,
+      {
+        ...zeroGrowthScenario,
+        usageIncreasePercent: 10,
+        summerIncreasePercent: 10,
+        winterIncreasePercent: 10,
+      },
+      defaultCalculationSettings,
+    )
+
+    expect(comparison.peakScenarioCurrentAnnualWon).toBe(1_760_000 * 12)
+    expect(comparison.peakScenarioCandidateAnnualWon).toBe(1_243_000 * 12)
+  })
+
+  it('uses rate-derived fallbacks when optional base and energy components are missing', () => {
+    const bills = exactTwelveBills.map((bill) => ({
+      ...bill,
+      totalBillWon: 1_500_000,
+      baseChargeWon: 0,
+      energyChargeWon: 0,
+      climateChargeWon: 0,
+      vatWon: 0,
+      observedFields: bill.observedFields.filter(
+        (field) => field !== 'baseChargeWon' && field !== 'energyChargeWon',
+      ),
+    }))
+    const comparison = comparePlansForDiagnosis(
+      bills,
+      currentPlan,
+      cheaperPlan,
+      {
+        ...zeroGrowthScenario,
+        expectedPeakKw: 600,
+        usageIncreasePercent: 10,
+        summerIncreasePercent: 10,
+        winterIncreasePercent: 10,
+      },
+      defaultCalculationSettings,
+    )
+
+    expect(comparison.peakScenarioCurrentAnnualWon).toBe(1_700_000 * 12)
+    expect(comparison.peakScenarioCandidateAnnualWon).toBe(1_180_000 * 12)
+  })
+
+  it('applies the baseline candidate component delta once from the actual bill', () => {
+    const comparison = comparePlansForDiagnosis(
+      exactTwelveBills,
+      currentPlan,
+      cheaperPlan,
+      zeroGrowthScenario,
+      defaultCalculationSettings,
+    )
+
+    expect(comparison.candidateAnnualWon).toBe(1_155_000 * 12)
+  })
+
   it('ignores tariff-full correction factors in bill-delta mode', () => {
     const baseline = comparePlansForDiagnosis(
       thirtySixConsecutiveBills,
@@ -285,7 +470,7 @@ describe('automatic diagnosis harness', () => {
     expect(comparison.recommendation).toBe('추가 검토 필요')
   })
 
-  it('builds the annual breakdown from the recent consecutive run only', () => {
+  it('does not build a partial annual breakdown from fewer than 12 recent months', () => {
     const comparison = comparePlansForDiagnosis(
       [{ ...makeBill(1), id: 'old-bill', year: 2025 }, ...consecutiveBills(2026, 2, 11)],
       currentPlan,
@@ -294,8 +479,9 @@ describe('automatic diagnosis harness', () => {
       defaultCalculationSettings,
     )
 
-    expect(comparison.currentAnnualWon).toBeGreaterThan(0)
-    expect(comparison.calculationBreakdown[0]?.currentWon).toBe(5_500_000)
+    expect(comparison.annualDataAvailable).toBe(false)
+    expect(comparison.currentAnnualWon).toBe(0)
+    expect(comparison.calculationBreakdown).toEqual([])
   })
 
   it('recommends keeping the current plan when change increases cost', () => {

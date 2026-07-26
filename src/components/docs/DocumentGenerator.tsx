@@ -83,6 +83,7 @@ export function DocumentGenerator({
     diagnosis.configurationRequired ||
     !diagnosis.currentPlan ||
     !diagnosis.recommendedPlan ||
+    !diagnosis.comparison.annualDataAvailable ||
     diagnosis.documentBlockReason.includes('고지서 기간 문제')
   const bundle = useMemo(
     () =>

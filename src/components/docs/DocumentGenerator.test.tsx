@@ -166,4 +166,31 @@ describe('document generation eligibility', () => {
     expect(view.queryByText('예산절감을 위한 전기요금제 변경 계획(안)')).toBeNull()
     expect(view.queryByText('추천 요금제')).toBeNull()
   })
+
+  it('does not construct a document preview with fewer than 12 consecutive months', () => {
+    const bills = sampleBills.slice(-11)
+    const diagnosis = buildAutoDiagnosis({
+      bills,
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+    })
+
+    render(
+      <DocumentGenerator
+        profile={defaultSchoolProfile}
+        latestBill={bills.at(-1)}
+        comparison={diagnosis.comparison}
+        scenario={defaultScenario}
+        diagnosis={diagnosis}
+        peakOperationPlan={buildPeakOperationPlan(defaultScenario)}
+      />,
+    )
+
+    expect(screen.getByText('변경신청 문서 생성 보류')).toBeTruthy()
+    expect(screen.getByText(/최근 12개월/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'PDF 미리보기' })).toBeNull()
+    expect(screen.queryByText('추천 요금제')).toBeNull()
+  })
 })

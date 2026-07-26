@@ -71,6 +71,37 @@ describe('automatic diagnosis period integrity', () => {
     expect(screen.getAllByText('36개월 자료 부족').length).toBeGreaterThan(0)
   })
 
+  it('does not present annual or peak zeroes as completed results', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills.slice(-11),
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: { ...defaultScenario, expectedPeakKw: 0 },
+      calculationSettings: defaultCalculationSettings,
+    })
+
+    render(
+      <AutoDiagnosis
+        diagnosis={diagnosis}
+        dataProvenance={{ bills: 'sample', powerPlanner: 'none' }}
+        onNavigate={() => undefined}
+      />,
+    )
+
+    const annualCard = screen
+      .getAllByText('최근 12개월 절감액')[0]
+      .closest('article')
+    const peakCard = screen
+      .getAllByText('피크 시나리오 절감액')[0]
+      .closest('article')
+
+    expect(annualCard?.textContent).toContain('12개월 연속 자료 부족')
+    expect(annualCard?.textContent).not.toContain('0원')
+    expect(peakCard?.textContent).toContain('피크 시나리오 자료 부족')
+    expect(peakCard?.textContent).not.toContain('0원')
+    expect(screen.getAllByText('자료 부족').length).toBeGreaterThan(0)
+  })
+
   it.each([
     {
       label: 'duplicate period',

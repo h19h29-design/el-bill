@@ -18,6 +18,7 @@ const comparison = {
   peakScenarioCurrentAnnualWon: 70_000_000,
   peakScenarioCandidateAnnualWon: 65_000_000,
   peakScenarioSavingWon: 5_000_000,
+  peakScenarioDataAvailable: true,
   recommendation: '변경 추천' as const,
   basis: '테스트',
 }
@@ -177,6 +178,82 @@ describe('document template harness', () => {
         { label: '건축물관리대장', ready: false },
         { label: '변경신청서', ready: true },
       ]),
+    )
+  })
+
+  it('labels unavailable periods instead of presenting zero-value results', () => {
+    const unavailableComparison: PlanCandidateComparison = {
+      ...candidateComparison,
+      currentAnnualWon: 0,
+      candidateAnnualWon: 0,
+      savingWon: 0,
+      annualDataAvailable: false,
+      currentThreeYearWon: 0,
+      candidateThreeYearWon: 0,
+      threeYearSavingWon: 0,
+      threeYearDataAvailable: false,
+      peakScenarioCurrentAnnualWon: 0,
+      peakScenarioCandidateAnnualWon: 0,
+      peakScenarioSavingWon: 0,
+      peakScenarioDataAvailable: false,
+    }
+    const unavailableDiagnosis: AutoDiagnosisResult = {
+      ...diagnosis,
+      comparison: unavailableComparison,
+    }
+
+    const bundle = buildDocumentBundle(
+      defaultSchoolProfile,
+      sampleBills.at(-1),
+      unavailableComparison,
+      defaultScenario,
+      unavailableDiagnosis,
+    )
+
+    expect(bundle.calculationSummaryText).toContain(
+      '최근 12개월 현재안: 자료 부족',
+    )
+    expect(bundle.calculationSummaryText).toContain(
+      '최근 3년 절감액: 자료 부족',
+    )
+    expect(bundle.calculationSummaryText).toContain(
+      '피크 시나리오 절감액: 자료 부족',
+    )
+    expect(bundle.planText).toContain(
+      '최근 12개월 기준 절감 예상액: 자료 부족',
+    )
+    expect(bundle.planText).not.toContain('연간 약 0원 절감')
+  })
+
+  it('keeps valid annual values while labeling unavailable longer periods', () => {
+    const partialComparison: PlanCandidateComparison = {
+      ...candidateComparison,
+      currentThreeYearWon: 0,
+      candidateThreeYearWon: 0,
+      threeYearSavingWon: 0,
+      threeYearDataAvailable: false,
+      peakScenarioCurrentAnnualWon: 0,
+      peakScenarioCandidateAnnualWon: 0,
+      peakScenarioSavingWon: 0,
+      peakScenarioDataAvailable: false,
+    }
+
+    const bundle = buildDocumentBundle(
+      defaultSchoolProfile,
+      sampleBills.at(-1),
+      partialComparison,
+      defaultScenario,
+      { ...diagnosis, comparison: partialComparison },
+    )
+
+    expect(bundle.calculationSummaryText).toContain(
+      '최근 12개월 절감액: 3,329,490원',
+    )
+    expect(bundle.calculationSummaryText).toContain(
+      '최근 3년 현재안: 자료 부족',
+    )
+    expect(bundle.calculationSummaryText).toContain(
+      '피크 시나리오 현재안: 자료 부족',
     )
   })
 })

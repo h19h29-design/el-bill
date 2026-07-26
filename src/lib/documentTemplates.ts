@@ -14,6 +14,9 @@ import type { PeakOperationPlan } from './peakOperations'
 export const rateChangeCaution =
   '요금제 변경 신청은 원칙적으로 1년에 한 번만 가능하므로 예상 절감액, 피크 시나리오, 향후 사용량 변동을 신중히 검토한 뒤 진행해야 합니다.'
 
+const formatAvailableWon = (available: boolean, value: number) =>
+  available ? formatWon(value) : '자료 부족'
+
 export const buildDocumentBundle = (
   profile: SchoolProfile,
   latestBill: MonthlyBill | undefined,
@@ -70,16 +73,16 @@ export const buildDocumentBundle = (
     `- ${latestMonthLabel} 전기요금: ${latestBillWon}`,
     '',
     'Ⅳ. 요금제별 비교',
-    `- 현재 요금제(${currentPlanName}) 기준 연간 예상액: ${formatWon(activeComparison.currentAnnualWon)}`,
-    `- 추천 요금제(${recommendedPlanName}) 기준 연간 예상액: ${formatWon(activeComparison.candidateAnnualWon)}`,
-    `- 최근 12개월 기준 절감 예상액: ${formatWon(activeComparison.savingWon)}`,
-    `- 최근 3년 현재 요금제 예상액: ${formatWon(activeComparison.currentThreeYearWon)}`,
-    `- 최근 3년 추천 요금제 예상액: ${formatWon(activeComparison.candidateThreeYearWon)}`,
-    `- 최근 3년 기준 절감 예상액: ${formatWon(activeComparison.threeYearSavingWon)}`,
-    `- 피크 시나리오 현재 요금제 예상액: ${formatWon(activeComparison.peakScenarioCurrentAnnualWon)}`,
-    `- 피크 시나리오 추천 요금제 예상액: ${formatWon(activeComparison.peakScenarioCandidateAnnualWon)}`,
-    `- 예상 피크값 반영 후 절감액: ${formatWon(activeComparison.peakScenarioSavingWon)}`,
-    `- 절감률: ${(activeComparison.savingRate * 100).toFixed(1)}%`,
+    `- 현재 요금제(${currentPlanName}) 기준 연간 예상액: ${formatAvailableWon(activeComparison.annualDataAvailable, activeComparison.currentAnnualWon)}`,
+    `- 추천 요금제(${recommendedPlanName}) 기준 연간 예상액: ${formatAvailableWon(activeComparison.annualDataAvailable, activeComparison.candidateAnnualWon)}`,
+    `- 최근 12개월 기준 절감 예상액: ${formatAvailableWon(activeComparison.annualDataAvailable, activeComparison.savingWon)}`,
+    `- 최근 3년 현재 요금제 예상액: ${formatAvailableWon(activeComparison.threeYearDataAvailable, activeComparison.currentThreeYearWon)}`,
+    `- 최근 3년 추천 요금제 예상액: ${formatAvailableWon(activeComparison.threeYearDataAvailable, activeComparison.candidateThreeYearWon)}`,
+    `- 최근 3년 기준 절감 예상액: ${formatAvailableWon(activeComparison.threeYearDataAvailable, activeComparison.threeYearSavingWon)}`,
+    `- 피크 시나리오 현재 요금제 예상액: ${formatAvailableWon(activeComparison.peakScenarioDataAvailable, activeComparison.peakScenarioCurrentAnnualWon)}`,
+    `- 피크 시나리오 추천 요금제 예상액: ${formatAvailableWon(activeComparison.peakScenarioDataAvailable, activeComparison.peakScenarioCandidateAnnualWon)}`,
+    `- 예상 피크값 반영 후 절감액: ${formatAvailableWon(activeComparison.peakScenarioDataAvailable, activeComparison.peakScenarioSavingWon)}`,
+    `- 절감률: ${activeComparison.annualDataAvailable ? `${(activeComparison.savingRate * 100).toFixed(1)}%` : '자료 부족'}`,
     `- 판단: ${activeComparison.recommendation}`,
     `- 계산 신뢰도: ${diagnosis?.dataConfidence ?? '보통'}`,
     '',
@@ -111,8 +114,8 @@ export const buildDocumentBundle = (
     '- 정기적으로 전기사용량 및 최대수요전력 모니터링 지속',
     '',
     'Ⅸ. 기대효과',
-    `- 연간 약 ${formatWon(activeComparison.savingWon)} 절감 가능성을 검토한다.`,
-    `- 5년 누적 약 ${formatWon(activeComparison.fiveYearSavingWon)} 절감 가능성이 있다.`,
+    `- 연간 약 ${formatAvailableWon(activeComparison.annualDataAvailable, activeComparison.savingWon)} 절감 가능성을 검토한다.`,
+    `- 5년 누적 약 ${formatAvailableWon(activeComparison.annualDataAvailable, activeComparison.fiveYearSavingWon)} 절감 가능성이 있다.`,
     '- 예산절감에 따른 학교 시설개선 및 교육활동 지원 가능',
   ].join('\n')
 
@@ -146,15 +149,15 @@ export const buildDocumentBundle = (
     ...correctionFactorLines,
     `- 데이터 인식률: ${diagnosis?.dataRecognitionRate ?? 0}%`,
     `- 인식 월수: ${diagnosis?.recognizedMonths ?? 0}개월`,
-    `- 최근 12개월 현재안: ${formatWon(activeComparison.currentAnnualWon)}`,
-    `- 최근 12개월 추천안: ${formatWon(activeComparison.candidateAnnualWon)}`,
-    `- 최근 12개월 절감액: ${formatWon(activeComparison.savingWon)}`,
-    `- 최근 3년 현재안: ${formatWon(activeComparison.currentThreeYearWon)}`,
-    `- 최근 3년 추천안: ${formatWon(activeComparison.candidateThreeYearWon)}`,
-    `- 최근 3년 절감액: ${formatWon(activeComparison.threeYearSavingWon)}`,
-    `- 피크 시나리오 현재안: ${formatWon(activeComparison.peakScenarioCurrentAnnualWon)}`,
-    `- 피크 시나리오 추천안: ${formatWon(activeComparison.peakScenarioCandidateAnnualWon)}`,
-    `- 피크 시나리오 절감액: ${formatWon(activeComparison.peakScenarioSavingWon)}`,
+    `- 최근 12개월 현재안: ${formatAvailableWon(activeComparison.annualDataAvailable, activeComparison.currentAnnualWon)}`,
+    `- 최근 12개월 추천안: ${formatAvailableWon(activeComparison.annualDataAvailable, activeComparison.candidateAnnualWon)}`,
+    `- 최근 12개월 절감액: ${formatAvailableWon(activeComparison.annualDataAvailable, activeComparison.savingWon)}`,
+    `- 최근 3년 현재안: ${formatAvailableWon(activeComparison.threeYearDataAvailable, activeComparison.currentThreeYearWon)}`,
+    `- 최근 3년 추천안: ${formatAvailableWon(activeComparison.threeYearDataAvailable, activeComparison.candidateThreeYearWon)}`,
+    `- 최근 3년 절감액: ${formatAvailableWon(activeComparison.threeYearDataAvailable, activeComparison.threeYearSavingWon)}`,
+    `- 피크 시나리오 현재안: ${formatAvailableWon(activeComparison.peakScenarioDataAvailable, activeComparison.peakScenarioCurrentAnnualWon)}`,
+    `- 피크 시나리오 추천안: ${formatAvailableWon(activeComparison.peakScenarioDataAvailable, activeComparison.peakScenarioCandidateAnnualWon)}`,
+    `- 피크 시나리오 절감액: ${formatAvailableWon(activeComparison.peakScenarioDataAvailable, activeComparison.peakScenarioSavingWon)}`,
     ...calculationBreakdown.flatMap((row) => [
       `- ${row.label}: 현재 ${formatWon(row.currentWon)} / 추천 ${formatWon(row.candidateWon)} / 차액 ${formatWon(row.differenceWon)}`,
       `  · ${row.note}`,

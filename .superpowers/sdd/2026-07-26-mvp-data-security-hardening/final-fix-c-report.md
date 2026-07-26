@@ -109,3 +109,55 @@ The initial application entry remains within the enforced budget.
 
 Vite continues to report only the existing large lazy-loaded Excel/PDF chunk
 warning.
+
+## Second Review Round
+
+- Added independent availability semantics:
+  - annual results require 12 consecutive calendar months;
+  - three-year results require 36 consecutive calendar months;
+  - peak results require annual data and a valid peak scenario.
+- Added boundary coverage for 1, 11, 12, 35, and 36 months. Unavailable
+  periods retain typed false flags and are rendered as `자료 부족`; partial
+  sums and zeroes are not presented as completed results.
+- Corrected `billDelta` so a no-scenario current month equals the uploaded
+  `totalBillWon` exactly. Baseline 12/36-month current totals are therefore
+  exact sums of uploaded bills.
+- Corrected scenario calculations to start from the actual bill, apply current
+  base-charge and energy-charge changes with the observed ancillary ratio, and
+  then apply the candidate component delta once from the adjusted current
+  basis. Missing observed base/energy components use current-plan rates.
+- Added exact tests for current totals, peak base increases, usage increases,
+  missing optional component fallbacks, and candidate deltas.
+- Updated Dashboard, AutoDiagnosis, PlanCandidateTable, RateSimulator, and
+  document templates to honor each availability flag. Document previews are
+  not constructed when the annual period is unavailable.
+- Added accessible RateSimulator tablist, tab, selected-state, control, and
+  tabpanel relationships.
+- Updated README and calculation notes with the actual availability rules and
+  `billDelta` formula.
+
+## Second Review Round TDD Evidence
+
+1. Boundary tests failed because 1- and 11-month partial sums were exposed as
+   annual results and peak availability was not modeled.
+2. Exact numeric tests failed because the no-scenario current path recalculated
+   components and the peak current path omitted the base-charge delta.
+3. UI tests failed because annual and peak cards/tables rendered `0원` and the
+   simulator used annual availability for its peak tab.
+4. Document tests failed because unavailable metrics were formatted as zeroes
+   and a plausible preview was built with only 11 months.
+5. Accessibility tests failed because the simulator range controls were plain
+   buttons without tab and panel semantics.
+
+## Second Review Round Verification
+
+- `npm run typecheck`: passed
+- `npm run lint`: passed
+- `npm test -- --run`: 23 files, 209 tests passed
+- `npm run build`: passed
+- initial Vite entry: 274,897 bytes, under the 700,000-byte budget
+- `npm run test:e2e`: 8 Chromium tests passed
+- `git diff --check`: passed
+
+Vite continues to report only the existing large lazy-loaded Excel/PDF chunk
+warning.

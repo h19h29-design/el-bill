@@ -37,16 +37,26 @@ export function PlanCandidateTable({ candidates }: PlanCandidateTableProps) {
                   <strong>{candidate.candidatePlanName}</strong>
                   <span>{candidate.contractType} {candidate.voltageType}</span>
                 </td>
-                <td>{formatWon(candidate.candidateAnnualWon)}</td>
+                <td>
+                  {candidate.annualDataAvailable
+                    ? formatWon(candidate.candidateAnnualWon)
+                    : '자료 부족'}
+                </td>
                 <td className={candidate.savingWon >= 0 ? 'positive' : 'danger-text'}>
-                  {formatWon(candidate.savingWon)}
+                  {candidate.annualDataAvailable
+                    ? formatWon(candidate.savingWon)
+                    : '자료 부족'}
                 </td>
                 <td>
                   {candidate.threeYearDataAvailable
                     ? formatWon(candidate.threeYearSavingWon)
                     : '36개월 자료 부족'}
                 </td>
-                <td>{formatWon(candidate.peakScenarioSavingWon)}</td>
+                <td>
+                  {candidate.peakScenarioDataAvailable
+                    ? formatWon(candidate.peakScenarioSavingWon)
+                    : '자료 부족'}
+                </td>
                 <td>
                   <span className={`judgement-pill ${candidate.recommendation === '변경 추천' ? 'good' : candidate.recommendation === '유지 추천' ? 'hold' : 'review'}`}>
                     {candidate.recommendation}

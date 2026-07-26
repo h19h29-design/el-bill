@@ -160,11 +160,17 @@ export function Dashboard({
             <BarChart3 size={22} />
           </div>
           <span>예상 연간 절감액</span>
-          <strong>{formatWon(diagnosis.comparison.savingWon)}</strong>
+          <strong>
+            {diagnosis.comparison.annualDataAvailable
+              ? formatWon(diagnosis.comparison.savingWon)
+              : '자료 부족'}
+          </strong>
           <small>
-            {diagnosis.calculationMode === 'billDelta'
-              ? '고지서 기반 차액 추정'
-              : '요금표 기반 전체 추정'}
+            {diagnosis.comparison.annualDataAvailable
+              ? diagnosis.calculationMode === 'billDelta'
+                ? '고지서 기반 차액 추정'
+                : '요금표 기반 전체 추정'
+              : '최근 12개월 연속 고지서 필요'}
           </small>
         </article>
         <article className="kpi-card">

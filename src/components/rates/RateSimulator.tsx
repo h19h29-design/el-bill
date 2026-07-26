@@ -65,7 +65,7 @@ export function RateSimulator({
             currentWon: comparison.peakScenarioCurrentAnnualWon,
             candidateWon: comparison.peakScenarioCandidateAnnualWon,
             savingWon: comparison.peakScenarioSavingWon,
-            available: comparison.annualDataAvailable,
+            available: comparison.peakScenarioDataAvailable,
             currentLabel: `피크 시나리오 현재안 (${currentPlan.planName})`,
             candidateLabel: `피크 시나리오 추천안 (${candidatePlan.planName})`,
             summaryLabel: '피크 시나리오 절감액',
@@ -94,7 +94,7 @@ export function RateSimulator({
 
   return (
     <div className="view-stack">
-      <section className="tabs" aria-label="요금 비교 범위">
+      <section className="tabs" role="tablist" aria-label="요금 비교 범위">
         {[
           ['12', '최근 12개월'],
           ['36', '최근 3년'],
@@ -102,7 +102,11 @@ export function RateSimulator({
         ].map(([key, label]) => (
           <button
             key={key}
+            id={`rate-simulator-tab-${key}`}
             type="button"
+            role="tab"
+            aria-selected={tab === key}
+            aria-controls="rate-simulator-panel"
             className={tab === key ? 'active' : ''}
             onClick={() => setTab(key as typeof tab)}
           >
@@ -115,19 +119,31 @@ export function RateSimulator({
       </p>
 
       {!selectedMetrics.available ? (
-        <section className="document-block-notice" role="status">
+        <section
+          id="rate-simulator-panel"
+          className="document-block-notice"
+          role="tabpanel"
+          aria-labelledby={`rate-simulator-tab-${tab}`}
+        >
           <AlertTriangle size={22} />
           <div>
             <strong>선택 기간 자료 부족</strong>
             <p>
               {tab === '36'
                 ? '최근 36개월의 연속된 고지서 자료가 부족합니다.'
-                : '최근 12개월의 연속된 고지서 자료가 부족합니다.'}
+                : tab === 'peak'
+                  ? '최근 12개월의 연속된 고지서와 유효한 피크 시나리오가 필요합니다.'
+                  : '최근 12개월의 연속된 고지서 자료가 부족합니다.'}
             </p>
           </div>
         </section>
       ) : (
-        <section className="comparison-grid">
+        <section
+          id="rate-simulator-panel"
+          className="comparison-grid"
+          role="tabpanel"
+          aria-labelledby={`rate-simulator-tab-${tab}`}
+        >
         <article className="comparison-card blue">
           <span>{selectedMetrics.currentLabel}</span>
           <strong>{formatWon(selectedMetrics.currentWon)}</strong>
@@ -170,11 +186,19 @@ export function RateSimulator({
             </div>
             <div>
               <dt>12개월 기준</dt>
-              <dd>{formatWon(comparison.savingWon)}</dd>
+              <dd>
+                {comparison.annualDataAvailable
+                  ? formatWon(comparison.savingWon)
+                  : '자료 부족'}
+              </dd>
             </div>
             <div>
               <dt>피크 반영</dt>
-              <dd>{formatWon(comparison.peakScenarioSavingWon)}</dd>
+              <dd>
+                {comparison.peakScenarioDataAvailable
+                  ? formatWon(comparison.peakScenarioSavingWon)
+                  : '자료 부족'}
+              </dd>
             </div>
           </dl>
           <p className="recommendation">
