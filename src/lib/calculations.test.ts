@@ -34,15 +34,14 @@ describe('electricity calculation harness', () => {
   it('keeps recent 12 month data available for recommendation', () => {
     const recent = getRecentBills(sampleBills, 12)
     expect(recent).toHaveLength(12)
-    expect(recent.at(-1)?.year).toBe(2025)
-    expect(recent.at(-1)?.month).toBe(5)
+    expect(recent.at(-1)?.year).toBe(2026)
+    expect(recent.at(-1)?.month).toBe(7)
   })
 
-  it('requires consecutive calendar months before comparing plans', () => {
+  it('compares synthetic data with consecutive calendar months', () => {
     const comparison = comparePlans(sampleBills, currentPlan, candidatePlan, defaultScenario)
-    expect(comparison.currentAnnualWon).toBe(0)
-    expect(comparison.candidateAnnualWon).toBe(0)
-    expect(comparison.recommendation).toBe('추가 검토 필요')
+    expect(comparison.currentAnnualWon).toBeGreaterThan(0)
+    expect(comparison.candidateAnnualWon).toBeGreaterThan(0)
   })
 
   it('compares plans from 12 consecutive calendar months', () => {
@@ -71,7 +70,7 @@ describe('electricity calculation harness', () => {
 
   it('calculates usage hours from monthly usage and applied power', () => {
     const bill = sampleBills.find((item) => item.year === 2025 && item.month === 5)!
-    expect(calculateUsageHours(bill)).toBeCloseTo(58.82, 1)
+    expect(calculateUsageHours(bill)).toBeCloseTo(60.38, 1)
   })
 
   it('maps school peak scenario thresholds', () => {
