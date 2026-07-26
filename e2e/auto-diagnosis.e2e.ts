@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import JSZip from 'jszip'
@@ -41,6 +41,31 @@ const powerPlannerHtmlFixture = `
     </table>
   </body>
 </html>`
+
+const storageMutationLockName = 'el-bill:storage-mutation'
+
+const readActiveStorageState = (page: Page) =>
+  page.evaluate(() => {
+    const pointerRaw = localStorage.getItem('el-bill:storage-active')
+    if (!pointerRaw) return null
+    const pointer = JSON.parse(pointerRaw) as { sessionId: string }
+    const snapshotRaw = localStorage.getItem(
+      `el-bill:storage-snapshot:${encodeURIComponent(pointer.sessionId)}`,
+    )
+    if (!snapshotRaw) return null
+    const snapshot = JSON.parse(snapshotRaw) as {
+      revision: number
+      data: {
+        profile: { displaySchoolName: string }
+        scenario: { targetPeakKw: number }
+      }
+    }
+    return {
+      revision: snapshot.revision,
+      schoolName: snapshot.data.profile.displaySchoolName,
+      targetPeakKw: snapshot.data.scenario.targetPeakKw,
+    }
+  })
 
 test('checked-in synthetic XLSX reaches recognized mapping and analysis state', async ({ page }) => {
   await page.goto('/')
@@ -86,6 +111,12 @@ test('two tabs merge different active-session edits under Web Locks', async ({ p
   await expect(
     secondPage.getByText('고지서: 사용자 업로드', { exact: true }),
   ).toBeVisible()
+  expect(
+    await page.evaluate(() => typeof navigator.locks?.request),
+  ).toBe('function')
+  expect(
+    await secondPage.evaluate(() => typeof navigator.locks?.request),
+  ).toBe('function')
 
   await page.locator('.sidebar-nav').getByRole('button', {
     name: '학교정보',
@@ -96,40 +127,85 @@ test('two tabs merge different active-session edits under Web Locks', async ({ p
     exact: true,
   }).click()
 
-  await Promise.all([
-    page.getByLabel('화면 표시명').fill('교차 탭 학교'),
-    secondPage.getByLabel('목표 피크(kW)').fill('611'),
-  ])
+  await page.getByLabel('화면 표시명').fill('교차 탭 학교')
+  await expect
+    .poll(() => readActiveStorageState(page))
+    .toEqual({
+      revision: 1,
+      schoolName: '교차 탭 학교',
+      targetPeakKw: 500,
+    })
 
+  await page.evaluate((lockName) => {
+    const testWindow = window as typeof window & {
+      __elBillLockAcquired?: boolean
+      __elBillLockRelease?: () => void
+      __elBillLockPromise?: Promise<void>
+    }
+    testWindow.__elBillLockAcquired = false
+    testWindow.__elBillLockPromise = navigator.locks.request(
+      lockName,
+      { mode: 'exclusive' },
+      async () => {
+        testWindow.__elBillLockAcquired = true
+        await new Promise<void>((resolve) => {
+          testWindow.__elBillLockRelease = resolve
+        })
+      },
+    )
+  }, storageMutationLockName)
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const pointerRaw = localStorage.getItem('el-bill:storage-active')
-        if (!pointerRaw) return null
-        const pointer = JSON.parse(pointerRaw) as { sessionId: string }
-        const snapshotRaw = localStorage.getItem(
-          `el-bill:storage-snapshot:${encodeURIComponent(pointer.sessionId)}`,
-        )
-        if (!snapshotRaw) return null
-        const snapshot = JSON.parse(snapshotRaw) as {
-          revision: number
-          data: {
-            profile: { displaySchoolName: string }
-            scenario: { targetPeakKw: number }
-          }
+        const testWindow = window as typeof window & {
+          __elBillLockAcquired?: boolean
         }
-        return {
-          revision: snapshot.revision,
-          schoolName: snapshot.data.profile.displaySchoolName,
-          targetPeakKw: snapshot.data.scenario.targetPeakKw,
-        }
+        return testWindow.__elBillLockAcquired
       }),
     )
+    .toBe(true)
+
+  await secondPage.getByLabel('목표 피크(kW)').fill('611')
+  await expect
+    .poll(() =>
+      secondPage.evaluate(async (lockName) => {
+        const state = await navigator.locks.query()
+        return {
+          held: state.held?.some((lock) => lock.name === lockName) ?? false,
+          pending:
+            state.pending?.some((lock) => lock.name === lockName) ?? false,
+        }
+      }, storageMutationLockName),
+    )
+    .toEqual({
+      held: true,
+      pending: true,
+    })
+  expect(await readActiveStorageState(page)).toEqual({
+    revision: 1,
+    schoolName: '교차 탭 학교',
+    targetPeakKw: 500,
+  })
+
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __elBillLockRelease?: () => void
+    }
+    testWindow.__elBillLockRelease?.()
+  })
+  await expect
+    .poll(() => readActiveStorageState(page))
     .toEqual({
       revision: 2,
       schoolName: '교차 탭 학교',
       targetPeakKw: 611,
     })
+  await page.evaluate(async () => {
+    const testWindow = window as typeof window & {
+      __elBillLockPromise?: Promise<void>
+    }
+    await testWindow.__elBillLockPromise
+  })
 
   await secondPage.close()
 })

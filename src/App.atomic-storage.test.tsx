@@ -263,7 +263,8 @@ describe('App session-scoped storage integration', () => {
 
     expect(await removeStorageSnapshot('active-tab')).toEqual({
       ok: true,
-      removed: true,
+      outcome: 'active-deactivated',
+      snapshotRemoved: true,
     })
     act(() => {
       window.dispatchEvent(
@@ -306,6 +307,61 @@ describe('App session-scoped storage integration', () => {
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '현재 저장된 사용자 데이터 없음',
     )
+  })
+
+  it('resets the UI after pointer-first deactivation and retries the inactive orphan after 60 seconds', async () => {
+    expect(
+      (
+        await startNewStorageSnapshot(
+          makeData({
+            provenance: { bills: 'uploaded', powerPlanner: 'none' },
+          }),
+          now,
+          'reset-orphan',
+        )
+      ).ok,
+    ).toBe(true)
+    render(<App />)
+    const snapshotKey = storageSnapshotKeyFor('reset-orphan')
+    const nativeRemoveItem = Storage.prototype.removeItem
+    let rejectSnapshotRemoval = true
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key,
+    ) {
+      if (key === snapshotKey && rejectSnapshotRemoval) {
+        throw new DOMException('remove failed', 'QuotaExceededError')
+      }
+      nativeRemoveItem.call(this, key)
+    })
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '시연 샘플로 초기화' }),
+    )
+
+    await waitFor(() =>
+      expect(document.querySelector('.notice-detail')?.textContent).toContain(
+        '고지서: 시연 샘플',
+      ),
+    )
+    expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
+    expect(localStorage.getItem(snapshotKey)).not.toBeNull()
+    expect(vi.getTimerCount()).toBe(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(59_999)
+      await Promise.resolve()
+    })
+    expect(localStorage.getItem(snapshotKey)).not.toBeNull()
+
+    rejectSnapshotRemoval = false
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync()
+      for (let index = 0; index < 6; index += 1) {
+        await Promise.resolve()
+      }
+    })
+    expect(localStorage.getItem(snapshotKey)).toBeNull()
   })
 
   it('retains the prior profile control value when persistence fails', async () => {

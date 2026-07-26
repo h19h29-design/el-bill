@@ -78,10 +78,16 @@ export type StorageSnapshotWriteResult =
     }
 
 export type StorageSnapshotRemovalResult =
-  | { ok: true; removed: boolean }
+  | {
+      ok: true
+      outcome: 'active-deactivated'
+      snapshotRemoved: boolean
+    }
+  | { ok: true; outcome: 'orphan-cleaned' }
   | {
       ok: false
-      reason: 'storage-error' | 'stale-session' | 'lock-error'
+      outcome: 'active-retained' | 'orphan-retained'
+      reason: 'storage-error' | 'lock-error'
     }
 
 export const storageMutationLockName = 'el-bill:storage-mutation'
@@ -665,20 +671,53 @@ export const removeStorageSnapshot = (
 ): Promise<StorageSnapshotRemovalResult> =>
   withStorageMutationLock(() => {
     const activeSessionId = readStorageActivePointer()?.sessionId
-    try {
-      if (activeSessionId === expectedSessionId) {
+    if (activeSessionId === expectedSessionId) {
+      try {
         clearActivePointerUnlocked(expectedSessionId)
-        localStorage.removeItem(storageSnapshotKeyFor(expectedSessionId))
-        return { ok: true, removed: true } as const
+      } catch {
+        return {
+          ok: false,
+          outcome: 'active-retained',
+          reason: 'storage-error',
+        } as const
       }
+      let snapshotRemoved = false
+      try {
+        localStorage.removeItem(storageSnapshotKeyFor(expectedSessionId))
+        snapshotRemoved =
+          localStorage.getItem(storageSnapshotKeyFor(expectedSessionId)) === null
+      } catch {
+        snapshotRemoved = false
+      }
+      return {
+        ok: true,
+        outcome: 'active-deactivated',
+        snapshotRemoved,
+      } as const
+    }
+    try {
       localStorage.removeItem(storageSnapshotKeyFor(expectedSessionId))
-      return { ok: false, reason: 'stale-session' } as const
+      if (
+        localStorage.getItem(storageSnapshotKeyFor(expectedSessionId)) !== null
+      ) {
+        return {
+          ok: false,
+          outcome: 'orphan-retained',
+          reason: 'storage-error',
+        } as const
+      }
+      return { ok: true, outcome: 'orphan-cleaned' } as const
     } catch {
-      return { ok: false, reason: 'storage-error' } as const
+      return {
+        ok: false,
+        outcome: 'orphan-retained',
+        reason: 'storage-error',
+      } as const
     }
   }).catch(
     (): StorageSnapshotRemovalResult => ({
       ok: false,
+      outcome: 'active-retained',
       reason: 'lock-error',
     }),
   )
@@ -737,9 +776,12 @@ const cleanupExpiredStorageSnapshotsUnlocked = (now: number) => {
       sessionId = encodedSessionId
     }
     const candidate = parseStorageSnapshot(localStorage.getItem(key), sessionId)
-    if (candidate && !isSessionExpired(candidate.session, now)) return
+    const isActive = sessionId === activeSessionId
+    if (isActive && candidate && !isSessionExpired(candidate.session, now)) {
+      return
+    }
     try {
-      if (sessionId === activeSessionId) {
+      if (isActive) {
         clearActivePointerUnlocked(sessionId)
       }
       localStorage.removeItem(key)
@@ -757,18 +799,15 @@ export const cleanupExpiredStorageSnapshots = (now?: number) =>
   )
 
 export const getNextStorageExpiry = (now = Date.now()) => {
-  let earliest: number | null = null
-  sessionSnapshotKeys().forEach((key) => {
-    const candidate = parseStorageSnapshot(localStorage.getItem(key))
-    if (!candidate) return
-    const expiresAt = Date.parse(candidate.session.expiresAt)
-    if (expiresAt <= now) {
-      earliest = now
-      return
-    }
-    earliest = earliest === null ? expiresAt : Math.min(earliest, expiresAt)
-  })
-  return earliest
+  const active = readStorageActivePointer()
+  if (!active) return null
+  const candidate = parseStorageSnapshot(
+    localStorage.getItem(storageSnapshotKeyFor(active.sessionId)),
+    active.sessionId,
+  )
+  if (!candidate) return now
+  const expiresAt = Date.parse(candidate.session.expiresAt)
+  return expiresAt <= now ? now : expiresAt
 }
 
 const removeLegacyPerKeyStorage = () => {

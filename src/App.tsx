@@ -43,12 +43,15 @@ import {
 } from './lib/storage'
 
 const maxBrowserTimeoutMs = 2_147_483_647
+const orphanCleanupRetryDelaysMs = [60_000, 5 * 60_000, 15 * 60_000] as const
 const storageFailureMessage =
   '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.'
 const storageLockFailureMessage =
   '안전한 저장 잠금을 확보하지 못했습니다. 다른 탭을 닫고 다시 시도해 주세요.'
 const storageLockFallbackMessage =
   '이 브라우저에서는 여러 탭 동시 편집을 안전하게 조정할 수 없습니다. 다른 탭을 닫고 한 탭에서만 사용하세요.'
+const storageOrphanCleanupMessage =
+  '시연 샘플로 전환했지만 남은 브라우저 데이터 정리가 지연되고 있습니다. 잠시 후 자동으로 다시 정리합니다.'
 
 const defaultStorageData = (): StorageSnapshotData => ({
   bills: sampleBills,
@@ -128,6 +131,10 @@ function App() {
     initialStorage.snapshot?.session ?? null,
   )
   const [expiryMessage, setExpiryMessage] = useState('')
+  const [orphanCleanupRetry, setOrphanCleanupRetry] = useState<{
+    sessionId: string
+    attempt: number
+  } | null>(null)
 
   const applySnapshot = useCallback((snapshot: StorageSnapshot) => {
     setStorageSession(snapshot.session)
@@ -200,9 +207,9 @@ function App() {
       if (nextExpiry === null) return
       const remainingMs = nextExpiry - Date.now()
       if (remainingMs <= 0) {
-        void expireStoredData().then(() => {
-          if (getNextStorageExpiry() !== null) scheduleExpiry()
-        })
+        timeoutId = window.setTimeout(() => {
+          void expireStoredData().then(scheduleExpiry)
+        }, orphanCleanupRetryDelaysMs[0])
         return
       }
       timeoutId = window.setTimeout(
@@ -218,6 +225,52 @@ function App() {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
   }, [applySnapshot, resetInMemoryToSamples, storageSession])
+
+  useEffect(() => {
+    if (!orphanCleanupRetry) return
+    const delay =
+      orphanCleanupRetryDelaysMs[
+        Math.min(
+          orphanCleanupRetry.attempt,
+          orphanCleanupRetryDelaysMs.length - 1,
+        )
+      ]
+    const timeoutId = window.setTimeout(() => {
+      void cleanupExpiredStorageSnapshots()
+        .then(() => {
+          const orphanStillExists =
+            localStorage.getItem(
+              storageSnapshotKeyFor(orphanCleanupRetry.sessionId),
+            ) !== null
+          if (!orphanStillExists) {
+            setOrphanCleanupRetry(null)
+            return
+          }
+          const nextAttempt = orphanCleanupRetry.attempt + 1
+          setOrphanCleanupRetry(
+            nextAttempt < orphanCleanupRetryDelaysMs.length
+              ? {
+                  sessionId: orphanCleanupRetry.sessionId,
+                  attempt: nextAttempt,
+                }
+              : null,
+          )
+        })
+        .catch(() => {
+          const nextAttempt = orphanCleanupRetry.attempt + 1
+          setOrphanCleanupRetry(
+            nextAttempt < orphanCleanupRetryDelaysMs.length
+              ? {
+                  sessionId: orphanCleanupRetry.sessionId,
+                  attempt: nextAttempt,
+                }
+              : null,
+          )
+          setExpiryMessage(storageFailureMessage)
+        })
+    }, delay)
+    return () => window.clearTimeout(timeoutId)
+  }, [orphanCleanupRetry])
 
   useEffect(() => {
     const adoptCurrentSnapshot = (missingMessage: string) => {
@@ -295,24 +348,39 @@ function App() {
 
   const resetSample = async () => {
     if (storageSession) {
-      const removal = await removeStorageSnapshot(storageSession.sessionId)
-      if (!removal.ok) {
-        const latest = readStorageSnapshot()
-        if (
-          removal.reason === 'storage-error'
-        ) {
-          setExpiryMessage(storageFailureMessage)
+      const sessionId = storageSession.sessionId
+      const removal = await removeStorageSnapshot(sessionId)
+      if (removal.ok && removal.outcome === 'active-deactivated') {
+        if (!removal.snapshotRemoved) {
+          setOrphanCleanupRetry({ sessionId, attempt: 0 })
+          resetInMemoryToSamples(storageOrphanCleanupMessage)
+        } else {
+          resetInMemoryToSamples()
+        }
+        return
+      }
+
+      if (!removal.ok && removal.outcome === 'orphan-retained') {
+        setOrphanCleanupRetry({ sessionId, attempt: 0 })
+      }
+      const latest = readStorageSnapshot()
+      if (latest) {
+        applySnapshot(latest)
+      } else {
+        if (!removal.ok && removal.outcome === 'orphan-retained') {
+          resetInMemoryToSamples(storageOrphanCleanupMessage)
           return
         }
+        resetInMemoryToSamples()
+      }
+      if (!removal.ok) {
         if (removal.reason === 'lock-error') {
           setExpiryMessage(storageLockFailureMessage)
-          return
-        }
-        if (latest) {
-          applySnapshot(latest)
-          return
+        } else {
+          setExpiryMessage(storageFailureMessage)
         }
       }
+      return
     }
     resetInMemoryToSamples()
   }
