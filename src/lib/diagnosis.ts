@@ -15,10 +15,10 @@ import type {
 } from '../types'
 import {
   estimateBillForPlan,
-  getBillsByFiscalYears,
   getRecentBills,
   getSeason,
 } from './calculations'
+import { validateBillPeriods } from './billPeriods'
 import { rateChangeCaution } from './documentTemplates'
 
 const optionalBillColumns = [
@@ -51,6 +51,13 @@ const clamp = (value: number, min: number, max: number) =>
 const matches = (value: string, expected: string) =>
   value.trim().replace(/\s/g, '') === expected.trim().replace(/\s/g, '')
 
+const describePeriodIssue = (code: string, period?: string) => {
+  const periodLabel = period ? `${period} 고지서 기간` : '고지서 기간'
+  if (code === 'duplicate-period') return `${periodLabel}이 중복되었습니다.`
+  if (code === 'missing-period') return `${periodLabel}이 누락되었습니다.`
+  return `${periodLabel}이 올바르지 않습니다.`
+}
+
 export const findCurrentPlan = (
   profile: SchoolProfile,
   ratePlans: RatePlan[],
@@ -76,10 +83,11 @@ export const findCurrentPlan = (
 }
 
 export const assessDataConfidence = (bills: MonthlyBill[]): DataConfidence => {
-  const recent36 = getRecentBills(bills, 36)
+  const validation = validateBillPeriods(bills, 36)
+  const recent36 = validation.recentConsecutiveBills.slice(-36)
   const hasDemand = recent36.length > 0 && recent36.every((bill) => bill.maxDemandKw > 0)
-  if (recent36.length >= 36 && hasDemand) return '데이터 충분'
-  if (getRecentBills(bills, 12).length >= 12) return '보통'
+  if (validation.hasRequiredConsecutiveMonths && hasDemand) return '데이터 충분'
+  if (validateBillPeriods(bills, 12).hasRequiredConsecutiveMonths) return '보통'
   return '낮음'
 }
 
@@ -271,8 +279,9 @@ export const comparePlansForDiagnosis = (
   scenario?: PeakScenario,
   mode: CalculationMode = 'billDelta',
 ): PlanCandidateComparison => {
-  const recent12 = getRecentBills(bills, 12)
-  const threeYearBills = getBillsByFiscalYears(bills, 3)
+  const validation = validateBillPeriods(bills, 12)
+  const recent12 = validation.recentConsecutiveBills.slice(-12)
+  const threeYearBills = validation.normalizedBills.slice(-36)
 
   const currentAnnualWon = recent12.reduce(
     (sum, bill) => sum + estimateCurrentBillByMode(bill, currentPlan, scenario, mode),
@@ -295,7 +304,7 @@ export const comparePlansForDiagnosis = (
 
   const peakScenarioSavingWon = scenario ? savingWon : 0
   const calculationBreakdown = buildCalculationBreakdown(
-    bills,
+    validation.normalizedBills,
     currentPlan,
     candidatePlan,
     scenario,
@@ -305,12 +314,12 @@ export const comparePlansForDiagnosis = (
   )
 
   let recommendation: Recommendation = '추가 검토 필요'
-  if (recent12.length < 12) recommendation = '추가 검토 필요'
+  if (!validation.hasRequiredConsecutiveMonths) recommendation = '추가 검토 필요'
   else if (savingWon < 0) recommendation = '유지 추천'
   else if (savingWon > 0 && threeYearSavingWon > 0) recommendation = '변경 추천'
 
   const basis =
-    recent12.length < 12
+    !validation.hasRequiredConsecutiveMonths
       ? '12개월 이상 월별 고지서 자료가 부족하여 추가 검토가 필요합니다.'
       : recommendation === '변경 추천'
         ? '최근 12개월과 최근 3년 기준이 모두 절감으로 추정됩니다.'
@@ -354,6 +363,8 @@ export const buildAutoDiagnosis = ({
   powerPlannerDataSource?: PowerPlannerDataSource | null
   mode?: CalculationMode
 }): AutoDiagnosisResult => {
+  const periodValidation = validateBillPeriods(bills, 12)
+  const normalizedBills = periodValidation.normalizedBills
   const currentPlan = findCurrentPlan(profile, ratePlans)
   const schoolPlans = ratePlans.filter((plan) => plan.contractType.includes('교육용'))
   const candidates = schoolPlans.filter((plan) => plan.id !== currentPlan.id)
@@ -363,7 +374,7 @@ export const buildAutoDiagnosis = ({
         matches(candidate.contractType, profile.contractType) &&
         matches(candidate.voltageType, profile.voltageType)
       const comparison = comparePlansForDiagnosis(
-        bills,
+        normalizedBills,
         currentPlan,
         candidate,
         scenario,
@@ -394,21 +405,26 @@ export const buildAutoDiagnosis = ({
   const topCandidates = ranked.slice(0, 3)
   const comparison =
     topCandidates[0] ??
-    comparePlansForDiagnosis(bills, currentPlan, currentPlan, scenario, mode)
+    comparePlansForDiagnosis(normalizedBills, currentPlan, currentPlan, scenario, mode)
   const recommendedPlan =
     ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ?? currentPlan
-  const confidence = assessDataConfidence(bills)
-  const recentBills = getRecentBills(bills, 12)
+  const confidence = assessDataConfidence(normalizedBills)
+  const recentBills = periodValidation.recentConsecutiveBills.slice(-12)
   const lastBill = recentBills.at(-1)
   const canGenerateChangeDocuments =
-    recentBills.length >= 12 &&
+    periodValidation.hasRequiredConsecutiveMonths &&
     comparison.sameContractPriority &&
     comparison.recommendation === '변경 추천'
   const documentBlockReason = canGenerateChangeDocuments
     ? ''
     : '최종 판단이 변경 추천이고 현재 계약종별·수전전압과 일치하는 후보인 경우에만 변경신청 문서를 생성할 수 있습니다.'
   const missingDataNotes = [
-    ...(recentBills.length < 12 ? ['최근 12개월 고지서 자료가 부족합니다.'] : []),
+    ...(!periodValidation.hasRequiredConsecutiveMonths
+      ? ['최근 12개월의 연속된 고지서 자료가 부족합니다.']
+      : []),
+    ...periodValidation.issues.map((issue) =>
+      `고지서 기간 문제: ${describePeriodIssue(issue.code, issue.period)}`,
+    ),
     ...(confidence !== '데이터 충분'
       ? ['36개월 이상 자료와 최대수요전력 컬럼이 있으면 신뢰도가 높아집니다.']
       : []),
@@ -416,7 +432,7 @@ export const buildAutoDiagnosis = ({
   ]
 
   return {
-    completed: recentBills.length >= 12,
+    completed: periodValidation.hasRequiredConsecutiveMonths,
     currentPlan,
     recommendedPlan,
     topCandidates,
@@ -424,8 +440,8 @@ export const buildAutoDiagnosis = ({
     comparison,
     calculationMode: mode,
     dataConfidence: confidence,
-    dataRecognitionRate: getDataRecognitionRate(bills),
-    recognizedMonths: bills.length,
+    dataRecognitionRate: getDataRecognitionRate(normalizedBills),
+    recognizedMonths: periodValidation.distinctMonthCount,
     lastUploadLabel: powerPlannerDataSource
       ? `${powerPlannerDataSource.sourceLabel} · ${new Date(powerPlannerDataSource.importedAt).toLocaleString('ko-KR')}`
       : lastBill

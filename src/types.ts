@@ -54,6 +54,25 @@ export interface MonthlyBill {
   note: string
 }
 
+export type BillPeriodIssueCode =
+  | 'invalid-period'
+  | 'duplicate-period'
+  | 'missing-period'
+
+export interface BillPeriodIssue {
+  code: BillPeriodIssueCode
+  period?: string
+  message: string
+}
+
+export interface BillPeriodValidation {
+  normalizedBills: MonthlyBill[]
+  distinctMonthCount: number
+  recentConsecutiveBills: MonthlyBill[]
+  hasRequiredConsecutiveMonths: boolean
+  issues: BillPeriodIssue[]
+}
+
 export type DataSourceProvider =
   | 'kepco-bill'
   | 'kepco-power-planner'

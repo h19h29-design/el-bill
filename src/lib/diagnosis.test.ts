@@ -47,6 +47,12 @@ const makeBill = (month: number): MonthlyBill => ({
 })
 
 const twelveBills = Array.from({ length: 12 }, (_, index) => makeBill(index + 1))
+const thirtySixConsecutiveBills = Array.from({ length: 36 }, (_, index) => {
+  const monthIndex = 2024 * 12 + index
+  const year = Math.floor(monthIndex / 12)
+  const month = (monthIndex % 12) + 1
+  return { ...makeBill(month), id: `bill-${year}-${month}`, year }
+})
 const currentPlan = makePlan('current', '선택요금Ⅱ', 1000, 100)
 const cheaperPlan = makePlan('cheap', '선택요금Ⅰ', 500, 80)
 const expensivePlan = makePlan('expensive', '고비용요금', 2000, 160)
@@ -66,7 +72,7 @@ describe('automatic diagnosis harness', () => {
 
   it('recommends change when 12-month and 3-year estimates both save money', () => {
     const comparison = comparePlansForDiagnosis(
-      [...twelveBills, ...twelveBills, ...twelveBills],
+      thirtySixConsecutiveBills,
       currentPlan,
       cheaperPlan,
       defaultScenario,
@@ -110,6 +116,25 @@ describe('automatic diagnosis harness', () => {
     expect(diagnosis.availableDocumentCount).toBe(2)
   })
 
+  it('does not complete diagnosis or unlock documents from duplicate billing rows', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: Array.from({ length: 12 }, () => makeBill(1)),
+      profile: {
+        ...defaultSchoolProfile,
+        contractType: currentPlan.contractType,
+        voltageType: currentPlan.voltageType,
+        currentPlan: currentPlan.planName,
+      },
+      ratePlans: [currentPlan, cheaperPlan],
+      scenario: defaultScenario,
+    })
+
+    expect(diagnosis.completed).toBe(false)
+    expect(diagnosis.recognizedMonths).toBe(1)
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(diagnosis.missingDataNotes.join(' ')).toContain('중복')
+  })
+
   it('recalculates savings when expected peak changes', () => {
     const basePeakComparison = comparePlansForDiagnosis(
       twelveBills,
@@ -144,7 +169,7 @@ describe('automatic diagnosis harness', () => {
       },
     }
     const diagnosis = buildAutoDiagnosis({
-      bills: [...twelveBills, ...twelveBills, ...twelveBills],
+      bills: thirtySixConsecutiveBills,
       profile: {
         ...defaultSchoolProfile,
         contractType: currentPlan.contractType,

@@ -8,9 +8,22 @@ import {
   getSeason,
 } from './calculations'
 import { getPeakRiskLevel, getPeakRatio } from './peak'
+import type { MonthlyBill } from '../types'
 
 const currentPlan = defaultRatePlans.find((plan) => plan.id === currentPlanId)!
 const candidatePlan = defaultRatePlans.find((plan) => plan.id === recommendedPlanId)!
+
+const calendarBill = (year: number, month: number): MonthlyBill => ({
+  ...sampleBills[0],
+  id: `${year}-${month}`,
+  year,
+  month,
+})
+
+const twelveConsecutiveBills = Array.from({ length: 12 }, (_, index) => {
+  const monthIndex = 2025 * 12 + 7 + index
+  return calendarBill(Math.floor(monthIndex / 12), (monthIndex % 12) + 1)
+})
 
 describe('electricity calculation harness', () => {
   it('keeps recent 12 month data available for recommendation', () => {
@@ -20,13 +33,23 @@ describe('electricity calculation harness', () => {
     expect(recent.at(-1)?.month).toBe(5)
   })
 
-  it('compares current and candidate rate plans with a conservative label', () => {
+  it('requires consecutive calendar months before comparing plans', () => {
     const comparison = comparePlans(sampleBills, currentPlan, candidatePlan, defaultScenario)
+    expect(comparison.currentAnnualWon).toBe(0)
+    expect(comparison.candidateAnnualWon).toBe(0)
+    expect(comparison.recommendation).toBe('추가 검토 필요')
+  })
+
+  it('compares plans from 12 consecutive calendar months', () => {
+    const comparison = comparePlans(
+      twelveConsecutiveBills,
+      currentPlan,
+      candidatePlan,
+      defaultScenario,
+    )
+
     expect(comparison.currentAnnualWon).toBeGreaterThan(0)
     expect(comparison.candidateAnnualWon).toBeGreaterThan(0)
-    expect(['변경 추천', '추가 검토 필요', '유지 추천']).toContain(
-      comparison.recommendation,
-    )
   })
 
   it('calculates usage hours from monthly usage and applied power', () => {

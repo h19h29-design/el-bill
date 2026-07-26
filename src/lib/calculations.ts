@@ -6,6 +6,7 @@ import type {
   Recommendation,
   Season,
 } from '../types'
+import { validateBillPeriods } from './billPeriods'
 
 const fiscalMonthOrder = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2]
 
@@ -21,11 +22,7 @@ export const getFiscalMonthIndex = (month: number) => {
 }
 
 export const sortBillsChronologically = (bills: MonthlyBill[]) =>
-  [...bills].sort((a, b) => {
-    const aKey = a.year * 100 + getFiscalMonthIndex(a.month)
-    const bKey = b.year * 100 + getFiscalMonthIndex(b.month)
-    return aKey - bKey
-  })
+  validateBillPeriods(bills).normalizedBills
 
 export const getSeason = (month: number): Season => {
   if ([6, 7, 8].includes(month)) return 'summer'
@@ -40,10 +37,10 @@ export const getSeasonLabel = (season: Season) => {
 }
 
 export const getRecentBills = (bills: MonthlyBill[], count: number) =>
-  sortBillsChronologically(bills).slice(-count)
+  validateBillPeriods(bills).normalizedBills.slice(-count)
 
 export const getBillsByFiscalYears = (bills: MonthlyBill[], years: number) => {
-  const sorted = sortBillsChronologically(bills)
+  const sorted = validateBillPeriods(bills).normalizedBills
   return sorted.slice(Math.max(0, sorted.length - years * 12))
 }
 
@@ -87,8 +84,9 @@ export const comparePlans = (
   candidatePlan: RatePlan,
   scenario?: PeakScenario,
 ): PlanComparison => {
-  const recent12 = getRecentBills(bills, 12)
-  if (recent12.length < 12) {
+  const validation = validateBillPeriods(bills, 12)
+  const recent12 = validation.recentConsecutiveBills.slice(-12)
+  if (!validation.hasRequiredConsecutiveMonths) {
     return {
       currentAnnualWon: 0,
       candidateAnnualWon: 0,
@@ -111,7 +109,7 @@ export const comparePlans = (
   )
   const savingWon = currentAnnualWon - candidateAnnualWon
   const savingRate = currentAnnualWon ? savingWon / currentAnnualWon : 0
-  const threeYearBills = getBillsByFiscalYears(bills, 3)
+  const threeYearBills = validation.normalizedBills.slice(-36)
   const threeYearSavingWon = threeYearBills.reduce(
     (sum, bill) =>
       sum +
