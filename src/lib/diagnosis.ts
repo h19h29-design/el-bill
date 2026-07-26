@@ -61,21 +61,7 @@ const describePeriodIssue = (code: string, period?: string) => {
 export const findCurrentPlan = (
   profile: SchoolProfile,
   ratePlans: RatePlan[],
-) => {
-  if (!ratePlans.length) {
-    throw new Error('요금제 설정이 비어 있어 자동진단을 실행할 수 없습니다.')
-  }
-  const exact = findExactRatePlan(profile, ratePlans)
-  if (exact) return exact
-
-  return (
-    ratePlans.find(
-      (plan) =>
-        matches(plan.contractType, profile.contractType) &&
-        matches(plan.voltageType, profile.voltageType),
-    ) ?? ratePlans[0]
-  )
-}
+) => findExactRatePlan(profile, ratePlans)
 
 export const findExactRatePlan = (
   profile: SchoolProfile,
@@ -87,6 +73,32 @@ export const findExactRatePlan = (
       matches(plan.voltageType, profile.voltageType) &&
       matches(plan.planName, profile.currentPlan),
   ) ?? null
+
+const configurationRequiredMessage =
+  '요금제 설정이 필요합니다. 현재 프로필의 계약종별, 수전전압, 현재 요금제와 정확히 일치하는 요금제를 설정에서 확인해야 자동진단을 진행할 수 있습니다.'
+
+const createConfigurationBlockedComparison = (
+  profile: SchoolProfile,
+  mode: CalculationMode,
+): PlanCandidateComparison => ({
+  currentAnnualWon: 0,
+  candidateAnnualWon: 0,
+  savingWon: 0,
+  savingRate: 0,
+  threeYearSavingWon: 0,
+  fiveYearSavingWon: 0,
+  recommendation: '추가 검토 필요',
+  basis: configurationRequiredMessage,
+  candidatePlanId: '',
+  candidatePlanName: '요금제 설정 필요',
+  contractType: profile.contractType,
+  voltageType: profile.voltageType,
+  sameContractPriority: false,
+  peakScenarioSavingWon: 0,
+  calculationMode: mode,
+  calculationBreakdown: [],
+  reviewReason: configurationRequiredMessage,
+})
 
 export const assessDataConfidence = (bills: MonthlyBill[]): DataConfidence => {
   const validation = validateBillPeriods(bills, 36)
@@ -382,6 +394,38 @@ export const buildAutoDiagnosis = ({
   const periodValidation = validateBillPeriods(bills, 12)
   const normalizedBills = periodValidation.normalizedBills
   const currentPlan = findCurrentPlan(profile, ratePlans)
+  const confidence = assessDataConfidence(normalizedBills)
+  const recentBills = periodValidation.recentConsecutiveBills.slice(-12)
+  const lastBill = recentBills.at(-1)
+
+  if (!currentPlan) {
+    const comparison = createConfigurationBlockedComparison(profile, mode)
+    return {
+      completed: false,
+      configurationRequired: true,
+      currentPlan: null,
+      recommendedPlan: null,
+      topCandidates: [],
+      additionalCandidates: [],
+      comparison,
+      calculationMode: mode,
+      dataConfidence: confidence,
+      dataRecognitionRate: getDataRecognitionRate(normalizedBills),
+      recognizedMonths: periodValidation.distinctMonthCount,
+      lastUploadLabel: powerPlannerDataSource
+        ? `${powerPlannerDataSource.sourceLabel} · ${new Date(powerPlannerDataSource.importedAt).toLocaleString('ko-KR')}`
+        : lastBill
+          ? `${lastBill.year}년 ${lastBill.month}월 고지서`
+          : '자료 없음',
+      availableDocumentCount: 0,
+      canGenerateChangeDocuments: false,
+      documentBlockReason: configurationRequiredMessage,
+      finalJudgement: '추가 검토 필요',
+      judgementBasis: configurationRequiredMessage,
+      missingDataNotes: [configurationRequiredMessage, rateChangeCaution],
+    }
+  }
+
   const schoolPlans = ratePlans.filter((plan) => plan.contractType.includes('교육용'))
   const candidates = schoolPlans.filter((plan) => plan.id !== currentPlan.id)
   const ranked = candidates
@@ -424,9 +468,6 @@ export const buildAutoDiagnosis = ({
     comparePlansForDiagnosis(normalizedBills, currentPlan, currentPlan, scenario, mode)
   const recommendedPlan =
     ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ?? currentPlan
-  const confidence = assessDataConfidence(normalizedBills)
-  const recentBills = periodValidation.recentConsecutiveBills.slice(-12)
-  const lastBill = recentBills.at(-1)
   const canGenerateChangeDocuments =
     periodValidation.hasRequiredConsecutiveMonths &&
     comparison.sameContractPriority &&
@@ -449,6 +490,7 @@ export const buildAutoDiagnosis = ({
 
   return {
     completed: periodValidation.hasRequiredConsecutiveMonths,
+    configurationRequired: false,
     currentPlan,
     recommendedPlan,
     topCandidates,

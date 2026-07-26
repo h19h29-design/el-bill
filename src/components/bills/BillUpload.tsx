@@ -172,6 +172,12 @@ export function BillUpload({
 
   const applyRecognizedMapping = () => {
     if (!parseResult) return
+    if (!importContext) {
+      setMessage(
+        '현재 요금제가 설정과 정확히 일치하지 않아 분석을 시작할 수 없습니다. 설정에서 계약종별, 수전전압, 현재 요금제를 확인해 주세요.',
+      )
+      return
+    }
     if (parseResult.autoRows.length) {
       onBillsChange(parseResult.autoRows)
       const isPowerPlannerExport = parseResult.diagnostics.some((item) =>
@@ -326,7 +332,7 @@ export function BillUpload({
             <button
               type="button"
               className="primary-button"
-              disabled={!recognition.canAnalyze}
+              disabled={!recognition.canAnalyze || !importContext}
               onClick={applyRecognizedMapping}
             >
               이 매핑으로 분석 시작

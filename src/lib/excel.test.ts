@@ -157,6 +157,24 @@ describe('synthetic workbook parser harness', () => {
     expect(powerPlannerBill?.observedFields).not.toContain('maxDemandKw')
   })
 
+  it('treats blank Power Planner applied power as an inferred profile fallback', async () => {
+    const blankAppliedPowerFixture = powerPlannerHtmlFixture.replace(
+      'title="450" aria-describedby="grid_JOJ_KW">450',
+      'title="" aria-describedby="grid_JOJ_KW"></td>',
+    )
+    const result = await parseWorkbook(
+      new TextEncoder().encode(blankAppliedPowerFixture).buffer,
+      { appliedPowerKw: 620, currentPlan },
+    )
+
+    expect(result.autoRows[0]).toMatchObject({
+      appliedPowerKw: 620,
+      maxDemandKw: 0,
+    })
+    expect(result.autoRows[0]?.observedFields).not.toContain('appliedPowerKw')
+    expect(result.autoRows[0]?.observedFields).not.toContain('maxDemandKw')
+  })
+
   it('normalizes a KEPCO Power Planner HTML xls export', async () => {
     const result = await parseWorkbook(
       new TextEncoder().encode(powerPlannerHtmlFixture).buffer,

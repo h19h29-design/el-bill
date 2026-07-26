@@ -67,6 +67,7 @@ const candidateComparison: PlanCandidateComparison = {
 
 const diagnosis: AutoDiagnosisResult = {
   completed: true,
+  configurationRequired: false,
   currentPlan,
   recommendedPlan,
   topCandidates: [candidateComparison],

@@ -33,12 +33,43 @@ export function AutoDiagnosis({
   onNavigate,
 }: AutoDiagnosisProps) {
   const comparison = diagnosis.comparison
+  const currentPlan = diagnosis.currentPlan
+  const recommendedPlan = diagnosis.recommendedPlan
   const judgementClass =
     diagnosis.finalJudgement === '변경 추천'
       ? 'good'
       : diagnosis.finalJudgement === '유지 추천'
         ? 'hold'
         : 'review'
+
+  if (diagnosis.configurationRequired || !currentPlan || !recommendedPlan) {
+    return (
+      <div className="view-stack">
+        <section className="diagnosis-hero">
+          <div>
+            <span className="flow-label">요금제 설정 필요</span>
+            <h2>자동진단을 시작할 수 없습니다</h2>
+            <p>{diagnosis.judgementBasis}</p>
+          </div>
+          <button
+            type="button"
+            className="primary-button diagnosis-start"
+            onClick={() => onNavigate('settings')}
+          >
+            <ShieldAlert size={20} />
+            요금제 설정 확인
+          </button>
+        </section>
+        <section className="document-block-notice" role="status">
+          <ShieldAlert size={22} />
+          <div>
+            <strong>요금제 자동 비교 및 변경신청 문서 생성 보류</strong>
+            <p>{diagnosis.documentBlockReason}</p>
+          </div>
+        </section>
+      </div>
+    )
+  }
 
   return (
     <div className="view-stack">
@@ -95,12 +126,12 @@ export function AutoDiagnosis({
         </article>
         <article className="diagnosis-result-card">
           <span>현재 요금제</span>
-          <strong>{diagnosis.currentPlan.planName}</strong>
-          <p>{diagnosis.currentPlan.contractType} {diagnosis.currentPlan.voltageType}</p>
+          <strong>{currentPlan.planName}</strong>
+          <p>{currentPlan.contractType} {currentPlan.voltageType}</p>
         </article>
         <article className="diagnosis-result-card">
           <span>추천 요금제</span>
-          <strong>{diagnosis.recommendedPlan.planName}</strong>
+          <strong>{recommendedPlan.planName}</strong>
           <p>{diagnosis.comparison.reviewReason}</p>
         </article>
         <article className="diagnosis-result-card">

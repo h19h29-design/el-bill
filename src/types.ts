@@ -245,8 +245,9 @@ export interface PlanCandidateComparison extends PlanComparison {
 
 export interface AutoDiagnosisResult {
   completed: boolean
-  currentPlan: RatePlan
-  recommendedPlan: RatePlan
+  configurationRequired: boolean
+  currentPlan: RatePlan | null
+  recommendedPlan: RatePlan | null
   topCandidates: PlanCandidateComparison[]
   additionalCandidates: PlanCandidateComparison[]
   comparison: PlanCandidateComparison

@@ -37,8 +37,8 @@ import { getPeakRiskLevel } from '../../lib/peak'
 
 interface DashboardProps {
   bills: MonthlyBill[]
-  currentPlan: RatePlan
-  candidatePlan: RatePlan
+  currentPlan: RatePlan | null
+  candidatePlan: RatePlan | null
   scenario: PeakScenario
   diagnosis: AutoDiagnosisResult
   dataMode: DataMode
@@ -57,6 +57,18 @@ export function Dashboard({
   dataMode,
   onStartDiagnosis,
 }: DashboardProps) {
+  if (!currentPlan || !candidatePlan) {
+    return (
+      <section className="document-block-notice" role="status">
+        <AlertTriangle size={22} />
+        <div>
+          <strong>요금제 설정 확인 필요</strong>
+          <p>{diagnosis.judgementBasis}</p>
+        </div>
+      </section>
+    )
+  }
+
   const summary = getDashboardSummary(bills, currentPlan, candidatePlan, scenario)
   const chartData = groupBillsForCharts(bills)
   const latest = summary.latest

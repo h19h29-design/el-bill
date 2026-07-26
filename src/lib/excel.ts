@@ -49,6 +49,12 @@ const asNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+const hasNumericValue = (value: unknown) => {
+  if (typeof value === 'number') return Number.isFinite(value)
+  const cleaned = normalize(value).replace(/,/g, '')
+  return cleaned !== '' && Number.isFinite(Number(cleaned))
+}
+
 const asMonth = (value: unknown) => {
   const match = normalize(value).match(/(\d{1,2})/)
   if (!match) return 0
@@ -277,21 +283,22 @@ const parsePowerPlannerMonthlyBills = (
       const totalBillWon = asNumber(getRowValue(row, '청구요금', '예상요금'))
       const rawAppliedPowerKw = getRowValue(row, '요금적용전력')
       const appliedPowerKw = asNumber(rawAppliedPowerKw)
+      const hasObservedAppliedPower = hasNumericValue(rawAppliedPowerKw)
       if (!year || !month || !usageKwh || !totalBillWon) return null
 
       const bill = makeImportedBill(year, month, usageKwh, totalBillWon, context)
-      const baseChargeWon = appliedPowerKw
+      const baseChargeWon = hasObservedAppliedPower
         ? Math.round(appliedPowerKw * (context?.currentPlan.baseRateWonPerKw ?? 0))
         : bill.baseChargeWon
       return {
         ...bill,
         id: `power-planner-${year}-${month}-${index}`,
-        appliedPowerKw: appliedPowerKw || bill.appliedPowerKw,
+        appliedPowerKw: hasObservedAppliedPower ? appliedPowerKw : bill.appliedPowerKw,
         maxDemandKw: 0,
         baseChargeWon,
-        observedFields: rawAppliedPowerKw === undefined
-          ? bill.observedFields
-          : [...bill.observedFields, 'appliedPowerKw'],
+        observedFields: hasObservedAppliedPower
+          ? [...bill.observedFields, 'appliedPowerKw']
+          : bill.observedFields,
         note: '파워플래너 월별청구요금 업로드',
       }
     })

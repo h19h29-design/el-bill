@@ -146,6 +146,23 @@ describe('automatic diagnosis harness', () => {
     ).toBeNull()
   })
 
+  it('blocks diagnosis and documents when no exact active plan is configured', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: { ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' },
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+    })
+
+    expect(diagnosis.configurationRequired).toBe(true)
+    expect(diagnosis.currentPlan).toBeNull()
+    expect(diagnosis.recommendedPlan).toBeNull()
+    expect(diagnosis.completed).toBe(false)
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(diagnosis.documentBlockReason).toContain('요금제 설정')
+    expect(diagnosis.comparison.savingWon).toBe(0)
+  })
+
   it('does not calculate a three-year estimate from gapped calendar periods', () => {
     const comparison = comparePlansForDiagnosis(
       [...consecutiveBills(2022, 1, 24), ...consecutiveBills(2026, 1, 12)],

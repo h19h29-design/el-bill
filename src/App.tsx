@@ -213,14 +213,24 @@ function App() {
             />
           )}
           {activeView === 'rates' && (
-            <RateSimulator
-              bills={bills}
-              currentPlan={currentPlan}
-              candidatePlan={candidatePlan}
-              candidates={diagnosis.topCandidates}
-              scenario={scenario}
-              onScenarioChange={setScenario}
-            />
+            currentPlan && candidatePlan ? (
+              <RateSimulator
+                bills={bills}
+                currentPlan={currentPlan}
+                candidatePlan={candidatePlan}
+                candidates={diagnosis.topCandidates}
+                scenario={scenario}
+                onScenarioChange={setScenario}
+              />
+            ) : (
+              <section className="document-block-notice" role="status">
+                <AlertCircle size={22} />
+                <div>
+                  <strong>요금제 비교 보류</strong>
+                  <p>{diagnosis.judgementBasis}</p>
+                </div>
+              </section>
+            )
           )}
           {activeView === 'peak' && (
             <PeakManager

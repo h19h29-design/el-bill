@@ -22,8 +22,8 @@ export const buildDocumentBundle = (
   peakOperationPlan?: PeakOperationPlan,
 ): DocumentBundle => {
   const activeComparison = diagnosis?.comparison ?? comparison
-  const recommendedPlanName = diagnosis?.recommendedPlan.planName ?? '추천 요금제'
-  const currentPlanName = diagnosis?.currentPlan.planName ?? profile.currentPlan
+  const recommendedPlanName = diagnosis?.recommendedPlan?.planName ?? '추천 요금제'
+  const currentPlanName = diagnosis?.currentPlan?.planName ?? profile.currentPlan
   const peakScenarioSavingWon = diagnosis?.comparison.peakScenarioSavingWon ?? 0
   const calculationModeLabel =
     diagnosis?.calculationMode === 'tariffFull'
