@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
 import { defaultRatePlans } from '../../data/ratePlans'
@@ -48,5 +48,32 @@ describe('document generation eligibility', () => {
     expect(
       screen.getByText(/한전 공식 신청서가 아닌 작성 참고용 미리보기입니다/),
     ).toBeTruthy()
+  })
+
+  it('does not construct previews or document actions without an exact active plan', () => {
+    const configurationDiagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: { ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' },
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+    })
+
+    const { container } = render(
+      <DocumentGenerator
+        profile={{ ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' }}
+        latestBill={sampleBills.at(-1)}
+        comparison={configurationDiagnosis.comparison}
+        scenario={defaultScenario}
+        diagnosis={configurationDiagnosis}
+        peakOperationPlan={buildPeakOperationPlan(defaultScenario)}
+      />,
+    )
+
+    const view = within(container)
+    expect(view.getByText(configurationDiagnosis.documentBlockReason)).toBeTruthy()
+    expect(view.queryByRole('button', { name: 'PDF 미리보기' })).toBeNull()
+    expect(view.queryByRole('button', { name: '전체 다운로드 (ZIP)' })).toBeNull()
+    expect(view.queryByText('예산절감을 위한 전기요금제 변경 계획(안)')).toBeNull()
+    expect(view.queryByText('추천 요금제')).toBeNull()
   })
 })

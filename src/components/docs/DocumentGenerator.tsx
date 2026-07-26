@@ -73,19 +73,47 @@ export function DocumentGenerator({
 }: DocumentGeneratorProps) {
   const [selectedPreview, setSelectedPreview] = useState<'plan' | 'letter' | 'application'>('plan')
   const [status, setStatus] = useState('')
+  const documentsUnavailable =
+    diagnosis.configurationRequired ||
+    !diagnosis.currentPlan ||
+    !diagnosis.recommendedPlan
   const bundle = useMemo(
     () =>
-      buildDocumentBundle(
-        profile,
-        latestBill,
-        comparison,
-        scenario,
-        diagnosis,
-        peakOperationPlan,
-      ),
-    [profile, latestBill, comparison, scenario, diagnosis, peakOperationPlan],
+      documentsUnavailable
+        ? null
+        : buildDocumentBundle(
+            profile,
+            latestBill,
+            comparison,
+            scenario,
+            diagnosis,
+            peakOperationPlan,
+          ),
+    [
+      documentsUnavailable,
+      profile,
+      latestBill,
+      comparison,
+      scenario,
+      diagnosis,
+      peakOperationPlan,
+    ],
   )
   const canGenerateChangeDocuments = diagnosis.canGenerateChangeDocuments
+
+  if (!bundle) {
+    return (
+      <div className="view-stack">
+        <section className="document-block-notice" role="status">
+          <ShieldAlert size={22} />
+          <div>
+            <strong>변경신청 문서 생성 보류</strong>
+            <p>{diagnosis.documentBlockReason}</p>
+          </div>
+        </section>
+      </div>
+    )
+  }
 
   const downloadPdf = async (targetId: string, filename: string) => {
     if (!canGenerateChangeDocuments) {
