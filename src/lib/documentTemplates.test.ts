@@ -78,6 +78,8 @@ const diagnosis: AutoDiagnosisResult = {
   recognizedMonths: 36,
   lastUploadLabel: '2026년 5월 고지서',
   availableDocumentCount: 6,
+  canGenerateChangeDocuments: true,
+  documentBlockReason: '',
   finalJudgement: '변경 추천',
   judgementBasis: '최근 12개월과 최근 3년 기준이 모두 절감으로 추정됩니다.',
   missingDataNotes: [rateChangeCaution],
@@ -115,5 +117,13 @@ describe('document template harness', () => {
     expect(bundle.calculationSummaryText).toContain('고지서 기반 차액 추정')
     expect(bundle.calculationSummaryText).toContain('기본요금 차액')
     expect(bundle.calculationBreakdown[0].differenceWon).toBe(4_920_000)
+    expect(bundle.checklist).toEqual(
+      expect.arrayContaining([
+        { label: '사업자등록증', ready: false },
+        { label: '전기요금내역', ready: true },
+        { label: '건축물관리대장', ready: false },
+        { label: '변경신청서', ready: true },
+      ]),
+    )
   })
 })

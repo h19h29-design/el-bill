@@ -9,6 +9,7 @@ import type { MonthlyBill, SchoolProfile } from '../../types'
 import {
   mapRowsToBills,
   parseWorkbook,
+  validateUploadFile,
   type ParsedSheet,
   type WorkbookParseResult,
 } from '../../lib/excel'
@@ -41,6 +42,23 @@ const mappingFields = [
 const guessHeader = (headers: string[], label: string) =>
   headers.find((header) => header.includes(label) || label.includes(header)) ?? ''
 
+const buildMapping = (headers: string[]) => ({
+  year: guessHeader(headers, '연도'),
+  month: guessHeader(headers, '월'),
+  usageKwh: guessHeader(headers, '사용량'),
+  totalBillWon: guessHeader(headers, '총'),
+  appliedPowerKw: guessHeader(headers, '요금적용전력'),
+  maxDemandKw: guessHeader(headers, '최대수요전력'),
+  baseChargeWon: guessHeader(headers, '기본요금'),
+  energyChargeWon: guessHeader(headers, '전력량요금'),
+  powerFactorChargeWon: guessHeader(headers, '역률요금'),
+  climateChargeWon: guessHeader(headers, '기후환경요금'),
+  fuelAdjustmentWon: guessHeader(headers, '연료비조정액'),
+  vatWon: guessHeader(headers, '부가세'),
+  fundWon: guessHeader(headers, '전력산업기반기금'),
+  note: guessHeader(headers, '메모'),
+})
+
 export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
   const [parseResult, setParseResult] = useState<WorkbookParseResult | null>(null)
   const [selectedSheetName, setSelectedSheetName] = useState('')
@@ -66,25 +84,37 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
     () => summarizeWorkbookRecognition(parseResult, mapping),
     [parseResult, mapping],
   )
+  const pendingBills = useMemo(() => {
+    if (!parseResult) return []
+    if (parseResult.autoRows.length) return parseResult.autoRows
+    return selectedSheet ? mapRowsToBills(selectedSheet.rows, mapping) : []
+  }, [mapping, parseResult, selectedSheet])
 
   const handleFile = async (file: File) => {
-    const result = await parseWorkbook(file)
-    setParseResult(result)
-    setSelectedSheetName(result.sheets[0]?.name ?? '')
-    setShowManualMapping(false)
-    const headers = result.sheets[0]?.headers ?? []
-    setMapping({
-      year: guessHeader(headers, '연도'),
-      month: guessHeader(headers, '월'),
-      usageKwh: guessHeader(headers, '사용량'),
-      totalBillWon: guessHeader(headers, '총'),
-      appliedPowerKw: guessHeader(headers, '요금적용전력'),
-      maxDemandKw: guessHeader(headers, '최대수요전력'),
-      baseChargeWon: guessHeader(headers, '기본요금'),
-      energyChargeWon: guessHeader(headers, '전력량요금'),
-    })
+    const validationMessage = validateUploadFile(file)
+    if (validationMessage) {
+      setParseResult(null)
+      setMessage(validationMessage)
+      return
+    }
 
-    setMessage('파일을 읽었습니다. 자동 인식 결과를 확인한 뒤 분석을 시작해 주세요.')
+    try {
+      const result = await parseWorkbook(file)
+      setParseResult(result)
+      setSelectedSheetName(result.sheets[0]?.name ?? '')
+      setShowManualMapping(false)
+      setMapping(buildMapping(result.sheets[0]?.headers ?? []))
+      setMessage(
+        '파일을 읽었습니다. 새 파일 미리보기와 자동 인식 결과를 확인한 뒤 분석을 시작해 주세요.',
+      )
+    } catch (error) {
+      setParseResult(null)
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : '파일을 분석하지 못했습니다. 파일 형식과 내용을 확인해 주세요.',
+      )
+    }
   }
 
   const handleDrop = (
@@ -103,26 +133,7 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
   }
 
   const handleCsv = async (file: File) => {
-    const text = await file.text()
-    const rows = text
-      .split(/\r?\n/)
-      .map((line) => line.split(',').map((cell) => cell.trim()))
-      .filter((row) => row.some(Boolean))
-    const headers = rows[0] ?? []
-    const dataRows = rows.slice(1).map((row) =>
-      headers.reduce<Record<string, string>>((acc, header, index) => {
-        acc[header] = row[index] ?? ''
-        return acc
-      }, {}),
-    )
-    setParseResult({
-      sheets: [{ name: file.name, headers, rows: dataRows }],
-      autoRows: [],
-      diagnostics: ['CSV는 수동 컬럼 매핑으로 처리합니다.'],
-    })
-    setSelectedSheetName(file.name)
-    setShowManualMapping(false)
-    setMessage('CSV를 읽었습니다. 필수 컬럼 매핑을 확인해 주세요.')
+    await handleFile(file)
   }
 
   const applyMapping = () => {
@@ -244,7 +255,7 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
         <section className="panel recognition-panel">
           <div className="panel-title">
             <h2>자동 인식 결과</h2>
-            <span>매핑 신뢰도 {recognition.mappingConfidence}%</span>
+            <span>구조·데이터 인식 신뢰도 {recognition.mappingConfidence}%</span>
           </div>
           <div className="recognition-grid">
             <article>
@@ -361,10 +372,23 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
         </section>
       )}
 
+      {parseResult && pendingBills.length > 0 && (
+        <section className="panel pending-data-panel">
+          <div className="panel-title">
+            <h2>새 파일 분석 미리보기</h2>
+            <span className="pending-data-badge">아직 적용 전</span>
+          </div>
+          <p className="preview-state-note">
+            아래 내용은 새로 선택한 파일의 미리보기입니다. `이 매핑으로 분석 시작`을 눌러야 현재 진단 데이터가 변경됩니다.
+          </p>
+          <BillTable bills={pendingBills.slice(0, 12)} />
+        </section>
+      )}
+
       <section className="panel">
         <div className="panel-title">
-          <h2>고지서 입력 내역</h2>
-          <span>최근 12개월 미리보기</span>
+          <h2>현재 적용 데이터</h2>
+          <span>분석에 사용 중 · 최근 12개월</span>
         </div>
         <BillTable bills={recentBills} />
       </section>

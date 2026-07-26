@@ -40,4 +40,17 @@ describe('local demo storage TTL harness', () => {
     expect(localStorage.getItem('el-bill:expired')).toBeNull()
     expect(loadWithExpiry<string>('el-bill:valid')?.data).toBe('new')
   })
+
+  it('does not extend the absolute expiry when saved data is updated', () => {
+    const initial = saveWithExpiry('el-bill:absolute', { version: 1 })
+
+    vi.setSystemTime(new Date('2026-06-30T23:00:00+09:00'))
+    const updated = saveWithExpiry('el-bill:absolute', { version: 2 })
+
+    expect(updated.createdAt).toBe(initial.createdAt)
+    expect(updated.expiresAt).toBe(initial.expiresAt)
+
+    vi.setSystemTime(new Date('2026-07-01T00:00:01+09:00'))
+    expect(loadWithExpiry('el-bill:absolute')).toBeNull()
+  })
 })

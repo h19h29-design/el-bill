@@ -2,6 +2,36 @@ import { expect, test } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 import JSZip from 'jszip'
 
+const billMonths = [
+  [2025, 8],
+  [2025, 9],
+  [2025, 10],
+  [2025, 11],
+  [2025, 12],
+  [2026, 1],
+  [2026, 2],
+  [2026, 3],
+  [2026, 4],
+  [2026, 5],
+  [2026, 6],
+  [2026, 7],
+] as const
+
+const powerPlannerBillRows = billMonths
+  .map(([year, month], index) => {
+    const usage = 46_000 + index * 900
+    const amount = 6_900_000 + index * 135_000
+    const appliedPower = 490 + (index % 6)
+    return `
+      <tr role="row">
+        <td title="${year}년 ${String(month).padStart(2, '0')}월" aria-describedby="grid_YEAR_ROW">${year}년 ${String(month).padStart(2, '0')}월</td>
+        <td title="${appliedPower}" aria-describedby="grid_JOJ_KW">${appliedPower}</td>
+        <td title="${usage.toLocaleString('en-US')}" aria-describedby="grid_F_AP_QT">${usage.toLocaleString('en-US')}</td>
+        <td title="${amount.toLocaleString('en-US')}" aria-describedby="grid_TOT_REQ_AMT">${amount.toLocaleString('en-US')}</td>
+      </tr>`
+  })
+  .join('')
+
 const powerPlannerHtmlFixture = `
 <html>
   <body>
@@ -16,20 +46,7 @@ const powerPlannerHtmlFixture = `
       </thead>
     </table>
     <table class="ui-jqgrid-btable">
-      <tbody>
-        <tr role="row">
-          <td title="2026년 06월" aria-describedby="grid_YEAR_ROW">2026년 06월</td>
-          <td title="493" aria-describedby="grid_JOJ_KW">493</td>
-          <td title="48,365" aria-describedby="grid_F_AP_QT">48,365</td>
-          <td title="7,138,790" aria-describedby="grid_TOT_REQ_AMT">7,138,790</td>
-        </tr>
-        <tr role="row">
-          <td title="2026년 07월" aria-describedby="grid_YEAR_ROW">2026년 07월</td>
-          <td title="498" aria-describedby="grid_JOJ_KW">498</td>
-          <td title="50,120" aria-describedby="grid_F_AP_QT">50,120</td>
-          <td title="7,421,000" aria-describedby="grid_TOT_REQ_AMT">7,421,000</td>
-        </tr>
-      </tbody>
+      <tbody>${powerPlannerBillRows}</tbody>
     </table>
   </body>
 </html>`
@@ -72,6 +89,9 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await expect(
     page.locator('.recognition-grid article').filter({ hasText: '누락 컬럼' }),
   ).toContainText('없음')
+  await expect(page.getByRole('heading', { name: '새 파일 분석 미리보기' })).toBeVisible()
+  await expect(page.getByText('아직 적용 전')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '현재 적용 데이터' })).toBeVisible()
   await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
   await expectViewHeading('자동진단')
   await expect(page.getByText('사용자 업로드 분석', { exact: true })).toBeVisible()

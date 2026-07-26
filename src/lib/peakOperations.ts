@@ -8,10 +8,20 @@ export interface PeakOperationPlan {
   sequentialOrder: string[]
   avoidCombinations: string[]
   exceptionConditions: string[]
+  operatingWindows: Array<{
+    label: string
+    time: string
+    tone: 'danger' | 'warning' | 'neutral'
+  }>
 }
 
 const getNumber = (value: number | undefined, fallback: number) =>
   Number.isFinite(value) && value ? Number(value) : fallback
+
+const formatStartTime = (offset: number) => {
+  const minutes = 13 * 60 + offset * 5
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}
 
 export const buildPeakOperationPlan = (
   scenario: PeakScenario,
@@ -24,6 +34,12 @@ export const buildPeakOperationPlan = (
   const auditoriumText = scenario.auditoriumCooling
     ? '강당 냉방은 12:30 예냉 후 유지운전으로 전환합니다.'
     : '강당 냉난방은 행사 시간 외에는 대기 운전으로 유지합니다.'
+  const mainSequence = Array.from({ length: mainGroups }, (_, index) =>
+    `${formatStartTime(index)} 본관 EHP ${index + 1}그룹 기동`,
+  )
+  const annexSequence = Array.from({ length: annexGroups }, (_, index) =>
+    `${formatStartTime(mainGroups + index)} 별관 EHP ${index + 1}그룹 기동`,
+  )
 
   return {
     todayPlan:
@@ -37,11 +53,10 @@ export const buildPeakOperationPlan = (
     preCoolingHeating:
       '예냉은 최대부하 30~60분 전, 예열은 등교 전 30분 전부터 시작하고 최대부하 시간대에는 신규 기동보다 유지운전을 우선합니다.',
     sequentialOrder: [
-      '보건실, 서버실, 특수학급 등 제외 공간 상시 유지',
-      '본관 저층부 EHP 1그룹',
-      '본관 고층부 EHP 2그룹',
-      '별관 EHP 그룹',
-      '특별실 및 강당 유지운전',
+      `제외 공간 상시 유지: ${exemptSpaces}`,
+      ...mainSequence,
+      ...annexSequence,
+      '특별실 및 강당은 예냉 후 유지운전',
     ],
     avoidCombinations: [
       `급식실 고전력 기기(${cafeteriaTime}) + 강당 EHP`,
@@ -52,6 +67,33 @@ export const buildPeakOperationPlan = (
       `${exemptSpaces}은 학생 수업환경과 안전을 위해 피크 제어 대상에서 제외합니다.`,
       '폭염·한파 특보, 시험, 행사, 보건상 필요 시 담당자 판단으로 예외 운전합니다.',
       '예외 운전은 시간과 사유를 메모해 다음 달 피크관리 계획에 반영합니다.',
+    ],
+    operatingWindows: [
+      {
+        label: '하계 최대부하',
+        time: '11:00~12:00 · 13:00~17:00',
+        tone: 'danger',
+      },
+      {
+        label: '동계 최대부하',
+        time: '10:00~12:00 · 17:00~20:00 · 22:00~23:00',
+        tone: 'danger',
+      },
+      {
+        label: '급식실 고전력 기기',
+        time: cafeteriaTime,
+        tone: 'warning',
+      },
+      {
+        label: '특별실 집중 사용',
+        time: specialRoomTime,
+        tone: 'warning',
+      },
+      {
+        label: '강당 예냉·유지운전',
+        time: scenario.auditoriumCooling ? '12:30 예냉 · 이후 유지운전' : '행사 시간 확인',
+        tone: 'neutral',
+      },
     ],
   }
 }

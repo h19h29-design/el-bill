@@ -13,6 +13,30 @@ export interface WorkbookParseResult {
   diagnostics: string[]
 }
 
+const maxUploadFileBytes = 10 * 1024 * 1024
+const maxWorkbookRows = 10_000
+
+export const validateUploadFile = (
+  file: Pick<File, 'name' | 'size'>,
+): string | null => {
+  if (file.size > maxUploadFileBytes) {
+    return '파일 크기는 10MB 이하만 분석할 수 있습니다.'
+  }
+  if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
+    return '엑셀(.xlsx, .xls) 또는 CSV(.csv) 파일만 업로드할 수 있습니다.'
+  }
+  return null
+}
+
+export const getWorkbookLimitMessage = (
+  result: WorkbookParseResult,
+): string | null => {
+  const totalRows = result.sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0)
+  return totalRows > maxWorkbookRows
+    ? '전체 데이터가 10,000행을 초과하여 브라우저 분석을 중단했습니다. 기간이나 시트를 나눠 업로드해 주세요.'
+    : null
+}
+
 const normalize = (value: unknown) => String(value ?? '').trim()
 const asNumber = (value: unknown) => {
   if (typeof value === 'number') return value
@@ -291,7 +315,7 @@ const parsePowerPlannerHtmlSheet = (text: string): ParsedSheet | null => {
   }
 }
 
-export const parseWorkbook = async (
+const parseWorkbookContents = async (
   file: File | ArrayBuffer,
 ): Promise<WorkbookParseResult> => {
   const buffer = file instanceof File ? await file.arrayBuffer() : file
@@ -336,6 +360,20 @@ export const parseWorkbook = async (
     autoRows: known.rows,
     diagnostics: known.diagnostics,
   }
+}
+
+export const parseWorkbook = async (
+  file: File | ArrayBuffer,
+): Promise<WorkbookParseResult> => {
+  if (file instanceof File) {
+    const fileMessage = validateUploadFile(file)
+    if (fileMessage) throw new Error(fileMessage)
+  }
+
+  const result = await parseWorkbookContents(file)
+  const rowLimitMessage = getWorkbookLimitMessage(result)
+  if (rowLimitMessage) throw new Error(rowLimitMessage)
+  return result
 }
 
 export const mapRowsToBills = (

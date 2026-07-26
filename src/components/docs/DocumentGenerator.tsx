@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react'
-import { CheckCircle2, ClipboardCopy, Download, Eye, FileArchive } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  ClipboardCopy,
+  Download,
+  Eye,
+  FileArchive,
+  ShieldAlert,
+} from 'lucide-react'
 import type {
   AutoDiagnosisResult,
   MonthlyBill,
@@ -77,8 +85,13 @@ export function DocumentGenerator({
       ),
     [profile, latestBill, comparison, scenario, diagnosis, peakOperationPlan],
   )
+  const canGenerateChangeDocuments = diagnosis.canGenerateChangeDocuments
 
   const downloadPdf = async (targetId: string, filename: string) => {
+    if (!canGenerateChangeDocuments) {
+      setStatus(diagnosis.documentBlockReason)
+      return
+    }
     const element = document.getElementById(targetId)
     if (!element) return
     setStatus(`${filename} 생성 중입니다.`)
@@ -92,6 +105,10 @@ export function DocumentGenerator({
   }
 
   const downloadZip = async () => {
+    if (!canGenerateChangeDocuments) {
+      setStatus(diagnosis.documentBlockReason)
+      return
+    }
     const plan = document.getElementById('plan-preview')
     const letter = document.getElementById('letter-preview')
     const application = document.getElementById('application-preview')
@@ -123,6 +140,15 @@ export function DocumentGenerator({
 
   return (
     <div className="view-stack">
+      {!canGenerateChangeDocuments && (
+        <section className="document-block-notice" role="status">
+          <ShieldAlert size={22} />
+          <div>
+            <strong>변경신청 문서 생성 보류</strong>
+            <p>{diagnosis.documentBlockReason}</p>
+          </div>
+        </section>
+      )}
       <section className="document-grid">
         <article className="document-card">
           <h2>전기요금제 변경 계획(안)</h2>
@@ -137,12 +163,14 @@ export function DocumentGenerator({
             </button>
             <button
               type="button"
+              disabled={!canGenerateChangeDocuments}
               onClick={() => void copyText(bundle.planText).then(() => setStatus('계획안 문안을 복사했습니다.'))}
             >
               <ClipboardCopy size={16} /> 문안 복사
             </button>
             <button
               type="button"
+              disabled={!canGenerateChangeDocuments}
               onClick={() => void downloadPdf('plan-preview', '전기요금제_변경계획안.pdf')}
             >
               <Download size={16} /> 다운로드
@@ -163,12 +191,14 @@ export function DocumentGenerator({
             </button>
             <button
               type="button"
+              disabled={!canGenerateChangeDocuments}
               onClick={() => void copyText(bundle.kepcoLetterText).then(() => setStatus('공문 문안을 복사했습니다.'))}
             >
               <ClipboardCopy size={16} /> 문안 복사
             </button>
             <button
               type="button"
+              disabled={!canGenerateChangeDocuments}
               onClick={() => void downloadPdf('letter-preview', '한전_제출공문.pdf')}
             >
               <Download size={16} /> 다운로드
@@ -189,6 +219,7 @@ export function DocumentGenerator({
             </button>
             <button
               type="button"
+              disabled={!canGenerateChangeDocuments}
               onClick={() =>
                 void copyText(JSON.stringify(bundle.applicationPreviewData, null, 2)).then(() =>
                   setStatus('신청서 자동입력 항목을 복사했습니다.'),
@@ -199,6 +230,7 @@ export function DocumentGenerator({
             </button>
             <button
               type="button"
+              disabled={!canGenerateChangeDocuments}
               onClick={() => void downloadPdf('application-preview', '전기사용계약_변경신청서_미리보기.pdf')}
             >
               <Download size={16} /> 다운로드
@@ -210,13 +242,19 @@ export function DocumentGenerator({
           <h2>붙임 체크리스트</h2>
           <ul className="check-list">
             {bundle.checklist.map((item) => (
-              <li key={item.label}>
-                <CheckCircle2 size={18} />
-                {item.label}
+              <li key={item.label} className={item.ready ? 'ready' : 'pending'}>
+                {item.ready ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+                <span>{item.label}</span>
+                <em>{item.ready ? '준비됨' : '첨부 확인'}</em>
               </li>
             ))}
           </ul>
-          <button type="button" className="outline-download" onClick={() => void downloadZip()}>
+          <button
+            type="button"
+            className="outline-download"
+            disabled={!canGenerateChangeDocuments}
+            onClick={() => void downloadZip()}
+          >
             <FileArchive size={16} />
             전체 다운로드 (ZIP)
           </button>
@@ -309,6 +347,7 @@ export function DocumentGenerator({
           >
             <h3>전기사용계약 변경신청서 PDF 미리보기</h3>
             <div className="doc-alert">
+              한전 공식 신청서가 아닌 작성 참고용 미리보기입니다.
               자동 입력 가능 항목과 수기 확인 필요 항목을 구분했습니다.
             </div>
             <table>

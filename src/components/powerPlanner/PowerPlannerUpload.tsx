@@ -17,6 +17,7 @@ import type {
 } from '../../types'
 import {
   parseWorkbook,
+  validateUploadFile,
   type ParsedSheet,
   type WorkbookParseResult,
 } from '../../lib/excel'
@@ -68,14 +69,30 @@ export function PowerPlannerUpload({
   const required = requiredPowerPlannerMapping(dataType)
 
   const handleFile = async (file: File) => {
-    const result = await parseWorkbook(file)
-    const firstSheet = result.sheets[0]
-    setParseResult(result)
-    setSelectedSheetName(firstSheet?.name ?? '')
-    setSourceName(file.name)
-    setDataType(guessPowerPlannerDataType(firstSheet?.headers ?? []))
-    setMapping(guessPowerPlannerMapping(firstSheet?.headers ?? []))
-    setMessage('파일을 읽었습니다. 데이터 유형과 컬럼 매핑을 확인해 주세요.')
+    const validationMessage = validateUploadFile(file)
+    if (validationMessage) {
+      setParseResult(null)
+      setMessage(validationMessage)
+      return
+    }
+
+    try {
+      const result = await parseWorkbook(file)
+      const firstSheet = result.sheets[0]
+      setParseResult(result)
+      setSelectedSheetName(firstSheet?.name ?? '')
+      setSourceName(file.name)
+      setDataType(guessPowerPlannerDataType(firstSheet?.headers ?? []))
+      setMapping(guessPowerPlannerMapping(firstSheet?.headers ?? []))
+      setMessage('파일을 읽었습니다. 데이터 유형과 컬럼 매핑을 확인해 주세요.')
+    } catch (error) {
+      setParseResult(null)
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : '파일을 분석하지 못했습니다. 파일 형식과 내용을 확인해 주세요.',
+      )
+    }
   }
 
   const handleDrop = (event: DragEvent<HTMLLabelElement>) => {

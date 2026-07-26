@@ -201,6 +201,21 @@ export function PeakManager({
 
       <section className="panel">
         <div className="panel-title">
+          <h2>요금 최대부하·학교 운영시간 중첩</h2>
+          <span>같은 시간대 설비 동시 기동 주의</span>
+        </div>
+        <div className="operating-window-grid">
+          {peakOperationPlan.operatingWindows.map((window) => (
+            <article key={window.label} className={window.tone}>
+              <span>{window.label}</span>
+              <strong>{window.time}</strong>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
           <h2>피크관리 자동 운영안 입력</h2>
           <span>학교 설비 운영 조건</span>
         </div>

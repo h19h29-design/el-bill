@@ -369,8 +369,16 @@ export const buildAutoDiagnosis = ({
         scenario,
         mode,
       )
+      const eligibleComparison = sameContractPriority
+        ? comparison
+        : {
+            ...comparison,
+            recommendation: '추가 검토 필요' as const,
+            basis:
+              '계약종별 또는 수전전압이 현재 계약과 달라 한전 적용 가능 여부를 먼저 확인해야 합니다.',
+          }
       return {
-        ...comparison,
+        ...eligibleComparison,
         sameContractPriority,
         reviewReason: sameContractPriority
           ? '현재 계약종별과 수전전압이 일치하는 우선 후보입니다.'
@@ -392,6 +400,13 @@ export const buildAutoDiagnosis = ({
   const confidence = assessDataConfidence(bills)
   const recentBills = getRecentBills(bills, 12)
   const lastBill = recentBills.at(-1)
+  const canGenerateChangeDocuments =
+    recentBills.length >= 12 &&
+    comparison.sameContractPriority &&
+    comparison.recommendation === '변경 추천'
+  const documentBlockReason = canGenerateChangeDocuments
+    ? ''
+    : '최종 판단이 변경 추천이고 현재 계약종별·수전전압과 일치하는 후보인 경우에만 변경신청 문서를 생성할 수 있습니다.'
   const missingDataNotes = [
     ...(recentBills.length < 12 ? ['최근 12개월 고지서 자료가 부족합니다.'] : []),
     ...(confidence !== '데이터 충분'
@@ -416,7 +431,9 @@ export const buildAutoDiagnosis = ({
       : lastBill
         ? `${lastBill.year}년 ${lastBill.month}월 고지서`
         : '자료 없음',
-    availableDocumentCount: 6,
+    availableDocumentCount: canGenerateChangeDocuments ? 6 : 2,
+    canGenerateChangeDocuments,
+    documentBlockReason,
     finalJudgement: comparison.recommendation,
     judgementBasis: comparison.basis,
     missingDataNotes,
@@ -467,7 +484,13 @@ export const summarizeWorkbookRecognition = (
         .map(([label]) => label)
   const normalizedMissingRequiredColumns = hasAutoRows ? [] : missingRequiredColumns
   const mappingConfidence = hasAutoRows
-    ? 100
+    ? Math.min(
+        99,
+        Math.round(
+          80 +
+            (optionalColumns.length / normalizedOptionalBillColumns.length) * 19,
+        ),
+      )
     : Math.round(
         ((requiredMap.length - missingRequiredColumns.length) / requiredMap.length) * 100,
       )

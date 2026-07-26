@@ -185,6 +185,8 @@ export interface AutoDiagnosisResult {
   recognizedMonths: number
   lastUploadLabel: string
   availableDocumentCount: number
+  canGenerateChangeDocuments: boolean
+  documentBlockReason: string
   finalJudgement: Recommendation
   judgementBasis: string
   missingDataNotes: string[]

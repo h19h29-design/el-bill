@@ -1045,6 +1045,44 @@ textarea:focus {
   font-weight: 900;
 }
 
+.operating-window-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.operating-window-grid article {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  background: #f5f9fd;
+  border: 1px solid #cbdbea;
+  border-radius: 6px;
+}
+
+.operating-window-grid article.danger {
+  background: #fff3ed;
+  border-color: #ffc6ac;
+}
+
+.operating-window-grid article.warning {
+  background: #fff9e9;
+  border-color: #f4d278;
+}
+
+.operating-window-grid span {
+  color: #526b83;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.operating-window-grid strong {
+  color: #173858;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .check-list {
   display: grid;
   gap: 12px;
@@ -1065,6 +1103,24 @@ textarea:focus {
 .check-list svg {
   flex: 0 0 auto;
   color: #0aa87a;
+}
+
+.check-list li span {
+  min-width: 0;
+}
+
+.check-list li em {
+  margin-left: auto;
+  color: #0a7c5d;
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.check-list li.pending,
+.check-list li.pending svg,
+.check-list li.pending em {
+  color: #b45309;
 }
 
 .future-note {
@@ -1119,6 +1175,26 @@ textarea:focus {
   display: grid;
   grid-template-columns: repeat(4, minmax(180px, 1fr));
   gap: 13px;
+}
+
+.document-block-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  color: #8a3b13;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 7px;
+}
+
+.document-block-notice svg {
+  flex: 0 0 auto;
+}
+
+.document-block-notice p {
+  margin: 4px 0 0;
+  line-height: 1.55;
 }
 
 .document-card,
@@ -1630,6 +1706,23 @@ textarea:focus {
   gap: 8px;
 }
 
+.pending-data-panel {
+  border-color: #86bbed;
+}
+
+.pending-data-badge {
+  color: #9a5700 !important;
+  background: #fff7e8 !important;
+  border: 1px solid #f4c76a !important;
+}
+
+.preview-state-note {
+  margin: 0 0 14px;
+  color: #536b82;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .candidate-table-wrap {
   min-width: 0;
 }
@@ -1819,6 +1912,7 @@ textarea:focus {
   .diagnosis-note-grid,
   .operation-plan-grid,
   .operation-list-grid,
+  .operating-window-grid,
   .recognition-grid,
   .breakdown-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1896,6 +1990,7 @@ textarea:focus {
   .diagnosis-note-grid,
   .operation-plan-grid,
   .operation-list-grid,
+  .operating-window-grid,
   .recognition-grid {
     grid-template-columns: 1fr;
   }

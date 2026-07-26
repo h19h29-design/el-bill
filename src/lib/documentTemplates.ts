@@ -36,6 +36,8 @@ export const buildDocumentBundle = (
   const latestBillWon = latestBill ? formatWon(latestBill.totalBillWon) : '자료 없음'
   const riskLevel = getPeakRiskLevel(scenario.targetPeakKw, scenario.expectedPeakKw)
   const calculationBreakdown = diagnosis?.comparison.calculationBreakdown ?? []
+  const canGenerateChangeDocuments =
+    diagnosis?.canGenerateChangeDocuments ?? true
 
   const planText = [
     '예산절감을 위한 전기요금제 변경 계획(안)',
@@ -164,10 +166,10 @@ export const buildDocumentBundle = (
       개인정보동의: '수기 확인 필요',
     },
     checklist: [
-      { label: '사업자등록증', ready: true },
-      { label: '전기요금내역', ready: true },
-      { label: '건축물관리대장', ready: true },
-      { label: '변경신청서', ready: true },
+      { label: '사업자등록증', ready: false },
+      { label: '전기요금내역', ready: Boolean(latestBill) },
+      { label: '건축물관리대장', ready: false },
+      { label: '변경신청서', ready: canGenerateChangeDocuments },
       { label: '계산 근거 요약표', ready: true },
       { label: '담당자 검토 필요 항목', ready: true },
     ],

@@ -138,8 +138,12 @@ export function Dashboard({
             <BarChart3 size={22} />
           </div>
           <span>예상 연간 절감액</span>
-          <strong>{formatWon(summary.comparison.savingWon)}</strong>
-          <small>요금제 변경 시뮬레이션</small>
+          <strong>{formatWon(diagnosis.comparison.savingWon)}</strong>
+          <small>
+            {diagnosis.calculationMode === 'billDelta'
+              ? '고지서 기반 차액 추정'
+              : '요금표 기반 전체 추정'}
+          </small>
         </article>
         <article className="kpi-card">
           <div className="kpi-icon orange">

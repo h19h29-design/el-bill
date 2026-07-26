@@ -15,8 +15,14 @@ export const createExpiry = () => {
 }
 
 export const saveWithExpiry = <T>(key: string, data: T) => {
+  const existing = loadWithExpiry<T>(key)
   const payload: StoredPayload<T> = {
-    ...createExpiry(),
+    ...(existing
+      ? {
+          createdAt: existing.createdAt,
+          expiresAt: existing.expiresAt,
+        }
+      : createExpiry()),
     data,
   }
   localStorage.setItem(key, JSON.stringify(payload))

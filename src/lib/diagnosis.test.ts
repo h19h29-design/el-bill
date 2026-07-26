@@ -91,6 +91,25 @@ describe('automatic diagnosis harness', () => {
     expect(comparison.recommendation).toBe('유지 추천')
   })
 
+  it('blocks change-document generation when the final judgement is not change', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: twelveBills,
+      profile: {
+        ...defaultSchoolProfile,
+        contractType: currentPlan.contractType,
+        voltageType: currentPlan.voltageType,
+        currentPlan: currentPlan.planName,
+      },
+      ratePlans: [currentPlan, expensivePlan],
+      scenario: defaultScenario,
+    })
+
+    expect(diagnosis.finalJudgement).toBe('유지 추천')
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+    expect(diagnosis.documentBlockReason).toContain('변경 추천')
+    expect(diagnosis.availableDocumentCount).toBe(2)
+  })
+
   it('recalculates savings when expected peak changes', () => {
     const basePeakComparison = comparePlansForDiagnosis(
       twelveBills,
@@ -109,6 +128,39 @@ describe('automatic diagnosis harness', () => {
 
     expect(highPeakComparison.savingWon).not.toBe(basePeakComparison.savingWon)
     expect(highPeakComparison.peakScenarioSavingWon).toBe(highPeakComparison.savingWon)
+  })
+
+  it('forces candidates with different contract conditions to additional review', () => {
+    const foreignVoltagePlan: RatePlan = {
+      ...cheaperPlan,
+      id: 'foreign-voltage',
+      voltageType: '고압B',
+      planName: '고압B 초저가',
+      baseRateWonPerKw: 1,
+      seasonRates: {
+        springAutumn: 1,
+        summer: 1,
+        winter: 1,
+      },
+    }
+    const diagnosis = buildAutoDiagnosis({
+      bills: [...twelveBills, ...twelveBills, ...twelveBills],
+      profile: {
+        ...defaultSchoolProfile,
+        contractType: currentPlan.contractType,
+        voltageType: currentPlan.voltageType,
+        currentPlan: currentPlan.planName,
+      },
+      ratePlans: [currentPlan, cheaperPlan, foreignVoltagePlan],
+      scenario: defaultScenario,
+    })
+    const foreignCandidate = diagnosis.topCandidates.find(
+      (candidate) => candidate.candidatePlanId === foreignVoltagePlan.id,
+    )
+
+    expect(foreignCandidate?.savingWon).toBeGreaterThan(0)
+    expect(foreignCandidate?.recommendation).toBe('추가 검토 필요')
+    expect(foreignCandidate?.basis).toContain('계약종별 또는 수전전압')
   })
 
   it('summarizes missing required upload columns as guidance, not a crash', () => {
@@ -179,7 +231,8 @@ describe('automatic diagnosis harness', () => {
       ]),
     )
     expect(recognition?.recognizedRecordCount).toBe(2)
-    expect(recognition?.mappingConfidence).toBe(100)
+    expect(recognition?.mappingConfidence).toBeGreaterThanOrEqual(80)
+    expect(recognition?.mappingConfidence).toBeLessThan(100)
     expect(recognition?.canAnalyze).toBe(true)
   })
 })

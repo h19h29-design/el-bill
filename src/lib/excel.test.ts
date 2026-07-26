@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { parseWorkbook } from './excel'
+import {
+  getWorkbookLimitMessage,
+  parseWorkbook,
+  validateUploadFile,
+} from './excel'
 
 const attachedWorkbook = '/Users/mac-mini/Downloads/0. 전기요금-등촌고.xlsx'
 const attachedPowerPlannerWorkbook = '/Users/mac-mini/Desktop/월별청구요금.xls'
@@ -41,6 +45,31 @@ const powerPlannerHtmlFixture = `
 </html>`
 
 describe('attached workbook parser harness', () => {
+  it('rejects an oversized browser upload before parsing', () => {
+    const message = validateUploadFile({
+      name: 'oversized.xlsx',
+      size: 10 * 1024 * 1024 + 1,
+    })
+
+    expect(message).toContain('10MB')
+  })
+
+  it('rejects a workbook whose total rows exceed the analysis limit', () => {
+    const message = getWorkbookLimitMessage({
+      sheets: [
+        {
+          name: 'large',
+          headers: ['연도'],
+          rows: Array.from({ length: 10_001 }, () => ({ 연도: 2026 })),
+        },
+      ],
+      autoRows: [],
+      diagnostics: [],
+    })
+
+    expect(message).toContain('10,000행')
+  })
+
   it.runIf(existsSync(attachedWorkbook))(
     'auto-merges the provided yearly electricity sheets',
     async () => {
