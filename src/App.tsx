@@ -29,16 +29,19 @@ import { sortBillsChronologically } from './lib/calculations'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import {
-  createExpiry,
   dataProvenanceStorageKey,
   isStoredMonthlyBillCollection,
   legacyDataModeStorageKey,
   loadDataProvenance,
   loadWithExpiry,
   powerPlannerStorageKey,
-  purgeExpiredKeys,
+  purgeStorageSession,
   restorePowerPlannerState,
-  saveWithExpiry,
+  restoreStorageSession,
+  saveForSession,
+  startNewStorageSession,
+  storageSessionKey,
+  type StorageSession,
 } from './lib/storage'
 
 const billsKey = 'el-bill:bills'
@@ -54,9 +57,10 @@ const storageKeys = [
   dataProvenanceStorageKey,
   legacyDataModeStorageKey,
 ]
+const maxBrowserTimeoutMs = 2_147_483_647
 
 function App() {
-  purgeExpiredKeys(storageKeys)
+  const initialStorageSession = restoreStorageSession(storageKeys)
 
   const loadedBillsPayload = loadWithExpiry<unknown>(billsKey)
   const loadedBills = isStoredMonthlyBillCollection(loadedBillsPayload?.data)
@@ -67,7 +71,10 @@ function App() {
   const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
   const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
   const [restoredPowerPlanner] = useState(() =>
-    restorePowerPlannerState(loadDataProvenance(loadedBills?.data)),
+    restorePowerPlannerState(
+      loadDataProvenance(loadedBills?.data, initialStorageSession),
+      initialStorageSession,
+    ),
   )
 
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
@@ -86,38 +93,70 @@ function App() {
   const [dataProvenance, setDataProvenance] = useState<DataProvenance>(
     restoredPowerPlanner.provenance,
   )
-  const [expiresAt, setExpiresAt] = useState(
-    loadedBills?.expiresAt ?? createExpiry().expiresAt,
+  const [storageSession, setStorageSession] = useState<StorageSession | null>(
+    initialStorageSession,
   )
+  const [expiryMessage, setExpiryMessage] = useState('')
 
   useEffect(() => {
-    const saved = saveWithExpiry(billsKey, bills)
-    setExpiresAt(saved.expiresAt)
-  }, [bills])
+    if (storageSession) saveForSession(billsKey, bills, storageSession)
+  }, [bills, storageSession])
 
   useEffect(() => {
-    saveWithExpiry(profileKey, profile)
-  }, [profile])
+    if (storageSession) saveForSession(profileKey, profile, storageSession)
+  }, [profile, storageSession])
 
   useEffect(() => {
-    saveWithExpiry(scenarioKey, scenario)
-  }, [scenario])
+    if (storageSession) saveForSession(scenarioKey, scenario, storageSession)
+  }, [scenario, storageSession])
 
   useEffect(() => {
-    saveWithExpiry(ratePlansKey, ratePlans)
-  }, [ratePlans])
+    if (storageSession) saveForSession(ratePlansKey, ratePlans, storageSession)
+  }, [ratePlans, storageSession])
 
   useEffect(() => {
+    if (!storageSession) return
     if (powerPlannerDataSource) {
-      saveWithExpiry(powerPlannerStorageKey, powerPlannerDataSource)
+      saveForSession(powerPlannerStorageKey, powerPlannerDataSource, storageSession)
     } else {
       localStorage.removeItem(powerPlannerStorageKey)
     }
-  }, [powerPlannerDataSource])
+  }, [powerPlannerDataSource, storageSession])
 
   useEffect(() => {
-    saveWithExpiry(dataProvenanceStorageKey, dataProvenance)
-  }, [dataProvenance])
+    if (storageSession) {
+      saveForSession(dataProvenanceStorageKey, dataProvenance, storageSession)
+    }
+  }, [dataProvenance, storageSession])
+
+  useEffect(() => {
+    if (!storageSession) return
+
+    const expireSession = () => {
+      if (!purgeStorageSession(storageKeys, storageSessionKey)) return
+      setStorageSession(null)
+      setBills(sampleBills)
+      setProfile(defaultSchoolProfile)
+      setScenario(defaultScenario)
+      setRatePlans(defaultRatePlans)
+      setPowerPlannerDataSource(null)
+      setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
+      setActiveView('dashboard')
+      setExpiryMessage('24시간이 지나 시연 데이터가 삭제되었습니다.')
+    }
+
+    const remainingMs = Date.parse(storageSession.expiresAt) - Date.now()
+    if (remainingMs <= 0) {
+      expireSession()
+      return
+    }
+
+    const timeoutId = window.setTimeout(
+      expireSession,
+      Math.min(remainingMs, maxBrowserTimeoutMs),
+    )
+    return () => window.clearTimeout(timeoutId)
+  }, [storageSession])
 
   const sortedBills = useMemo(() => sortBillsChronologically(bills), [bills])
   const latestBill = sortedBills.at(-1)
@@ -142,22 +181,26 @@ function App() {
   )
 
   const resetSample = () => {
-    localStorage.removeItem(billsKey)
-    localStorage.removeItem(profileKey)
-    localStorage.removeItem(scenarioKey)
-    localStorage.removeItem(ratePlansKey)
-    localStorage.removeItem(powerPlannerStorageKey)
-    localStorage.removeItem(dataProvenanceStorageKey)
-    localStorage.removeItem(legacyDataModeStorageKey)
+    storageKeys.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(storageSessionKey)
+    setStorageSession(null)
     setBills(sampleBills)
     setProfile(defaultSchoolProfile)
     setScenario(defaultScenario)
     setRatePlans(defaultRatePlans)
     setPowerPlannerDataSource(null)
     setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
+    setExpiryMessage('')
+  }
+
+  const startUploadSession = () => {
+    const nextSession = startNewStorageSession()
+    setStorageSession(nextSession)
+    setExpiryMessage('')
   }
 
   const applyBillsAndOpenDiagnosis = (nextBills: MonthlyBill[]) => {
+    startUploadSession()
     setBills(nextBills)
     setDataProvenance((current) => ({ ...current, bills: 'uploaded' }))
     setActiveView('diagnosis')
@@ -167,6 +210,7 @@ function App() {
     nextDataSource: PowerPlannerDataSource | null,
     origin: DataProvenance['powerPlanner'],
   ) => {
+    if (nextDataSource && origin === 'uploaded') startUploadSession()
     setPowerPlannerDataSource(nextDataSource)
     setDataProvenance((current) => ({ ...current, powerPlanner: origin }))
     if (nextDataSource) {
@@ -184,9 +228,10 @@ function App() {
             <p>학교별 한전고지서 분석 · 요금제 비교 · 피크관리 · 한전 변경신청서 PDF 생성</p>
           </div>
           <TopNotice
-            expiresAt={expiresAt}
+            expiresAt={storageSession?.expiresAt}
             dataProvenance={dataProvenance}
             onReset={resetSample}
+            expiryMessage={expiryMessage}
           />
         </header>
 

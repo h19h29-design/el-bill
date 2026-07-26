@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import App from './App'
 import { sampleBills } from './data/sampleBills'
 import { samplePowerPlannerDataSource } from './data/samplePowerPlanner'
@@ -197,5 +197,64 @@ describe('data provenance persistence', () => {
         powerPlanner: 'none',
       })
     })
+  })
+})
+
+describe('shared live storage expiry', () => {
+  afterEach(() => {
+    cleanup()
+    localStorage.clear()
+    vi.useRealTimers()
+  })
+
+  it('clears live user state when the shared session expires', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-26T00:00:00Z'))
+    const session = {
+      createdAt: '2026-07-26T00:00:00.000Z',
+      expiresAt: '2026-07-27T00:00:00.000Z',
+    }
+    localStorage.setItem('el-bill:storage-session', JSON.stringify(session))
+    localStorage.setItem(
+      'el-bill:bills',
+      JSON.stringify({ ...session, data: sampleBills }),
+    )
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      JSON.stringify({ ...session, data: { bills: 'uploaded', powerPlanner: 'none' } }),
+    )
+
+    render(<App />)
+    expect(document.querySelector('.notice-detail')?.textContent).toContain('고지서: 사용자 업로드')
+
+    act(() => {
+      vi.advanceTimersByTime(24 * 60 * 60 * 1000)
+    })
+
+    expect(screen.getByText('시연 샘플', { exact: true })).toBeTruthy()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+    expect(screen.getByText('24시간이 지나 시연 데이터가 삭제되었습니다.')).toBeTruthy()
+  })
+
+  it('bounds a long migrated session timer to the browser timeout limit', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-26T00:00:00Z'))
+    localStorage.setItem(
+      'el-bill:storage-session',
+      JSON.stringify({
+        createdAt: '2030-01-01T00:00:00.000Z',
+        expiresAt: '2030-01-02T00:00:00.000Z',
+      }),
+    )
+    localStorage.setItem('el-bill:bills', stored(sampleBills))
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
+
+    render(<App />)
+
+    expect(
+      setTimeoutSpy.mock.calls.every(([, delay]) =>
+        typeof delay === 'number' && delay <= 2_147_483_647,
+      ),
+    ).toBe(true)
   })
 })

@@ -11,6 +11,7 @@ const dayMs = 24 * 60 * 60 * 1000
 export const dataProvenanceStorageKey = 'el-bill:data-provenance'
 export const legacyDataModeStorageKey = 'el-bill:data-mode'
 export const powerPlannerStorageKey = 'el-bill:power-planner'
+export const storageSessionKey = 'el-bill:storage-session'
 export const defaultDataProvenance: DataProvenance = {
   bills: 'sample',
   powerPlanner: 'none',
@@ -28,6 +29,120 @@ interface StoredPayload<T> {
   createdAt: string
   expiresAt: string
   data: T
+}
+
+export interface StorageSession {
+  createdAt: string
+  expiresAt: string
+}
+
+const isValidExpiry = (expiresAt: string) => Number.isFinite(Date.parse(expiresAt))
+
+const isStorageSession = (value: unknown): value is StorageSession => {
+  if (!value || typeof value !== 'object') return false
+  const session = value as Record<string, unknown>
+  return (
+    typeof session.createdAt === 'string' &&
+    typeof session.expiresAt === 'string' &&
+    isValidExpiry(session.createdAt) &&
+    isValidExpiry(session.expiresAt) &&
+    Date.parse(session.createdAt) <= Date.parse(session.expiresAt)
+  )
+}
+
+const isExpired = (session: StorageSession) => Date.parse(session.expiresAt) <= Date.now()
+
+const parseStoredPayload = <T>(raw: string | null): StoredPayload<T> | null => {
+  if (!raw) return null
+  try {
+    const payload = JSON.parse(raw) as StoredPayload<T>
+    return isStorageSession(payload) ? payload : null
+  } catch {
+    return null
+  }
+}
+
+export const createStorageSession = (now = Date.now()): StorageSession => ({
+  createdAt: new Date(now).toISOString(),
+  expiresAt: new Date(now + dayMs).toISOString(),
+})
+
+export const startNewStorageSession = (now = Date.now()): StorageSession => {
+  const session = createStorageSession(now)
+  localStorage.setItem(storageSessionKey, JSON.stringify(session))
+  return session
+}
+
+export const saveForSession = <T>(
+  key: string,
+  data: T,
+  session: StorageSession,
+): StoredPayload<T> => {
+  const payload: StoredPayload<T> = { ...session, data }
+  localStorage.setItem(key, JSON.stringify(payload))
+  return payload
+}
+
+export const purgeStorageSession = (
+  keys: string[],
+  sessionKey = storageSessionKey,
+) => {
+  const session = parseStoredPayload<never>(localStorage.getItem(sessionKey))
+  const rawSession = localStorage.getItem(sessionKey)
+  const parsedSession = rawSession ? (() => {
+    try {
+      return JSON.parse(rawSession) as unknown
+    } catch {
+      return null
+    }
+  })() : null
+  const shouldPurge = !session && (!parsedSession || !isStorageSession(parsedSession))
+    ? Boolean(rawSession)
+    : Boolean(session && isExpired(session))
+
+  if (!shouldPurge) return false
+  keys.forEach((key) => localStorage.removeItem(key))
+  localStorage.removeItem(sessionKey)
+  return true
+}
+
+/**
+ * Existing releases stored each key with an independent expiry. Retain their
+ * earliest valid expiry during the one-time migration so no data gains time.
+ */
+export const restoreStorageSession = (
+  keys: string[],
+  sessionKey = storageSessionKey,
+): StorageSession | null => {
+  const rawSession = localStorage.getItem(sessionKey)
+  if (rawSession) {
+    try {
+      const session = JSON.parse(rawSession) as unknown
+      if (isStorageSession(session) && !isExpired(session)) return session
+    } catch {
+      // Fall through to a safe full purge below.
+    }
+    keys.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(sessionKey)
+    return null
+  }
+
+  const legacyPayloads = keys
+    .map((key) => parseStoredPayload<unknown>(localStorage.getItem(key)))
+    .filter((payload): payload is StoredPayload<unknown> =>
+      Boolean(payload && !isExpired(payload)),
+    )
+  if (!legacyPayloads.length) return null
+
+  const earliest = legacyPayloads.reduce((current, payload) =>
+    Date.parse(payload.expiresAt) < Date.parse(current.expiresAt) ? payload : current,
+  )
+  const session: StorageSession = {
+    createdAt: earliest.createdAt,
+    expiresAt: earliest.expiresAt,
+  }
+  localStorage.setItem(sessionKey, JSON.stringify(session))
+  return session
 }
 
 const isDataProvenance = (value: unknown): value is DataProvenance => {
@@ -161,11 +276,7 @@ export const isStoredMonthlyBillCollection = (
 ): value is MonthlyBill[] => Array.isArray(value) && value.every(isStoredMonthlyBill)
 
 export const createExpiry = () => {
-  const createdAt = new Date()
-  return {
-    createdAt: createdAt.toISOString(),
-    expiresAt: new Date(createdAt.getTime() + dayMs).toISOString(),
-  }
+  return createStorageSession()
 }
 
 export const saveWithExpiry = <T>(key: string, data: T) => {
@@ -201,7 +312,17 @@ export const loadWithExpiry = <T>(key: string): StoredPayload<T> | null => {
   }
 }
 
-export const loadDataProvenance = (storedBills?: unknown): DataProvenance => {
+export const loadDataProvenance = (
+  storedBills?: unknown,
+  session?: StorageSession | null,
+): DataProvenance => {
+  const saveProvenance = (provenance: DataProvenance) => {
+    if (session) {
+      saveForSession(dataProvenanceStorageKey, provenance, session)
+      return
+    }
+    saveWithExpiry(dataProvenanceStorageKey, provenance)
+  }
   const storedProvenance = loadWithExpiry<unknown>(dataProvenanceStorageKey)
   if (storedProvenance) {
     if (isDataProvenance(storedProvenance.data)) {
@@ -215,10 +336,7 @@ export const loadDataProvenance = (storedBills?: unknown): DataProvenance => {
         ...storedProvenance.data,
         bills: 'sample',
       }
-      localStorage.setItem(
-        dataProvenanceStorageKey,
-        JSON.stringify({ ...storedProvenance, data: safeProvenance }),
-      )
+      saveProvenance(safeProvenance)
       return safeProvenance
     }
     localStorage.removeItem(dataProvenanceStorageKey)
@@ -235,15 +353,13 @@ export const loadDataProvenance = (storedBills?: unknown): DataProvenance => {
     bills: 'sample',
     powerPlanner: 'none',
   }
-  localStorage.setItem(
-    dataProvenanceStorageKey,
-    JSON.stringify({ ...legacyMode, data: migrated }),
-  )
+  saveProvenance(migrated)
   return migrated
 }
 
 export const restorePowerPlannerState = (
   provenance: DataProvenance,
+  session?: StorageSession | null,
 ): PowerPlannerRestoration => {
   if (canRestorePowerPlanner(provenance)) {
     const payload = loadWithExpiry<unknown>(powerPlannerStorageKey)
@@ -258,7 +374,11 @@ export const restorePowerPlannerState = (
       ? provenance
       : { ...provenance, powerPlanner: 'none' as const }
   if (safeProvenance !== provenance) {
-    saveWithExpiry(dataProvenanceStorageKey, safeProvenance)
+    if (session) {
+      saveForSession(dataProvenanceStorageKey, safeProvenance, session)
+    } else {
+      saveWithExpiry(dataProvenanceStorageKey, safeProvenance)
+    }
   }
   return { provenance: safeProvenance, powerPlannerData: null }
 }

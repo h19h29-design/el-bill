@@ -5,9 +5,15 @@ interface TopNoticeProps {
   expiresAt?: string
   dataProvenance: DataProvenance
   onReset: () => void
+  expiryMessage?: string
 }
 
-export function TopNotice({ expiresAt, dataProvenance, onReset }: TopNoticeProps) {
+export function TopNotice({
+  expiresAt,
+  dataProvenance,
+  onReset,
+  expiryMessage,
+}: TopNoticeProps) {
   const expiresText = expiresAt
     ? new Date(expiresAt).toLocaleString('ko-KR', {
         month: '2-digit',
@@ -37,6 +43,11 @@ export function TopNotice({ expiresAt, dataProvenance, onReset }: TopNoticeProps
         </span>
         {' · '}만료 예정: {expiresText}
       </span>
+      {expiryMessage && (
+        <span className="notice-detail" role="status">
+          {expiryMessage}
+        </span>
+      )}
       <button type="button" className="ghost-button" onClick={onReset}>
         <RotateCw size={15} />
         시연 샘플로 초기화
