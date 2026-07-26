@@ -15,7 +15,6 @@ import type {
 } from '../types'
 import {
   estimateBillForPlan,
-  getRecentBills,
   getSeason,
 } from './calculations'
 import { validateBillPeriods } from './billPeriods'
@@ -87,7 +86,7 @@ export const assessDataConfidence = (bills: MonthlyBill[]): DataConfidence => {
   const recent36 = validation.recentConsecutiveBills.slice(-36)
   const hasDemand = recent36.length > 0 && recent36.every((bill) => bill.maxDemandKw > 0)
   if (validation.hasRequiredConsecutiveMonths && hasDemand) return '데이터 충분'
-  if (validateBillPeriods(bills, 12).hasRequiredConsecutiveMonths) return '보통'
+  if (recent36.length >= 12) return '보통'
   return '낮음'
 }
 
@@ -196,7 +195,7 @@ const estimateCandidateBillByMode = (
 }
 
 const buildCalculationBreakdown = (
-  bills: MonthlyBill[],
+  recentBills: MonthlyBill[],
   currentPlan: RatePlan,
   candidatePlan: RatePlan,
   scenario: PeakScenario | undefined,
@@ -204,8 +203,7 @@ const buildCalculationBreakdown = (
   currentAnnualWon: number,
   candidateAnnualWon: number,
 ): CalculationBreakdownRow[] => {
-  const recent12 = getRecentBills(bills, 12)
-  const breakdown = recent12.reduce(
+  const breakdown = recentBills.reduce(
     (acc, bill) => {
       const season = getSeason(bill.month)
       const adjustedUsage = getAdjustedUsage(bill, scenario)
@@ -279,9 +277,12 @@ export const comparePlansForDiagnosis = (
   scenario?: PeakScenario,
   mode: CalculationMode = 'billDelta',
 ): PlanCandidateComparison => {
-  const validation = validateBillPeriods(bills, 12)
+  const validation = validateBillPeriods(bills, 36)
   const recent12 = validation.recentConsecutiveBills.slice(-12)
-  const threeYearBills = validation.normalizedBills.slice(-36)
+  const hasTwelveConsecutiveMonths = recent12.length >= 12
+  const threeYearBills = validation.hasRequiredConsecutiveMonths
+    ? validation.recentConsecutiveBills.slice(-36)
+    : []
 
   const currentAnnualWon = recent12.reduce(
     (sum, bill) => sum + estimateCurrentBillByMode(bill, currentPlan, scenario, mode),
@@ -304,7 +305,7 @@ export const comparePlansForDiagnosis = (
 
   const peakScenarioSavingWon = scenario ? savingWon : 0
   const calculationBreakdown = buildCalculationBreakdown(
-    validation.normalizedBills,
+    recent12,
     currentPlan,
     candidatePlan,
     scenario,
@@ -314,12 +315,12 @@ export const comparePlansForDiagnosis = (
   )
 
   let recommendation: Recommendation = '추가 검토 필요'
-  if (!validation.hasRequiredConsecutiveMonths) recommendation = '추가 검토 필요'
+  if (!hasTwelveConsecutiveMonths) recommendation = '추가 검토 필요'
   else if (savingWon < 0) recommendation = '유지 추천'
   else if (savingWon > 0 && threeYearSavingWon > 0) recommendation = '변경 추천'
 
   const basis =
-    !validation.hasRequiredConsecutiveMonths
+    !hasTwelveConsecutiveMonths
       ? '12개월 이상 월별 고지서 자료가 부족하여 추가 검토가 필요합니다.'
       : recommendation === '변경 추천'
         ? '최근 12개월과 최근 3년 기준이 모두 절감으로 추정됩니다.'

@@ -84,9 +84,9 @@ export const comparePlans = (
   candidatePlan: RatePlan,
   scenario?: PeakScenario,
 ): PlanComparison => {
-  const validation = validateBillPeriods(bills, 12)
+  const validation = validateBillPeriods(bills, 36)
   const recent12 = validation.recentConsecutiveBills.slice(-12)
-  if (!validation.hasRequiredConsecutiveMonths) {
+  if (recent12.length < 12) {
     return {
       currentAnnualWon: 0,
       candidateAnnualWon: 0,
@@ -109,7 +109,9 @@ export const comparePlans = (
   )
   const savingWon = currentAnnualWon - candidateAnnualWon
   const savingRate = currentAnnualWon ? savingWon / currentAnnualWon : 0
-  const threeYearBills = validation.normalizedBills.slice(-36)
+  const threeYearBills = validation.hasRequiredConsecutiveMonths
+    ? validation.recentConsecutiveBills.slice(-36)
+    : []
   const threeYearSavingWon = threeYearBills.reduce(
     (sum, bill) =>
       sum +

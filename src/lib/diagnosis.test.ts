@@ -53,6 +53,13 @@ const thirtySixConsecutiveBills = Array.from({ length: 36 }, (_, index) => {
   const month = (monthIndex % 12) + 1
   return { ...makeBill(month), id: `bill-${year}-${month}`, year }
 })
+const consecutiveBills = (year: number, month: number, count: number) =>
+  Array.from({ length: count }, (_, index) => {
+    const monthIndex = year * 12 + (month - 1) + index
+    const billYear = Math.floor(monthIndex / 12)
+    const billMonth = (monthIndex % 12) + 1
+    return { ...makeBill(billMonth), id: `bill-${billYear}-${billMonth}`, year: billYear }
+  })
 const currentPlan = makePlan('current', '선택요금Ⅱ', 1000, 100)
 const cheaperPlan = makePlan('cheap', '선택요금Ⅰ', 500, 80)
 const expensivePlan = makePlan('expensive', '고비용요금', 2000, 160)
@@ -82,6 +89,29 @@ describe('automatic diagnosis harness', () => {
     expect(comparison.savingWon).toBeGreaterThan(0)
     expect(comparison.threeYearSavingWon).toBeGreaterThan(0)
     expect(comparison.recommendation).toBe('변경 추천')
+  })
+
+  it('does not calculate a three-year estimate from gapped calendar periods', () => {
+    const comparison = comparePlansForDiagnosis(
+      [...consecutiveBills(2022, 1, 24), ...consecutiveBills(2026, 1, 12)],
+      currentPlan,
+      cheaperPlan,
+    )
+
+    expect(comparison.savingWon).toBeGreaterThan(0)
+    expect(comparison.threeYearSavingWon).toBe(0)
+    expect(comparison.recommendation).toBe('추가 검토 필요')
+  })
+
+  it('builds the annual breakdown from the recent consecutive run only', () => {
+    const comparison = comparePlansForDiagnosis(
+      [{ ...makeBill(1), id: 'old-bill', year: 2025 }, ...consecutiveBills(2026, 2, 11)],
+      currentPlan,
+      cheaperPlan,
+    )
+
+    expect(comparison.currentAnnualWon).toBeGreaterThan(0)
+    expect(comparison.calculationBreakdown[0]?.currentWon).toBe(5_500_000)
   })
 
   it('recommends keeping the current plan when change increases cost', () => {

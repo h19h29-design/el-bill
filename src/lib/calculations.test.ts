@@ -24,6 +24,11 @@ const twelveConsecutiveBills = Array.from({ length: 12 }, (_, index) => {
   const monthIndex = 2025 * 12 + 7 + index
   return calendarBill(Math.floor(monthIndex / 12), (monthIndex % 12) + 1)
 })
+const consecutiveBills = (year: number, month: number, count: number) =>
+  Array.from({ length: count }, (_, index) => {
+    const monthIndex = year * 12 + (month - 1) + index
+    return calendarBill(Math.floor(monthIndex / 12), (monthIndex % 12) + 1)
+  })
 
 describe('electricity calculation harness', () => {
   it('keeps recent 12 month data available for recommendation', () => {
@@ -50,6 +55,18 @@ describe('electricity calculation harness', () => {
 
     expect(comparison.currentAnnualWon).toBeGreaterThan(0)
     expect(comparison.candidateAnnualWon).toBeGreaterThan(0)
+  })
+
+  it('does not present a three-year estimate from gapped calendar periods', () => {
+    const comparison = comparePlans(
+      [...consecutiveBills(2022, 1, 24), ...consecutiveBills(2026, 1, 12)],
+      currentPlan,
+      candidatePlan,
+      defaultScenario,
+    )
+
+    expect(comparison.currentAnnualWon).toBeGreaterThan(0)
+    expect(comparison.threeYearSavingWon).toBe(0)
   })
 
   it('calculates usage hours from monthly usage and applied power', () => {
