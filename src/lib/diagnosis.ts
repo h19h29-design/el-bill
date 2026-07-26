@@ -498,16 +498,26 @@ export const buildAutoDiagnosis = ({
     comparePlansForDiagnosis(normalizedBills, currentPlan, currentPlan, scenario, mode)
   const recommendedPlan =
     ratePlans.find((plan) => plan.id === comparison.candidatePlanId) ?? currentPlan
+  const hasPeriodIssues = periodValidation.issues.length > 0
+  const hasValidRequiredPeriods =
+    periodValidation.hasRequiredConsecutiveMonths && !hasPeriodIssues
+  const periodIssueReason = hasPeriodIssues
+    ? `고지서 기간 문제: ${periodValidation.issues
+        .map((issue) => describePeriodIssue(issue.code, issue.period))
+        .join(' ')}`
+    : ''
   const canGenerateChangeDocuments =
     billsAreUserUploaded &&
-    periodValidation.hasRequiredConsecutiveMonths &&
+    hasValidRequiredPeriods &&
     comparison.sameContractPriority &&
     comparison.recommendation === '변경 추천'
   const documentBlockReason = canGenerateChangeDocuments
     ? ''
-    : !billsAreUserUploaded
-      ? '사용자 고지서 업로드 후 생성 가능'
-      : '최종 판단이 변경 추천이고 현재 계약종별·수전전압과 일치하는 후보인 경우에만 변경신청 문서를 생성할 수 있습니다.'
+    : hasPeriodIssues
+      ? periodIssueReason
+      : !billsAreUserUploaded
+        ? '사용자 고지서 업로드 후 생성 가능'
+        : '최종 판단이 변경 추천이고 현재 계약종별·수전전압과 일치하는 후보인 경우에만 변경신청 문서를 생성할 수 있습니다.'
   const missingDataNotes = [
     ...(!periodValidation.hasRequiredConsecutiveMonths
       ? ['최근 12개월의 연속된 고지서 자료가 부족합니다.']
@@ -522,7 +532,7 @@ export const buildAutoDiagnosis = ({
   ]
 
   return {
-    completed: periodValidation.hasRequiredConsecutiveMonths,
+    completed: hasValidRequiredPeriods,
     configurationRequired: false,
     currentPlan,
     recommendedPlan,
@@ -541,8 +551,8 @@ export const buildAutoDiagnosis = ({
     availableDocumentCount: canGenerateChangeDocuments ? 6 : 2,
     canGenerateChangeDocuments,
     documentBlockReason,
-    finalJudgement: comparison.recommendation,
-    judgementBasis: comparison.basis,
+    finalJudgement: hasPeriodIssues ? '추가 검토 필요' : comparison.recommendation,
+    judgementBasis: hasPeriodIssues ? periodIssueReason : comparison.basis,
     missingDataNotes,
   }
 }

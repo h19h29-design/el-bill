@@ -161,6 +161,12 @@ export function BillUpload({
 
   const applyMapping = () => {
     if (!selectedSheet) return
+    if (!importContext) {
+      setMessage(
+        '현재 요금제가 설정과 정확히 일치하지 않아 분석을 시작할 수 없습니다. 설정에서 계약종별, 수전전압, 현재 요금제를 확인해 주세요.',
+      )
+      return
+    }
     const mapped = mapRowsToBills(selectedSheet.rows, mapping, importContext)
     if (!mapped.length) {
       setMessage('필수 매핑 결과가 없습니다. 연도, 월, 사용량, 총 전기요금을 확인해 주세요.')

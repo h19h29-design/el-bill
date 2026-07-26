@@ -22,6 +22,8 @@ export const powerPlannerUploadNotice =
 export const powerPlannerMvpGuardrail =
   'MVP에서는 한전 계정 자동 로그인, 크롤링, 비공식 API 호출을 하지 않습니다. 사용자가 내려받거나 정리한 엑셀/CSV만 업로드합니다.'
 
+export const POWER_PLANNER_AGGREGATE_RECORD_LIMIT = 10_000
+
 const normalize = (value: unknown) => String(value ?? '').trim()
 
 const asNumber = (value: unknown) => {
@@ -241,6 +243,72 @@ export const mapRowsToPowerPlannerRecords = (
       return hasPowerPlannerRequiredValues(record, dataType) ? record : null
     })
     .filter((record): record is PowerPlannerRecord => Boolean(record))
+}
+
+const powerPlannerFingerprintFields = [
+  'dataType',
+  'date',
+  'year',
+  'month',
+  'day',
+  'hour',
+  'usageKwh',
+  'maxDemandKw',
+  'estimatedBillWon',
+  'contractPowerKw',
+  'appliedPowerKw',
+  'usageDays',
+  'laggingPowerFactorPercent',
+  'leadingPowerFactorPercent',
+  'loadType',
+  'patternLabel',
+  'patternSummary',
+] as const
+
+export const getPowerPlannerRecordFingerprint = (record: PowerPlannerRecord) =>
+  JSON.stringify(
+    powerPlannerFingerprintFields.map((field) => record[field] ?? null),
+  )
+
+export interface PowerPlannerMergeResult {
+  accepted: boolean
+  records: PowerPlannerRecord[]
+  duplicateCount: number
+  message?: string
+}
+
+export const mergePowerPlannerRecords = (
+  existing: PowerPlannerRecord[],
+  incoming: PowerPlannerRecord[],
+): PowerPlannerMergeResult => {
+  const fingerprints = new Set(existing.map(getPowerPlannerRecordFingerprint))
+  const uniqueIncoming: PowerPlannerRecord[] = []
+  let duplicateCount = 0
+
+  for (const record of incoming) {
+    const fingerprint = getPowerPlannerRecordFingerprint(record)
+    if (fingerprints.has(fingerprint)) {
+      duplicateCount += 1
+      continue
+    }
+    fingerprints.add(fingerprint)
+    uniqueIncoming.push(record)
+  }
+
+  if (existing.length + uniqueIncoming.length > POWER_PLANNER_AGGREGATE_RECORD_LIMIT) {
+    return {
+      accepted: false,
+      records: existing,
+      duplicateCount,
+      message: `파워플래너 누적 자료는 최대 ${POWER_PLANNER_AGGREGATE_RECORD_LIMIT.toLocaleString('ko-KR')}건까지 반영할 수 있습니다. 기존 자료는 변경되지 않았습니다.`,
+    }
+  }
+
+  return {
+    accepted: true,
+    records: [...existing, ...uniqueIncoming],
+    duplicateCount,
+  }
 }
 
 export const createPowerPlannerDataSource = (

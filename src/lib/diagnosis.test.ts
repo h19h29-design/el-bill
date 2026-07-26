@@ -301,6 +301,39 @@ describe('automatic diagnosis harness', () => {
     expect(gappedDiagnosis.missingDataNotes.join(' ')).toContain('누락')
   })
 
+  it('blocks final judgement and documents when otherwise sufficient periods contain an issue', () => {
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: currentPlan.contractType,
+      voltageType: currentPlan.voltageType,
+      currentPlan: currentPlan.planName,
+    }
+    const validBills = consecutiveBills(2023, 8, 36)
+    const duplicateDiagnosis = buildAutoDiagnosis({
+      bills: [...validBills, { ...validBills.at(-1)!, id: 'duplicate-latest' }],
+      profile,
+      ratePlans: [currentPlan, cheaperPlan],
+      scenario: defaultScenario,
+      billsAreUserUploaded: true,
+    })
+    const gappedDiagnosis = buildAutoDiagnosis({
+      bills: validBills.filter((bill) => !(bill.year === 2024 && bill.month === 1)),
+      profile,
+      ratePlans: [currentPlan, cheaperPlan],
+      scenario: defaultScenario,
+      billsAreUserUploaded: true,
+    })
+
+    for (const diagnosis of [duplicateDiagnosis, gappedDiagnosis]) {
+      expect(diagnosis.completed).toBe(false)
+      expect(diagnosis.finalJudgement).toBe('추가 검토 필요')
+      expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+      expect(diagnosis.documentBlockReason).toContain('고지서 기간')
+    }
+    expect(duplicateDiagnosis.missingDataNotes.join(' ')).toContain('중복')
+    expect(gappedDiagnosis.missingDataNotes.join(' ')).toContain('누락')
+  })
+
   it('recalculates savings when expected peak changes', () => {
     const basePeakComparison = comparePlansForDiagnosis(
       twelveBills,

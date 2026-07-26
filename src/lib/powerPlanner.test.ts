@@ -7,6 +7,8 @@ import {
   guessPowerPlannerDataType,
   guessPowerPlannerMapping,
   mapRowsToPowerPlannerRecords,
+  POWER_PLANNER_AGGREGATE_RECORD_LIMIT,
+  mergePowerPlannerRecords,
   powerPlannerMvpGuardrail,
   powerPlannerUploadNotice,
 } from './powerPlanner'
@@ -105,6 +107,49 @@ describe('power planner data source harness', () => {
     expect(getHourlyUsageRecords(source)).toHaveLength(2)
     expect(summary.maxHourly?.hour).toBe(14)
     expect(summary.maxDemand?.maxDemandKw).toBe(512)
+  })
+
+  it('deduplicates repeated uploads using semantic record fields', () => {
+    const rows = [
+      { 일자: '2026-06-01', 시간대: '13', 사용량: '210' },
+      { 일자: '2026-06-01', 시간대: '14', 사용량: '230' },
+    ]
+    const mapping = { date: '일자', hour: '시간대', usageKwh: '사용량' }
+    const firstUpload = mapRowsToPowerPlannerRecords(rows, 'hourlyUsage', mapping)
+    const repeatedUpload = mapRowsToPowerPlannerRecords(rows, 'hourlyUsage', mapping)
+
+    const merged = mergePowerPlannerRecords(firstUpload, repeatedUpload)
+
+    expect(merged.accepted).toBe(true)
+    expect(merged.records).toHaveLength(2)
+    expect(merged.duplicateCount).toBe(2)
+  })
+
+  it('rejects a cumulative upload over the aggregate record cap without changing records', () => {
+    const existing = Array.from({ length: POWER_PLANNER_AGGREGATE_RECORD_LIMIT }, (_, index) => ({
+      id: `existing-${index}`,
+      dataType: 'hourlyUsage' as const,
+      date: `2026-06-${String((index % 28) + 1).padStart(2, '0')}`,
+      hour: index % 24,
+      usageKwh: index,
+      sourceRowIndex: index,
+    }))
+    const incoming = [
+      {
+        id: 'incoming',
+        dataType: 'hourlyUsage' as const,
+        date: '2026-07-01',
+        hour: 0,
+        usageKwh: 1,
+        sourceRowIndex: 0,
+      },
+    ]
+
+    const merged = mergePowerPlannerRecords(existing, incoming)
+
+    expect(merged.accepted).toBe(false)
+    expect(merged.records).toBe(existing)
+    expect(merged.message).toContain('10,000건')
   })
 
   it('keeps the MVP guardrails visible as reusable copy', () => {

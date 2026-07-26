@@ -20,7 +20,7 @@ import {
   createDocumentPackage,
   createPdfBlob,
 } from '../../lib/documentExport'
-import { getDocumentFileNames, sanitizeDownloadStem } from '../../lib/downloadNames'
+import { getDocumentFileNames } from '../../lib/downloadNames'
 import type { PeakOperationPlan } from '../../lib/peakOperations'
 
 interface DocumentGeneratorProps {
@@ -74,6 +74,11 @@ export function DocumentGenerator({
 }: DocumentGeneratorProps) {
   const [selectedPreview, setSelectedPreview] = useState<'plan' | 'letter' | 'application'>('plan')
   const [status, setStatus] = useState('')
+  const documentDisplayName = profile.displaySchoolName.trim() || '학교'
+  const documentProfile = useMemo(
+    () => ({ ...profile, displaySchoolName: documentDisplayName }),
+    [documentDisplayName, profile],
+  )
   const documentsUnavailable =
     diagnosis.configurationRequired ||
     !diagnosis.currentPlan ||
@@ -83,7 +88,7 @@ export function DocumentGenerator({
       documentsUnavailable
         ? null
         : buildDocumentBundle(
-            profile,
+            documentProfile,
             latestBill,
             comparison,
             scenario,
@@ -92,7 +97,7 @@ export function DocumentGenerator({
           ),
     [
       documentsUnavailable,
-      profile,
+      documentProfile,
       latestBill,
       comparison,
       scenario,
@@ -101,7 +106,6 @@ export function DocumentGenerator({
     ],
   )
   const canGenerateChangeDocuments = diagnosis.canGenerateChangeDocuments
-  const documentIdentity = sanitizeDownloadStem(profile.displaySchoolName)
   const documentFileNames = getDocumentFileNames(profile.displaySchoolName)
 
   const copyDocumentText = async (text: string, successMessage: string) => {
@@ -363,7 +367,7 @@ export function DocumentGenerator({
             {renderTextDocument(
               '예산절감을 위한 전기요금제 변경 계획(안)',
               bundle.planText,
-              documentIdentity,
+              documentDisplayName,
             )}
             <table className="document-summary-table">
               <tbody>
@@ -384,9 +388,9 @@ export function DocumentGenerator({
             className={selectedId === 'letter-preview' ? 'document-preview official-document visible' : 'document-preview official-document'}
           >
             {renderTextDocument(
-              `${documentIdentity} 전기요금 변경 신청`,
+              `${documentDisplayName} 전기요금 변경 신청`,
               bundle.kepcoLetterText,
-              documentIdentity,
+              documentDisplayName,
             )}
             <footer>{rateChangeCaution} 붙임 서류와 원본 청구서 대조 후 제출.</footer>
           </div>
@@ -396,7 +400,7 @@ export function DocumentGenerator({
           >
             <div className="doc-masthead">
               <span>서울특별시교육청 전기요금 진단 자료</span>
-              <strong>{documentIdentity}</strong>
+              <strong>{documentDisplayName}</strong>
             </div>
             <h3>전기사용계약 변경신청서 PDF 미리보기</h3>
             <div className="doc-alert">

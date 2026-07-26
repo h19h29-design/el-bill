@@ -30,6 +30,7 @@ import {
   guessPowerPlannerDataType,
   guessPowerPlannerMapping,
   mapRowsToPowerPlannerRecords,
+  mergePowerPlannerRecords,
   powerPlannerDataTypeLabels,
   powerPlannerMappingFields,
   powerPlannerMvpGuardrail,
@@ -136,14 +137,22 @@ export function PowerPlannerUpload({
     }
 
     const existing = dataOrigin === 'uploaded' ? dataSource?.records ?? [] : []
+    const merged = mergePowerPlannerRecords(existing, records)
+    if (!merged.accepted) {
+      setMessage(merged.message ?? '파워플래너 자료를 반영하지 못했습니다.')
+      return
+    }
     const next = createPowerPlannerDataSource(
-      [...existing, ...records],
+      merged.records,
       sourceName,
       `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건 반영`,
     )
     onDataSourceChange(next, 'uploaded')
+    const duplicateNotice = merged.duplicateCount
+      ? ` 중복 ${merged.duplicateCount.toLocaleString('ko-KR')}건은 제외했습니다.`
+      : ''
     setMessage(
-      `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건을 반영했습니다. 기존 자료와 합쳐 총 ${next.records.length.toLocaleString('ko-KR')}건입니다.`,
+      `${powerPlannerDataTypeLabels[dataType]} ${records.length.toLocaleString('ko-KR')}건을 반영했습니다. 기존 자료와 합쳐 총 ${next.records.length.toLocaleString('ko-KR')}건입니다.${duplicateNotice}`,
     )
   }
 

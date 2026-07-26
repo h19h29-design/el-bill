@@ -43,6 +43,31 @@ describe('document generation eligibility', () => {
     expect(within(container).getAllByText('테스트고등학교')).toHaveLength(3)
   })
 
+  it('keeps reserved filename characters in visible document identity only', () => {
+    const displaySchoolName = '테스트/고등학교: 2026'
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: { ...defaultSchoolProfile, displaySchoolName },
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+    })
+    const { container } = render(
+      <DocumentGenerator
+        profile={{ ...defaultSchoolProfile, displaySchoolName }}
+        latestBill={sampleBills.at(-1)}
+        comparison={diagnosis.comparison}
+        scenario={defaultScenario}
+        diagnosis={diagnosis}
+        peakOperationPlan={buildPeakOperationPlan(defaultScenario)}
+      />,
+    )
+
+    expect(within(container).getAllByText(displaySchoolName)).toHaveLength(3)
+    expect(getDocumentFileNames(displaySchoolName).planPdf).toBe(
+      '테스트 고등학교 2026_전기요금제_변경계획안.pdf',
+    )
+  })
+
   it('disables change-application exports when diagnosis does not recommend a change', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills,
