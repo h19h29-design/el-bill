@@ -13,6 +13,13 @@ const stored = (data: unknown) =>
     data,
   })
 
+const expiredStored = (data: unknown) =>
+  JSON.stringify({
+    createdAt: '2020-01-01T00:00:00.000Z',
+    expiresAt: '2020-01-02T00:00:00.000Z',
+    data,
+  })
+
 describe('data provenance persistence', () => {
   afterEach(() => {
     cleanup()
@@ -78,6 +85,20 @@ describe('data provenance persistence', () => {
     fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
     expect(screen.getByText('25건')).toBeTruthy()
     expect(localStorage.getItem('el-bill:power-planner')).not.toBeNull()
+  })
+
+  it('clears PowerPlanner data after an expired legacy mode without explicit provenance', () => {
+    localStorage.setItem('el-bill:data-mode', expiredStored('uploaded'))
+    localStorage.setItem('el-bill:power-planner', stored(samplePowerPlannerDataSource))
+
+    render(<App />)
+
+    expect(document.querySelector('.notice-detail')?.textContent).toContain('파워플래너: 미사용')
+    expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
+    expect(
+      screen.getByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
+    ).toBeTruthy()
   })
 
   it('migrates a legacy sample session without granting upload eligibility', async () => {

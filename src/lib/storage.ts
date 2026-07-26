@@ -10,6 +10,9 @@ export const defaultDataProvenance: DataProvenance = {
   powerPlanner: 'none',
 }
 
+export const canRestorePowerPlanner = (provenance: DataProvenance) =>
+  provenance.powerPlanner === 'sample' || provenance.powerPlanner === 'uploaded'
+
 interface StoredPayload<T> {
   createdAt: string
   expiresAt: string
