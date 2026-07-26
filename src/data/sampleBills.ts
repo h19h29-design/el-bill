@@ -35,10 +35,10 @@ const makeBill = (year: number, month: number, index: number): MonthlyBill => {
     fuelAdjustmentWon
   const vatWon = Math.round(beforeTaxWon * vatRate)
   const fundWon = Math.round(beforeTaxWon * fundRate)
-  const seasonalDemand = [6, 7, 8, 12, 1, 2].includes(month) ? 68 : 32
-  const maxDemandKw = Math.min(
-    appliedPowerKw,
-    Math.round(330 + usageKwh / 180 + seasonalDemand + (index % 3) * 7),
+  const seasonalDemand =
+    month >= 6 && month <= 8 ? 55 : [12, 1, 2].includes(month) ? 70 : 20
+  const maxDemandKw = Math.round(
+    230 + usageKwh / 330 + seasonalDemand + (index % 4) * 6,
   )
 
   return {

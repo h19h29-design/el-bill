@@ -131,7 +131,7 @@ it('uses 36 consecutive synthetic calendar months', () => {
 })
 
 it('contains no source-specific note or direct identifier', () => {
-  expect(JSON.stringify(sampleBills)).not.toMatch(/등촌|8616|9136/)
+  expect(JSON.stringify(sampleBills)).not.toMatch(protectedSourceIdentifiers)
   expect(defaultSchoolProfile.customerNumber).toBe('**********')
 })
 ```
@@ -163,7 +163,7 @@ Derive component charges from the documented sample tariff assumptions, round to
 
 Rewrite the attachment section to describe “사용자가 제공한 익명화 대상 자료” without school names or document numbers.
 
-Run: `rg -n "등촌|8616|9136" README.md docs src`
+Run: a repository privacy scan for the approved protected identifier set.
 
 Expected: no output.
 
@@ -628,7 +628,7 @@ git commit -m "test: cover diagnosis hardening workflow"
 
 ## Final Review Gate
 
-- [ ] Confirm no tracked source contains `등촌`, `8616`, or `9136`.
+- [ ] Confirm no tracked source contains protected source identifiers.
 - [ ] Confirm sample data is synthetic and has 36 distinct consecutive calendar months.
 - [ ] Confirm only user-uploaded bills can unlock change-document downloads.
 - [ ] Confirm PowerPlanner records affect peak enrichment without replacing bills.

@@ -14,6 +14,17 @@ describe('public sample profile privacy', () => {
 
     expect(validation.distinctMonthCount).toBe(36)
     expect(validation.recentConsecutiveBills).toHaveLength(36)
+    expect(sampleBills[0]).toMatchObject({ year: 2023, month: 8 })
+    expect(sampleBills.at(-1)).toMatchObject({ year: 2026, month: 7 })
+    expect(sampleBills.every((bill) => bill.note === '합성 시연 데이터')).toBe(true)
+  })
+
+  it('uses varied maximum demand values below applied power', () => {
+    const demands = sampleBills.map((bill) => bill.maxDemandKw)
+
+    expect(Math.min(...demands)).toBeLessThan(500)
+    expect(Math.max(...demands)).toBeLessThan(500)
+    expect(new Set(demands).size).toBeGreaterThan(1)
   })
 
   it('contains no source-specific note or direct identifier', () => {
