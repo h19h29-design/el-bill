@@ -68,19 +68,22 @@ export const resolveCurrentPlan = (
   profile: SchoolProfile,
   ratePlans: RatePlan[],
 ): CurrentPlanResolution => {
-  const plan = ratePlans.find(
+  const matchingPlans = ratePlans.filter(
     (candidate) =>
       matches(candidate.contractType, profile.contractType) &&
       matches(candidate.voltageType, profile.voltageType) &&
       matches(candidate.planName, profile.currentPlan),
   )
 
-  if (plan) return { plan, exact: true }
+  if (matchingPlans.length === 1) return { plan: matchingPlans[0], exact: true }
 
   return {
     plan: null,
     exact: false,
-    issue: '현재 요금제를 요금표에서 확인해 주세요.',
+    issue:
+      matchingPlans.length > 1
+        ? '현재 요금제 설정이 중복됩니다. 요금표에서 계약종별·수전전압·요금제 조합을 하나만 남겨 주세요.'
+        : '현재 요금제를 요금표에서 확인해 주세요.',
   }
 }
 

@@ -1,7 +1,12 @@
 export type PeakRiskLevel = '안전' | '주의' | '경고' | '위험'
 
 export const getPeakRatio = (targetPeakKw: number, expectedPeakKw: number) => {
-  if (!targetPeakKw) return 0
+  if (
+    !Number.isFinite(targetPeakKw) ||
+    !Number.isFinite(expectedPeakKw) ||
+    targetPeakKw <= 0 ||
+    expectedPeakKw <= 0
+  ) return 0
   return expectedPeakKw / targetPeakKw
 }
 
@@ -9,7 +14,12 @@ export const getPeakRiskLevel = (
   targetPeakKw: number,
   expectedPeakKw: number,
 ): PeakRiskLevel => {
-  if (targetPeakKw <= 0 || expectedPeakKw < 0) return '위험'
+  if (
+    !Number.isFinite(targetPeakKw) ||
+    !Number.isFinite(expectedPeakKw) ||
+    targetPeakKw <= 0 ||
+    expectedPeakKw <= 0
+  ) return '위험'
   const ratio = getPeakRatio(targetPeakKw, expectedPeakKw)
   if (ratio < 0.8) return '안전'
   if (ratio < 0.9) return '주의'

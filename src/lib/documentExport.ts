@@ -1,5 +1,6 @@
 import JSZip from 'jszip'
 import type { DocumentBundle } from '../types'
+import type { DocumentFileNames } from './downloadNames'
 
 export interface DocumentPdfFiles {
   plan: Blob
@@ -41,6 +42,7 @@ export const createPdfBlob = async (element: HTMLElement): Promise<Blob> => {
 export const createDocumentPackage = async (
   bundle: DocumentBundle,
   pdfFiles: DocumentPdfFiles,
+  filenames: DocumentFileNames,
 ): Promise<Blob> => {
   const zip = new JSZip()
   const [plan, letter, application] = await Promise.all([
@@ -48,17 +50,17 @@ export const createDocumentPackage = async (
     pdfFiles.letter.arrayBuffer(),
     pdfFiles.application.arrayBuffer(),
   ])
-  zip.file('전기요금제_변경계획안.pdf', plan)
-  zip.file('한전_제출공문.pdf', letter)
-  zip.file('전기사용계약_변경신청서_미리보기.pdf', application)
-  zip.file('계산근거_요약표.txt', bundle.calculationSummaryText)
+  zip.file(filenames.planPdf, plan)
+  zip.file(filenames.letterPdf, letter)
+  zip.file(filenames.applicationPdf, application)
+  zip.file(filenames.calculationSummary, bundle.calculationSummaryText)
   zip.file(
-    '계산근거_분해표.json',
+    filenames.calculationBreakdown,
     JSON.stringify(bundle.calculationBreakdown, null, 2),
   )
-  zip.file('담당자_검토필요항목.txt', bundle.reviewItems.join('\n'))
+  zip.file(filenames.reviewItems, bundle.reviewItems.join('\n'))
   zip.file(
-    '변경신청서_자동입력항목.json',
+    filenames.applicationData,
     JSON.stringify(bundle.applicationPreviewData, null, 2),
   )
   return zip.generateAsync({ type: 'blob' })

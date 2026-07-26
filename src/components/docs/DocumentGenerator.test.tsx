@@ -15,6 +15,7 @@ describe('document generation eligibility', () => {
   it('sanitizes the configured display name for ZIP downloads', () => {
     expect(sanitizeDownloadStem(' 테스트/고등학교: 2026 ')).toBe('테스트 고등학교 2026')
     expect(sanitizeDownloadStem(' /\\:*?"<>| ')).toBe('학교')
+    expect(sanitizeDownloadStem('../CON')).toBe('학교')
   })
 
   it('uses the configured display name in the document masthead', () => {
@@ -36,7 +37,7 @@ describe('document generation eligibility', () => {
       />,
     )
 
-    expect(within(container).getAllByText('테스트고등학교').length).toBeGreaterThan(0)
+    expect(within(container).getAllByText('테스트고등학교')).toHaveLength(3)
   })
 
   it('disables change-application exports when diagnosis does not recommend a change', () => {

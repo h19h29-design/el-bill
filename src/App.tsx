@@ -367,20 +367,22 @@ function SchoolProfilePanel({
       plan.contractType === profile.contractType &&
       plan.voltageType === profile.voltageType,
   )
-  const hasCurrentPlan = currentPlanOptions.some(
+  const matchingCurrentPlans = currentPlanOptions.filter(
     (plan) => plan.planName === profile.currentPlan,
   )
+  const hasCurrentPlan = matchingCurrentPlans.length === 1
+  const selectedCurrentPlanId = hasCurrentPlan ? matchingCurrentPlans[0].id : ''
 
   const setTariffProfile = (
     contractType: string,
     voltageType: string,
-    currentPlan?: string,
+    currentPlanId?: string,
   ) => {
     const compatiblePlans = ratePlans.filter(
       (plan) =>
         plan.contractType === contractType && plan.voltageType === voltageType,
     )
-    const nextPlan = compatiblePlans.find((plan) => plan.planName === currentPlan)
+    const nextPlan = compatiblePlans.find((plan) => plan.id === currentPlanId)
       ?? compatiblePlans[0]
     onProfileChange({
       ...profile,
@@ -475,21 +477,21 @@ function SchoolProfilePanel({
           <label>
             현재 요금제
             <select
-              value={profile.currentPlan}
+              value={selectedCurrentPlanId}
               onChange={(event) =>
                 setTariffProfile(profile.contractType, profile.voltageType, event.target.value)
               }
             >
               <option value="">선택</option>
               {currentPlanOptions.map((plan) => (
-                <option key={plan.id} value={plan.planName}>{plan.planName}</option>
+                <option key={plan.id} value={plan.id}>{plan.planName}</option>
               ))}
             </select>
           </label>
         </div>
         {!hasCurrentPlan && (
           <p className="status-line" role="status">
-            현재 계약종별과 수전전압에 맞는 요금제를 선택해 주세요. 일치하는 요금제가 없으면 설정에서 요금표를 확인해야 합니다.
+            현재 요금제 조합이 없거나 중복됩니다. 계약종별·수전전압·요금제명 조합을 하나만 남긴 뒤 선택해 주세요.
           </p>
         )}
       </section>

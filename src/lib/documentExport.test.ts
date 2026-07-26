@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
 import type { DocumentBundle } from '../types'
+import { getDocumentFileNames } from './downloadNames'
 import { createDocumentPackage } from './documentExport'
 
 const bundle: DocumentBundle = {
@@ -23,26 +24,27 @@ const bundle: DocumentBundle = {
 
 describe('document package export', () => {
   it('includes all generated PDFs and supporting evidence files', async () => {
+    const filenames = getDocumentFileNames('테스트/고등학교')
     const packageBlob = await createDocumentPackage(bundle, {
       plan: new Blob(['plan-pdf'], { type: 'application/pdf' }),
       letter: new Blob(['letter-pdf'], { type: 'application/pdf' }),
       application: new Blob(['application-pdf'], { type: 'application/pdf' }),
-    })
+    }, filenames)
     const zip = await JSZip.loadAsync(await packageBlob.arrayBuffer())
     const names = Object.keys(zip.files)
 
     expect(names).toEqual(
       expect.arrayContaining([
-        '전기요금제_변경계획안.pdf',
-        '한전_제출공문.pdf',
-        '전기사용계약_변경신청서_미리보기.pdf',
-        '계산근거_요약표.txt',
-        '계산근거_분해표.json',
-        '담당자_검토필요항목.txt',
-        '변경신청서_자동입력항목.json',
+        filenames.planPdf,
+        filenames.letterPdf,
+        filenames.applicationPdf,
+        filenames.calculationSummary,
+        filenames.calculationBreakdown,
+        filenames.reviewItems,
+        filenames.applicationData,
       ]),
     )
-    expect(names.some((name) => name.endsWith('변경계획안.txt'))).toBe(false)
-    expect(await zip.file('한전_제출공문.pdf')?.async('string')).toBe('letter-pdf')
+    expect(names.every((name) => name.startsWith('테스트 고등학교_'))).toBe(true)
+    expect(await zip.file(filenames.letterPdf)?.async('string')).toBe('letter-pdf')
   })
 })

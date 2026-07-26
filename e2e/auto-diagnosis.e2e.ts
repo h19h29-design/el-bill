@@ -176,30 +176,42 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   const zipDownload = page.waitForEvent('download')
   await page.getByRole('button', { name: '전체 다운로드 (ZIP)' }).click()
   const downloadedZip = await zipDownload
-  await expect(downloadedZip.suggestedFilename()).toContain('.zip')
+  const documentStem = 'A고등학교'
+  await expect(downloadedZip.suggestedFilename()).toBe(`${documentStem}_전기요금_변경_문서묶음.zip`)
   const zipPath = testInfo.outputPath('document-package.zip')
   await downloadedZip.saveAs(zipPath)
   const zip = await JSZip.loadAsync(await readFile(zipPath))
   expect(Object.keys(zip.files)).toEqual(
     expect.arrayContaining([
-      '전기요금제_변경계획안.pdf',
-      '한전_제출공문.pdf',
-      '전기사용계약_변경신청서_미리보기.pdf',
+      `${documentStem}_전기요금제_변경계획안.pdf`,
+      `${documentStem}_한전_제출공문.pdf`,
+      `${documentStem}_전기사용계약_변경신청서_미리보기.pdf`,
+      `${documentStem}_계산근거_요약표.txt`,
+      `${documentStem}_계산근거_분해표.json`,
+      `${documentStem}_담당자_검토필요항목.txt`,
+      `${documentStem}_변경신청서_자동입력항목.json`,
     ]),
   )
-  const zippedPlanPdf = await zip.file('전기요금제_변경계획안.pdf')?.async('uint8array')
+  const zippedPlanPdf = await zip.file(`${documentStem}_전기요금제_변경계획안.pdf`)?.async('uint8array')
   expect(new TextDecoder().decode(zippedPlanPdf?.slice(0, 4))).toBe('%PDF')
   expect(zippedPlanPdf?.byteLength).toBeGreaterThan(100_000)
 
-  const pdfDownload = page.waitForEvent('download')
-  await page.getByRole('button', { name: '다운로드' }).first().click()
-  const downloadedPdf = await pdfDownload
-  await expect(downloadedPdf.suggestedFilename()).toContain('.pdf')
-  const pdfPath = testInfo.outputPath('plan.pdf')
-  await downloadedPdf.saveAs(pdfPath)
-  const planPdfBytes = await readFile(pdfPath)
-  expect(planPdfBytes.subarray(0, 4).toString()).toBe('%PDF')
-  expect(planPdfBytes.byteLength).toBeGreaterThan(100_000)
+  const expectedPdfNames = [
+    `${documentStem}_전기요금제_변경계획안.pdf`,
+    `${documentStem}_한전_제출공문.pdf`,
+    `${documentStem}_전기사용계약_변경신청서_미리보기.pdf`,
+  ]
+  for (const [index, expectedPdfName] of expectedPdfNames.entries()) {
+    const pdfDownload = page.waitForEvent('download')
+    await page.getByRole('button', { name: '다운로드' }).nth(index).click()
+    const downloadedPdf = await pdfDownload
+    await expect(downloadedPdf.suggestedFilename()).toBe(expectedPdfName)
+    const pdfPath = testInfo.outputPath(`document-${index}.pdf`)
+    await downloadedPdf.saveAs(pdfPath)
+    const pdfBytes = await readFile(pdfPath)
+    expect(pdfBytes.subarray(0, 4).toString()).toBe('%PDF')
+    expect(pdfBytes.byteLength).toBeGreaterThan(100_000)
+  }
 })
 
 test('mobile core workflow keeps navigation and wide content usable', async ({ page }) => {

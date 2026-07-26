@@ -20,7 +20,7 @@ import {
   createDocumentPackage,
   createPdfBlob,
 } from '../../lib/documentExport'
-import { sanitizeDownloadStem } from '../../lib/downloadNames'
+import { getDocumentFileNames, sanitizeDownloadStem } from '../../lib/downloadNames'
 import type { PeakOperationPlan } from '../../lib/peakOperations'
 
 interface DocumentGeneratorProps {
@@ -101,6 +101,8 @@ export function DocumentGenerator({
     ],
   )
   const canGenerateChangeDocuments = diagnosis.canGenerateChangeDocuments
+  const documentIdentity = sanitizeDownloadStem(profile.displaySchoolName)
+  const documentFileNames = getDocumentFileNames(profile.displaySchoolName)
 
   const copyDocumentText = async (text: string, successMessage: string) => {
     if (!canGenerateChangeDocuments) {
@@ -161,11 +163,8 @@ export function DocumentGenerator({
         plan: planPdf,
         letter: letterPdf,
         application: applicationPdf,
-      })
-      saveBlob(
-        blob,
-        `${sanitizeDownloadStem(profile.displaySchoolName)}_전기요금_변경_문서묶음.zip`,
-      )
+      }, documentFileNames)
+      saveBlob(blob, documentFileNames.zip)
       setStatus('PDF 3종이 포함된 문서 묶음 ZIP 다운로드를 시작했습니다.')
     } catch {
       setStatus('문서 묶음 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.')
@@ -212,7 +211,7 @@ export function DocumentGenerator({
             <button
               type="button"
               disabled={!canGenerateChangeDocuments}
-              onClick={() => void downloadPdf('plan-preview', '전기요금제_변경계획안.pdf')}
+              onClick={() => void downloadPdf('plan-preview', documentFileNames.planPdf)}
             >
               <Download size={16} /> 다운로드
             </button>
@@ -240,7 +239,7 @@ export function DocumentGenerator({
             <button
               type="button"
               disabled={!canGenerateChangeDocuments}
-              onClick={() => void downloadPdf('letter-preview', '한전_제출공문.pdf')}
+              onClick={() => void downloadPdf('letter-preview', documentFileNames.letterPdf)}
             >
               <Download size={16} /> 다운로드
             </button>
@@ -273,7 +272,7 @@ export function DocumentGenerator({
             <button
               type="button"
               disabled={!canGenerateChangeDocuments}
-              onClick={() => void downloadPdf('application-preview', '전기사용계약_변경신청서_미리보기.pdf')}
+              onClick={() => void downloadPdf('application-preview', documentFileNames.applicationPdf)}
             >
               <Download size={16} /> 다운로드
             </button>
@@ -364,7 +363,7 @@ export function DocumentGenerator({
             {renderTextDocument(
               '예산절감을 위한 전기요금제 변경 계획(안)',
               bundle.planText,
-              profile.displaySchoolName,
+              documentIdentity,
             )}
             <table className="document-summary-table">
               <tbody>
@@ -385,9 +384,9 @@ export function DocumentGenerator({
             className={selectedId === 'letter-preview' ? 'document-preview official-document visible' : 'document-preview official-document'}
           >
             {renderTextDocument(
-              `${profile.displaySchoolName} 전기요금 변경 신청`,
+              `${documentIdentity} 전기요금 변경 신청`,
               bundle.kepcoLetterText,
-              profile.displaySchoolName,
+              documentIdentity,
             )}
             <footer>{rateChangeCaution} 붙임 서류와 원본 청구서 대조 후 제출.</footer>
           </div>
@@ -395,6 +394,10 @@ export function DocumentGenerator({
             id="application-preview"
             className={selectedId === 'application-preview' ? 'document-preview application-document visible' : 'document-preview application-document'}
           >
+            <div className="doc-masthead">
+              <span>서울특별시교육청 전기요금 진단 자료</span>
+              <strong>{documentIdentity}</strong>
+            </div>
             <h3>전기사용계약 변경신청서 PDF 미리보기</h3>
             <div className="doc-alert">
               한전 공식 신청서가 아닌 작성 참고용 미리보기입니다.

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { RatePlan, Season } from '../../types'
 
 interface RatePlanSettingsProps {
@@ -11,25 +12,62 @@ const seasonLabels: Record<Season, string> = {
   winter: '겨울',
 }
 
+const normalizeTuplePart = (value: string) => value.trim().replace(/\s/g, '')
+
+const hasDuplicateTuple = (plans: RatePlan[]) => {
+  const seen = new Set<string>()
+  return plans.some((plan) => {
+    const key = [plan.contractType, plan.voltageType, plan.planName]
+      .map(normalizeTuplePart)
+      .join('|')
+    if (seen.has(key)) return true
+    seen.add(key)
+    return false
+  })
+}
+
 export function RatePlanSettings({
   plans,
   onPlansChange,
 }: RatePlanSettingsProps) {
+  const [validationMessage, setValidationMessage] = useState('')
   const updatePlan = (
     planId: string,
     updater: (plan: RatePlan) => RatePlan,
   ) => {
-    onPlansChange(plans.map((plan) => (plan.id === planId ? updater(plan) : plan)))
+    const nextPlans = plans.map((plan) => (plan.id === planId ? updater(plan) : plan))
+    if (hasDuplicateTuple(nextPlans)) {
+      setValidationMessage('계약종별·수전전압·요금제명 조합이 중복됩니다. 기존 요금제와 다른 조합으로 입력해 주세요.')
+      return
+    }
+    setValidationMessage('')
+    onPlansChange(nextPlans)
   }
 
   const addPlan = () => {
     const base = plans[0]
+    if (!base) return
+    const existingNames = new Set(
+      plans
+        .filter(
+          (plan) =>
+            normalizeTuplePart(plan.contractType) === normalizeTuplePart(base.contractType) &&
+            normalizeTuplePart(plan.voltageType) === normalizeTuplePart(base.voltageType),
+        )
+        .map((plan) => normalizeTuplePart(plan.planName)),
+    )
+    let suffix = 1
+    let planName = '사용자 요금제'
+    while (existingNames.has(normalizeTuplePart(planName))) {
+      suffix += 1
+      planName = `사용자 요금제 ${suffix}`
+    }
     onPlansChange([
       ...plans,
       {
         ...base,
         id: `custom-${Date.now()}`,
-        planName: '사용자 요금제',
+        planName,
         memo: '설정 화면에서 추가',
       },
     ])
@@ -145,6 +183,7 @@ export function RatePlanSettings({
             </article>
           ))}
         </div>
+        {validationMessage && <p className="status-line" role="status">{validationMessage}</p>}
       </section>
     </div>
   )

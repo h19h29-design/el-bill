@@ -158,6 +158,30 @@ describe('automatic diagnosis harness', () => {
     expect(resolution.issue).toBe('현재 요금제를 요금표에서 확인해 주세요.')
   })
 
+  it('blocks diagnosis when the current-plan tuple is duplicated', () => {
+    const duplicateCurrentPlan = { ...currentPlan, id: 'duplicate-current' }
+    const profile = {
+      ...defaultSchoolProfile,
+      contractType: currentPlan.contractType,
+      voltageType: currentPlan.voltageType,
+      currentPlan: currentPlan.planName,
+    }
+    const resolution = resolveCurrentPlan(profile, [currentPlan, duplicateCurrentPlan, cheaperPlan])
+    const diagnosis = buildAutoDiagnosis({
+      bills: twelveBills,
+      profile,
+      ratePlans: [currentPlan, duplicateCurrentPlan, cheaperPlan],
+      scenario: defaultScenario,
+      billsAreUserUploaded: true,
+    })
+
+    expect(resolution.exact).toBe(false)
+    expect(resolution.plan).toBeNull()
+    expect(resolution.issue).toContain('중복')
+    expect(diagnosis.configurationRequired).toBe(true)
+    expect(diagnosis.canGenerateChangeDocuments).toBe(false)
+  })
+
   it('blocks diagnosis and documents when no exact active plan is configured', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills,
