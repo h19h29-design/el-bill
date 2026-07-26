@@ -343,4 +343,66 @@ describe('shared live storage expiry', () => {
 
     expect(localStorage.getItem('el-bill:bills')).toBeNull()
   })
+
+  it('cleans up a cross-tab session that remains uncommitted after the grace recheck', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-26T00:00:00Z'))
+    startCommittedSnapshot()
+    render(<App />)
+
+    const interruptedSession = {
+      createdAt: '2026-07-26T00:00:00.000Z',
+      expiresAt: '2026-07-27T00:00:00.000Z',
+      sessionId: 'interrupted-tab-session',
+    }
+    localStorage.removeItem(storageCommitKey)
+    localStorage.setItem(storageSessionKey, JSON.stringify(interruptedSession))
+    localStorage.setItem(
+      'el-bill:bills',
+      JSON.stringify({ ...interruptedSession, data: sampleBills }),
+    )
+
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: storageSessionKey,
+        storageArea: localStorage,
+      }))
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(localStorage.getItem(storageSessionKey)).toBeNull()
+    expect(localStorage.getItem(storageCommitKey)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+    expect(document.querySelector('.notice-detail')?.textContent).toContain(
+      '현재 저장된 사용자 데이터 없음',
+    )
+  })
+
+  it('adopts a complete cross-tab session after the grace recheck', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-26T00:00:00Z'))
+    startCommittedSnapshot()
+    render(<App />)
+
+    const adoptedSession = startCommittedSnapshot(
+      { bills: 'sample', powerPlanner: 'uploaded' },
+      samplePowerPlannerDataSource,
+    )
+
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: storageCommitKey,
+        storageArea: localStorage,
+      }))
+      vi.advanceTimersByTime(100)
+    })
+
+    expect(JSON.parse(localStorage.getItem(storageSessionKey) ?? '{}')).toMatchObject({
+      sessionId: adoptedSession.sessionId,
+    })
+    expect(localStorage.getItem(storageCommitKey)).not.toBeNull()
+    expect(document.querySelector('.notice-detail')?.textContent).toContain(
+      '파워플래너: 사용자 업로드',
+    )
+  })
 })

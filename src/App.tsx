@@ -36,7 +36,9 @@ import {
   loadDataProvenance,
   loadForSession,
   powerPlannerStorageKey,
+  purgeInvalidCurrentStorageSession,
   purgeStorageSession,
+  readStorageSession,
   restorePowerPlannerState,
   restoreStorageSession,
   saveForSession,
@@ -69,6 +71,7 @@ const storageSnapshotKeys = [
   dataProvenanceStorageKey,
 ]
 const maxBrowserTimeoutMs = 2_147_483_647
+const crossTabSessionGraceMs = 50
 
 function App() {
   const initialStorageSession = restoreStorageSession(
@@ -189,10 +192,7 @@ function App() {
 
   useEffect(() => {
     if (!storageSession) return
-    const resetStaleSession = () => {
-      const expired = Date.parse(storageSession.expiresAt) <= Date.now()
-      if (!expired && isCommittedStorageSession(storageSession)) return
-      purgeStorageSession(storageKeys, storageSession, storageSessionKey)
+    const resetToSample = (message: string) => {
       setStorageSession(null)
       setBills(sampleBills)
       setProfile(defaultSchoolProfile)
@@ -201,22 +201,81 @@ function App() {
       setPowerPlannerDataSource(null)
       setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
       setActiveView('dashboard')
-      setExpiryMessage(
-        expired
-          ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
-          : '다른 탭에서 저장 세션이 변경되어 시연 샘플로 전환했습니다.',
-      )
+      setExpiryMessage(message)
     }
+
+    const adoptOrPurgeCurrentSession = () => {
+      const nextSession = readStorageSession(storageSessionKey)
+      if (!nextSession) {
+        purgeInvalidCurrentStorageSession(
+          storageKeys,
+          storageSnapshotKeys,
+          storageSessionKey,
+        )
+        resetToSample('다른 탭의 저장이 완료되지 않아 시연 샘플로 전환했습니다.')
+        return
+      }
+
+      const nextBillsPayload = loadForSession<unknown>(billsKey, nextSession)
+      const nextProfilePayload = loadForSession<SchoolProfile>(profileKey, nextSession)
+      const nextScenarioPayload = loadForSession<PeakScenario>(scenarioKey, nextSession)
+      const nextPlansPayload = loadForSession<RatePlan[]>(ratePlansKey, nextSession)
+      if (
+        !isStoredMonthlyBillCollection(nextBillsPayload?.data) ||
+        !nextProfilePayload?.data ||
+        !nextScenarioPayload?.data ||
+        !Array.isArray(nextPlansPayload?.data)
+      ) {
+        purgeInvalidCurrentStorageSession(
+          storageKeys,
+          storageSnapshotKeys,
+          storageSessionKey,
+        )
+        resetToSample('다른 탭의 저장이 완료되지 않아 시연 샘플로 전환했습니다.')
+        return
+      }
+
+      const nextProvenance = loadDataProvenance(nextBillsPayload.data, nextSession)
+      const nextPowerPlanner = restorePowerPlannerState(nextProvenance, nextSession)
+      setStorageSession(nextSession)
+      setBills(nextBillsPayload.data)
+      setProfile(nextProfilePayload.data)
+      setScenario(nextScenarioPayload.data)
+      setRatePlans(nextPlansPayload.data)
+      setPowerPlannerDataSource(nextPowerPlanner.powerPlannerData)
+      setDataProvenance(nextPowerPlanner.provenance)
+      setExpiryMessage('')
+    }
+
+    let deferredRecheckId: number | undefined
+    const scheduleCrossTabRecheck = () => {
+      if (deferredRecheckId !== undefined) window.clearTimeout(deferredRecheckId)
+      deferredRecheckId = window.setTimeout(() => {
+        deferredRecheckId = undefined
+        adoptOrPurgeCurrentSession()
+      }, crossTabSessionGraceMs)
+    }
+
+    const recheckOwnedSession = () => {
+      if (isCommittedStorageSession(storageSession)) return
+      const expired = Date.parse(storageSession.expiresAt) <= Date.now()
+      if (expired && purgeStorageSession(storageKeys, storageSession, storageSessionKey)) {
+        resetToSample('24시간이 지나 시연 데이터가 삭제되었습니다.')
+        return
+      }
+      scheduleCrossTabRecheck()
+    }
+
     const handleStorageSessionChange = (event: StorageEvent) => {
       if (
         event.storageArea !== localStorage ||
         (event.key !== storageSessionKey && event.key !== storageCommitKey)
       ) return
-      resetStaleSession()
+      scheduleCrossTabRecheck()
     }
-    const handleFocus = () => resetStaleSession()
+    const handleFocus = () => recheckOwnedSession()
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') resetStaleSession()
+      if (document.visibilityState === 'visible') recheckOwnedSession()
     }
     window.addEventListener('storage', handleStorageSessionChange)
     window.addEventListener('focus', handleFocus)
@@ -225,6 +284,7 @@ function App() {
       window.removeEventListener('storage', handleStorageSessionChange)
       window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      if (deferredRecheckId !== undefined) window.clearTimeout(deferredRecheckId)
     }
   }, [storageSession])
 

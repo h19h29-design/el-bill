@@ -6,6 +6,7 @@ import {
   loadForSession,
   loadWithExpiry,
   purgeExpiredKeys,
+  purgeInvalidCurrentStorageSession,
   purgeStorageSession,
   restoreStorageSession,
   saveForSession,
@@ -183,6 +184,37 @@ describe('local demo storage TTL harness', () => {
     expect(localStorage.getItem(storageSessionKey)).toBeNull()
     expect(localStorage.getItem(storageCommitKey)).toBeNull()
     expect(localStorage.getItem('el-bill:bills')).toBeNull()
+  })
+
+  it('only purges the current session when its required snapshot is incomplete', () => {
+    const session = createStorageSession(Date.now(), 'current-incomplete-session')
+    localStorage.setItem(storageSessionKey, JSON.stringify(session))
+    localStorage.setItem(storageCommitKey, JSON.stringify(session))
+    localStorage.setItem('el-bill:bills', JSON.stringify({ ...session, data: { version: 1 } }))
+
+    expect(
+      purgeInvalidCurrentStorageSession(
+        ['el-bill:bills', 'el-bill:profile'],
+        ['el-bill:bills', 'el-bill:profile'],
+      ),
+    ).toBe(true)
+    expect(localStorage.getItem(storageSessionKey)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+  })
+
+  it('does not purge a valid current session while rechecking another tab', () => {
+    const session = startNewStorageSession([
+      ['el-bill:bills', { version: 2 }],
+      ['el-bill:profile', { version: 2 }],
+    ], Date.now(), 'current-committed-session')
+
+    expect(
+      purgeInvalidCurrentStorageSession(
+        ['el-bill:bills', 'el-bill:profile'],
+        ['el-bill:bills', 'el-bill:profile'],
+      ),
+    ).toBe(false)
+    expect(JSON.parse(localStorage.getItem(storageSessionKey) ?? '{}')).toEqual(session)
   })
 
   it('restores a fully committed snapshot immediately after upload', () => {

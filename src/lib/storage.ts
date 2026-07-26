@@ -238,6 +238,48 @@ export const purgeStorageSession = (
 }
 
 /**
+ * Removes only the current session when it cannot be restored as a complete,
+ * committed snapshot. This is intentionally separate from compare-and-purge:
+ * another tab may have already replaced the caller's former session.
+ */
+export const purgeInvalidCurrentStorageSession = (
+  keys: string[],
+  requiredKeys = keys,
+  sessionKey = storageSessionKey,
+) => {
+  const clearCurrentSession = () => {
+    keys.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(sessionKey)
+    localStorage.removeItem(storageCommitKey)
+  }
+  const rawSession = localStorage.getItem(sessionKey)
+  if (!rawSession) {
+    if (localStorage.getItem(storageCommitKey) || keys.some((key) => localStorage.getItem(key))) {
+      clearCurrentSession()
+      return true
+    }
+    return false
+  }
+
+  try {
+    const session = JSON.parse(rawSession) as unknown
+    if (
+      isStorageSession(session) &&
+      !isExpired(session) &&
+      hasMatchingCommitMarker(session) &&
+      requiredKeys.every((key) => hasMatchingSessionPayload(key, session))
+    ) {
+      return false
+    }
+  } catch {
+    // A malformed current session is invalid and must not survive the recheck.
+  }
+
+  clearCurrentSession()
+  return true
+}
+
+/**
  * Existing releases stored each key with an independent expiry. Retain their
  * earliest valid expiry during the one-time migration so no data gains time.
  */
