@@ -202,6 +202,7 @@ function App() {
             <BillUpload
               bills={bills}
               profile={profile}
+              ratePlans={ratePlans}
               onBillsChange={applyBillsAndOpenDiagnosis}
             />
           )}

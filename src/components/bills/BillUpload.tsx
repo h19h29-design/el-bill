@@ -5,7 +5,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { FileDown, FileSpreadsheet, UploadCloud } from 'lucide-react'
-import type { MonthlyBill, SchoolProfile } from '../../types'
+import type { MonthlyBill, RatePlan, SchoolProfile } from '../../types'
 import {
   mapRowsToBills,
   parseWorkbook,
@@ -13,12 +13,13 @@ import {
   type ParsedSheet,
   type WorkbookParseResult,
 } from '../../lib/excel'
-import { summarizeWorkbookRecognition } from '../../lib/diagnosis'
+import { findCurrentPlan, summarizeWorkbookRecognition } from '../../lib/diagnosis'
 import { BillTable } from './BillTable'
 
 interface BillUploadProps {
   bills: MonthlyBill[]
   profile: SchoolProfile
+  ratePlans: RatePlan[]
   onBillsChange: (bills: MonthlyBill[]) => void
 }
 
@@ -59,7 +60,12 @@ const buildMapping = (headers: string[]) => ({
   note: guessHeader(headers, '메모'),
 })
 
-export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
+export function BillUpload({
+  bills,
+  profile,
+  ratePlans,
+  onBillsChange,
+}: BillUploadProps) {
   const [parseResult, setParseResult] = useState<WorkbookParseResult | null>(null)
   const [selectedSheetName, setSelectedSheetName] = useState('')
   const [mapping, setMapping] = useState<Record<string, string>>({})
@@ -84,11 +90,20 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
     () => summarizeWorkbookRecognition(parseResult, mapping),
     [parseResult, mapping],
   )
+  const importContext = useMemo(
+    () => ({
+      appliedPowerKw: profile.appliedPowerKw,
+      currentPlan: findCurrentPlan(profile, ratePlans),
+    }),
+    [profile, ratePlans],
+  )
   const pendingBills = useMemo(() => {
     if (!parseResult) return []
     if (parseResult.autoRows.length) return parseResult.autoRows
-    return selectedSheet ? mapRowsToBills(selectedSheet.rows, mapping) : []
-  }, [mapping, parseResult, selectedSheet])
+    return selectedSheet
+      ? mapRowsToBills(selectedSheet.rows, mapping, importContext)
+      : []
+  }, [importContext, mapping, parseResult, selectedSheet])
 
   const handleFile = async (file: File) => {
     const validationMessage = validateUploadFile(file)
@@ -99,7 +114,7 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
     }
 
     try {
-      const result = await parseWorkbook(file)
+      const result = await parseWorkbook(file, importContext)
       setParseResult(result)
       setSelectedSheetName(result.sheets[0]?.name ?? '')
       setShowManualMapping(false)
@@ -138,7 +153,7 @@ export function BillUpload({ bills, profile, onBillsChange }: BillUploadProps) {
 
   const applyMapping = () => {
     if (!selectedSheet) return
-    const mapped = mapRowsToBills(selectedSheet.rows, mapping)
+    const mapped = mapRowsToBills(selectedSheet.rows, mapping, importContext)
     if (!mapped.length) {
       setMessage('필수 매핑 결과가 없습니다. 연도, 월, 사용량, 총 전기요금을 확인해 주세요.')
       return

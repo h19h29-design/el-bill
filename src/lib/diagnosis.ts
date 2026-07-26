@@ -84,7 +84,10 @@ export const findCurrentPlan = (
 export const assessDataConfidence = (bills: MonthlyBill[]): DataConfidence => {
   const validation = validateBillPeriods(bills, 36)
   const recent36 = validation.recentConsecutiveBills.slice(-36)
-  const hasDemand = recent36.length > 0 && recent36.every((bill) => bill.maxDemandKw > 0)
+  const hasDemand = recent36.length > 0 && recent36.every(
+    (bill) =>
+      bill.maxDemandKw > 0 && bill.observedFields.includes('maxDemandKw'),
+  )
   if (validation.hasRequiredConsecutiveMonths && hasDemand) return '데이터 충분'
   if (recent36.length >= 12) return '보통'
   return '낮음'
@@ -100,7 +103,12 @@ export const getDataRecognitionRate = (bills: MonthlyBill[]) => {
       Number(bill.usageKwh > 0) +
       Number(bill.totalBillWon > 0)
     const optionalScore =
-      Number(bill.appliedPowerKw > 0) + Number(bill.maxDemandKw > 0)
+      Number(
+        bill.appliedPowerKw > 0 && bill.observedFields.includes('appliedPowerKw'),
+      ) +
+      Number(
+        bill.maxDemandKw > 0 && bill.observedFields.includes('maxDemandKw'),
+      )
     return sum + requiredScore + optionalScore
   }, 0)
   return Math.round((score / (bills.length * maxScore)) * 100)
@@ -487,7 +495,7 @@ export const summarizeWorkbookRecognition = (
   const optionalColumns = hasAutoRows
     ? normalizedOptionalBillColumns
         .filter(([, key]) =>
-          result.autoRows.some((bill) => Number.isFinite(bill[key]) && bill[key] !== 0),
+          result.autoRows.some((bill) => bill.observedFields.includes(key)),
         )
         .map(([label]) => label)
     : mappedOptionalColumns

@@ -2,9 +2,25 @@ import { describe, expect, it } from 'vitest'
 import * as XLSX from 'xlsx'
 import {
   getWorkbookLimitMessage,
+  mapRowsToBills,
   parseWorkbook,
   validateUploadFile,
 } from './excel'
+
+const currentPlan = {
+  id: 'current',
+  contractType: '교육용(갑)',
+  voltageType: '고압A',
+  planName: '선택요금Ⅱ',
+  baseRateWonPerKw: 7100,
+  seasonRates: {
+    springAutumn: 77.7,
+    summer: 111.1,
+    winter: 99.9,
+  },
+  effectiveFrom: '2026-01-01',
+  memo: '테스트 요금제',
+}
 
 const createSyntheticWorkbook = () => {
   const workbook = XLSX.utils.book_new()
@@ -135,6 +151,36 @@ describe('synthetic workbook parser harness', () => {
       appliedPowerKw: 450,
       note: '파워플래너 월별청구요금 업로드',
     })
+    expect(result.autoRows[0]?.maxDemandKw).toBe(0)
+  })
+
+  it('uses profile defaults without pretending they were observed', () => {
+    const [bill] = mapRowsToBills(
+      [
+        {
+          연도: 2026,
+          월: 6,
+          사용량: 42_000,
+          '총 전기요금': 6_420_000,
+        },
+      ],
+      {
+        year: '연도',
+        month: '월',
+        usageKwh: '사용량',
+        totalBillWon: '총 전기요금',
+      },
+      { appliedPowerKw: 620, currentPlan },
+    )
+
+    expect(bill?.appliedPowerKw).toBe(620)
+    expect(bill?.maxDemandKw).toBe(0)
+    expect(bill?.observedFields).toContain('year')
+    expect(bill?.observedFields).toContain('totalBillWon')
+    expect(bill?.observedFields).not.toContain('appliedPowerKw')
+    expect(bill?.observedFields).not.toContain('maxDemandKw')
+    expect(bill?.baseChargeWon).toBe(620 * currentPlan.baseRateWonPerKw)
+    expect(bill?.energyChargeWon).toBe(Math.round(42_000 * currentPlan.seasonRates.summer))
   })
 
   it('keeps Korean headers intact when reading a UTF-8 Power Planner CSV', async () => {

@@ -18,6 +18,7 @@ const bill = (year: number, month: number): MonthlyBill => ({
   vatWon: 9_000,
   fundWon: 3_000,
   note: 'test',
+  observedFields: ['year', 'month', 'usageKwh', 'totalBillWon'],
 })
 
 describe('billing period validation', () => {

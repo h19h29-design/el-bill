@@ -52,6 +52,27 @@ export interface MonthlyBill {
   vatWon: number
   fundWon: number
   note: string
+  observedFields: MonthlyBillObservedField[]
+}
+
+export type MonthlyBillObservedField =
+  | 'year'
+  | 'month'
+  | 'usageKwh'
+  | 'totalBillWon'
+  | 'appliedPowerKw'
+  | 'maxDemandKw'
+  | 'baseChargeWon'
+  | 'energyChargeWon'
+  | 'powerFactorChargeWon'
+  | 'climateChargeWon'
+  | 'fuelAdjustmentWon'
+  | 'vatWon'
+  | 'fundWon'
+
+export interface BillImportContext {
+  appliedPowerKw: number
+  currentPlan: RatePlan
 }
 
 export type BillPeriodIssueCode =

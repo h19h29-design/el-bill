@@ -57,6 +57,21 @@ const makeBill = (year: number, month: number, index: number): MonthlyBill => {
     vatWon,
     fundWon,
     note: '합성 시연 데이터',
+    observedFields: [
+      'year',
+      'month',
+      'usageKwh',
+      'totalBillWon',
+      'appliedPowerKw',
+      'maxDemandKw',
+      'baseChargeWon',
+      'energyChargeWon',
+      'powerFactorChargeWon',
+      'climateChargeWon',
+      'fuelAdjustmentWon',
+      'vatWon',
+      'fundWon',
+    ],
   }
 }
 

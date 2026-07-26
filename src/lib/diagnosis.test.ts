@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { MonthlyBill, RatePlan } from '../types'
+import type { MonthlyBill, MonthlyBillObservedField, RatePlan } from '../types'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../data/sampleBills'
 import { defaultRatePlans } from '../data/ratePlans'
 import {
+  assessDataConfidence,
   buildAutoDiagnosis,
   comparePlansForDiagnosis,
+  getDataRecognitionRate,
   summarizeWorkbookRecognition,
 } from './diagnosis'
 
@@ -44,6 +46,21 @@ const makeBill = (month: number): MonthlyBill => ({
   vatWon: 130_000,
   fundWon: 48_000,
   note: '테스트',
+  observedFields: [
+    'year',
+    'month',
+    'usageKwh',
+    'totalBillWon',
+    'appliedPowerKw',
+    'maxDemandKw',
+    'baseChargeWon',
+    'energyChargeWon',
+    'powerFactorChargeWon',
+    'climateChargeWon',
+    'fuelAdjustmentWon',
+    'vatWon',
+    'fundWon',
+  ],
 })
 
 const twelveBills = Array.from({ length: 12 }, (_, index) => makeBill(index + 1))
@@ -89,6 +106,21 @@ describe('automatic diagnosis harness', () => {
     expect(comparison.savingWon).toBeGreaterThan(0)
     expect(comparison.threeYearSavingWon).toBeGreaterThan(0)
     expect(comparison.recommendation).toBe('변경 추천')
+  })
+
+  it('does not count inferred demand values as complete data', () => {
+    const inferredDemandBills = thirtySixConsecutiveBills.map((bill) => ({
+      ...bill,
+      observedFields: [
+        'year',
+        'month',
+        'usageKwh',
+        'totalBillWon',
+      ] as MonthlyBillObservedField[],
+    }))
+
+    expect(assessDataConfidence(inferredDemandBills)).toBe('보통')
+    expect(getDataRecognitionRate(inferredDemandBills)).toBe(67)
   })
 
   it('does not calculate a three-year estimate from gapped calendar periods', () => {

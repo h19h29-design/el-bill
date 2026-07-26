@@ -1,5 +1,9 @@
 import * as XLSX from 'xlsx'
-import type { MonthlyBill } from '../types'
+import type {
+  BillImportContext,
+  MonthlyBill,
+  MonthlyBillObservedField,
+} from '../types'
 
 export interface ParsedSheet {
   name: string
@@ -61,6 +65,12 @@ const asYearMonth = (value: unknown) => {
     year: Number.isFinite(year) ? year : 0,
     month: month >= 1 && month <= 12 ? month : 0,
   }
+}
+
+const seasonForMonth = (month: number) => {
+  if (month >= 6 && month <= 8) return 'summer'
+  if ([12, 1, 2].includes(month)) return 'winter'
+  return 'springAutumn'
 }
 
 const inferYearFromSheetName = (name: string) => {
@@ -165,10 +175,21 @@ const makeImportedBill = (
   month: number,
   usageKwh: number,
   totalBillWon: number,
+  context?: BillImportContext,
+  observedFields: MonthlyBillObservedField[] = [
+    'year',
+    'month',
+    'usageKwh',
+    'totalBillWon',
+  ],
 ): MonthlyBill => {
-  const appliedPowerKw = 497
-  const baseChargeWon = appliedPowerKw * 6370
-  const energyChargeWon = Math.round(usageKwh * 82.1)
+  const appliedPowerKw = context?.appliedPowerKw ?? 0
+  const baseChargeWon = context
+    ? Math.round(appliedPowerKw * context.currentPlan.baseRateWonPerKw)
+    : 0
+  const energyChargeWon = context
+    ? Math.round(usageKwh * context.currentPlan.seasonRates[seasonForMonth(month)])
+    : 0
   return {
     id: `import-${year}-${month}-${usageKwh}-${totalBillWon}`,
     year,
@@ -178,18 +199,20 @@ const makeImportedBill = (
     baseChargeWon,
     energyChargeWon,
     appliedPowerKw,
-    maxDemandKw: Math.max(385, Math.round(usageKwh / 120 + 40)),
+    maxDemandKw: 0,
     powerFactorChargeWon: 0,
-    climateChargeWon: Math.round(usageKwh * 9),
-    fuelAdjustmentWon: Math.round(usageKwh * -5),
-    vatWon: Math.round(totalBillWon * 0.09),
-    fundWon: Math.round(totalBillWon * 0.037),
+    climateChargeWon: 0,
+    fuelAdjustmentWon: 0,
+    vatWon: 0,
+    fundWon: 0,
     note: '업로드 엑셀 자동 파싱',
+    observedFields,
   }
 }
 
-export const parseKnownSchoolWorkbook = (
+const parseYearlyBillWorkbook = (
   workbook: XLSX.WorkBook,
+  context?: BillImportContext,
 ): { rows: MonthlyBill[]; diagnostics: string[] } => {
   const rows: MonthlyBill[] = []
   const diagnostics: string[] = []
@@ -229,7 +252,7 @@ export const parseKnownSchoolWorkbook = (
       const totalBillWon = asNumber(row[amountCol])
       const usageKwh = asNumber(row[usageCol])
       if (!month || !totalBillWon || !usageKwh) return
-      rows.push(makeImportedBill(year, month, usageKwh, totalBillWon))
+      rows.push(makeImportedBill(year, month, usageKwh, totalBillWon, context))
     })
   })
 
@@ -243,26 +266,32 @@ const getRowValue = (row: Record<string, unknown>, ...patterns: string[]) => {
   return found?.[1]
 }
 
-const parsePowerPlannerMonthlyBills = (sheet: ParsedSheet): MonthlyBill[] =>
+const parsePowerPlannerMonthlyBills = (
+  sheet: ParsedSheet,
+  context?: BillImportContext,
+): MonthlyBill[] =>
   sheet.rows
     .map((row, index) => {
       const { year, month } = asYearMonth(getRowValue(row, '연월', '사용월'))
       const usageKwh = asNumber(getRowValue(row, '사용전력량', '사용량'))
       const totalBillWon = asNumber(getRowValue(row, '청구요금', '예상요금'))
-      const appliedPowerKw = asNumber(getRowValue(row, '요금적용전력'))
+      const rawAppliedPowerKw = getRowValue(row, '요금적용전력')
+      const appliedPowerKw = asNumber(rawAppliedPowerKw)
       if (!year || !month || !usageKwh || !totalBillWon) return null
 
-      const bill = makeImportedBill(year, month, usageKwh, totalBillWon)
+      const bill = makeImportedBill(year, month, usageKwh, totalBillWon, context)
       const baseChargeWon = appliedPowerKw
-        ? Math.round(appliedPowerKw * 6370)
+        ? Math.round(appliedPowerKw * (context?.currentPlan.baseRateWonPerKw ?? 0))
         : bill.baseChargeWon
       return {
         ...bill,
         id: `power-planner-${year}-${month}-${index}`,
         appliedPowerKw: appliedPowerKw || bill.appliedPowerKw,
-        maxDemandKw: appliedPowerKw || bill.maxDemandKw,
+        maxDemandKw: 0,
         baseChargeWon,
-        energyChargeWon: Math.max(0, totalBillWon - baseChargeWon),
+        observedFields: rawAppliedPowerKw === undefined
+          ? bill.observedFields
+          : [...bill.observedFields, 'appliedPowerKw'],
         note: '파워플래너 월별청구요금 업로드',
       }
     })
@@ -317,6 +346,7 @@ const parsePowerPlannerHtmlSheet = (text: string): ParsedSheet | null => {
 
 const parseWorkbookContents = async (
   file: File | ArrayBuffer,
+  context?: BillImportContext,
 ): Promise<WorkbookParseResult> => {
   const buffer = file instanceof File ? await file.arrayBuffer() : file
   const decodedText = decodeSpreadsheetText(buffer)
@@ -331,7 +361,7 @@ const parseWorkbookContents = async (
   const powerPlannerSheet = parsePowerPlannerHtmlSheet(decodedText)
 
   if (powerPlannerSheet) {
-    const autoRows = parsePowerPlannerMonthlyBills(powerPlannerSheet)
+    const autoRows = parsePowerPlannerMonthlyBills(powerPlannerSheet, context)
     return {
       sheets: [powerPlannerSheet],
       autoRows,
@@ -353,7 +383,7 @@ const parseWorkbookContents = async (
     const headers = rows[0] ? Object.keys(rows[0]) : []
     return { name, headers, rows }
   })
-  const known = parseKnownSchoolWorkbook(workbook)
+  const known = parseYearlyBillWorkbook(workbook, context)
 
   return {
     sheets,
@@ -364,13 +394,14 @@ const parseWorkbookContents = async (
 
 export const parseWorkbook = async (
   file: File | ArrayBuffer,
+  context?: BillImportContext,
 ): Promise<WorkbookParseResult> => {
   if (file instanceof File) {
     const fileMessage = validateUploadFile(file)
     if (fileMessage) throw new Error(fileMessage)
   }
 
-  const result = await parseWorkbookContents(file)
+  const result = await parseWorkbookContents(file, context)
   const rowLimitMessage = getWorkbookLimitMessage(result)
   if (rowLimitMessage) throw new Error(rowLimitMessage)
   return result
@@ -379,6 +410,7 @@ export const parseWorkbook = async (
 export const mapRowsToBills = (
   rows: Record<string, unknown>[],
   mapping: Record<string, string>,
+  context?: BillImportContext,
 ): MonthlyBill[] =>
   rows
     .map((row, index) => {
@@ -388,18 +420,65 @@ export const mapRowsToBills = (
       const totalBillWon = asNumber(row[mapping.totalBillWon])
       if (!year || !month || !usageKwh || !totalBillWon) return null
 
+      const hasMappedValue = (field: string) => {
+        const column = mapping[field]
+        return Boolean(column && normalize(row[column]))
+      }
+      const observedFields: MonthlyBillObservedField[] = [
+        'year',
+        'month',
+        'usageKwh',
+        'totalBillWon',
+      ]
+      const optionalFields: MonthlyBillObservedField[] = [
+        'appliedPowerKw',
+        'maxDemandKw',
+        'baseChargeWon',
+        'energyChargeWon',
+        'powerFactorChargeWon',
+        'climateChargeWon',
+        'fuelAdjustmentWon',
+        'vatWon',
+        'fundWon',
+      ]
+      optionalFields.forEach((field) => {
+        if (hasMappedValue(field)) observedFields.push(field)
+      })
+      const imported = makeImportedBill(
+        year,
+        month,
+        usageKwh,
+        totalBillWon,
+        context,
+        observedFields,
+      )
+
       return {
-        ...makeImportedBill(year, month, usageKwh, totalBillWon),
+        ...imported,
         id: `mapped-${year}-${month}-${index}`,
-        appliedPowerKw: asNumber(row[mapping.appliedPowerKw]) || 497,
-        maxDemandKw: asNumber(row[mapping.maxDemandKw]) || 0,
-        baseChargeWon: asNumber(row[mapping.baseChargeWon]) || 0,
-        energyChargeWon: asNumber(row[mapping.energyChargeWon]) || 0,
-        powerFactorChargeWon: asNumber(row[mapping.powerFactorChargeWon]) || 0,
-        climateChargeWon: asNumber(row[mapping.climateChargeWon]) || 0,
-        fuelAdjustmentWon: asNumber(row[mapping.fuelAdjustmentWon]) || 0,
-        vatWon: asNumber(row[mapping.vatWon]) || 0,
-        fundWon: asNumber(row[mapping.fundWon]) || 0,
+        appliedPowerKw: hasMappedValue('appliedPowerKw')
+          ? asNumber(row[mapping.appliedPowerKw])
+          : imported.appliedPowerKw,
+        maxDemandKw: hasMappedValue('maxDemandKw')
+          ? asNumber(row[mapping.maxDemandKw])
+          : 0,
+        baseChargeWon: hasMappedValue('baseChargeWon')
+          ? asNumber(row[mapping.baseChargeWon])
+          : imported.baseChargeWon,
+        energyChargeWon: hasMappedValue('energyChargeWon')
+          ? asNumber(row[mapping.energyChargeWon])
+          : imported.energyChargeWon,
+        powerFactorChargeWon: hasMappedValue('powerFactorChargeWon')
+          ? asNumber(row[mapping.powerFactorChargeWon])
+          : 0,
+        climateChargeWon: hasMappedValue('climateChargeWon')
+          ? asNumber(row[mapping.climateChargeWon])
+          : 0,
+        fuelAdjustmentWon: hasMappedValue('fuelAdjustmentWon')
+          ? asNumber(row[mapping.fuelAdjustmentWon])
+          : 0,
+        vatWon: hasMappedValue('vatWon') ? asNumber(row[mapping.vatWon]) : 0,
+        fundWon: hasMappedValue('fundWon') ? asNumber(row[mapping.fundWon]) : 0,
         note: normalize(row[mapping.note]) || '컬럼 매핑 입력',
       }
     })
