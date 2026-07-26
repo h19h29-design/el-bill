@@ -4,6 +4,7 @@ const dayMs = 24 * 60 * 60 * 1000
 
 export const dataProvenanceStorageKey = 'el-bill:data-provenance'
 export const legacyDataModeStorageKey = 'el-bill:data-mode'
+export const powerPlannerStorageKey = 'el-bill:power-planner'
 export const defaultDataProvenance: DataProvenance = {
   bills: 'sample',
   powerPlanner: 'none',
@@ -120,6 +121,7 @@ export const loadDataProvenance = (storedBills?: unknown): DataProvenance => {
   }
 
   const legacyMode = loadWithExpiry<unknown>(legacyDataModeStorageKey)
+  if (legacyMode) localStorage.removeItem(powerPlannerStorageKey)
   localStorage.removeItem(legacyDataModeStorageKey)
   if (legacyMode?.data !== 'sample' && legacyMode?.data !== 'uploaded') {
     return defaultDataProvenance

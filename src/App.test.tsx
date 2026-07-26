@@ -51,9 +51,33 @@ describe('data provenance persistence', () => {
         bills: 'sample',
         powerPlanner: 'none',
       })
+      expect(localStorage.getItem('el-bill:power-planner')).toBeNull()
     })
+    fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
+    expect(
+      screen.getByText('파워플래너 자료가 없으면 기존 한전 고지서 월별 데이터만으로 진단합니다.'),
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^피크관리$/ }))
+    expect(
+      screen.getByText(/파워플래너 자료가 없으므로 기존 한전 고지서 월별 데이터와 예상 피크 입력값으로 진단합니다/),
+    ).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^문서생성$/ }))
     expect(screen.getByText('사용자 고지서 업로드 후 생성 가능')).toBeTruthy()
+  })
+
+  it('restores PowerPlanner records for a new explicit provenance session', () => {
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      stored({ bills: 'sample', powerPlanner: 'uploaded' }),
+    )
+    localStorage.setItem('el-bill:power-planner', stored(samplePowerPlannerDataSource))
+
+    render(<App />)
+
+    expect(document.querySelector('.notice-detail')?.textContent).toContain('파워플래너: 사용자 업로드')
+    fireEvent.click(screen.getByRole('button', { name: /^파워플래너$/ }))
+    expect(screen.getByText('25건')).toBeTruthy()
+    expect(localStorage.getItem('el-bill:power-planner')).not.toBeNull()
   })
 
   it('migrates a legacy sample session without granting upload eligibility', async () => {

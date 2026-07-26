@@ -35,6 +35,7 @@ import {
   legacyDataModeStorageKey,
   loadDataProvenance,
   loadWithExpiry,
+  powerPlannerStorageKey,
   purgeExpiredKeys,
   saveWithExpiry,
 } from './lib/storage'
@@ -43,13 +44,12 @@ const billsKey = 'el-bill:bills'
 const profileKey = 'el-bill:profile'
 const scenarioKey = 'el-bill:scenario'
 const ratePlansKey = 'el-bill:rate-plans'
-const powerPlannerKey = 'el-bill:power-planner'
 const storageKeys = [
   billsKey,
   profileKey,
   scenarioKey,
   ratePlansKey,
-  powerPlannerKey,
+  powerPlannerStorageKey,
   dataProvenanceStorageKey,
   legacyDataModeStorageKey,
 ]
@@ -62,10 +62,11 @@ function App() {
     ? { ...loadedBillsPayload, data: loadedBillsPayload.data }
     : null
   if (loadedBillsPayload && !loadedBills) localStorage.removeItem(billsKey)
+  const initialDataProvenance = loadDataProvenance(loadedBills?.data)
   const loadedProfile = loadWithExpiry<SchoolProfile>(profileKey)
   const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
   const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
-  const loadedPowerPlanner = loadWithExpiry<PowerPlannerDataSource>(powerPlannerKey)
+  const loadedPowerPlanner = loadWithExpiry<PowerPlannerDataSource>(powerPlannerStorageKey)
 
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [bills, setBills] = useState<MonthlyBill[]>(loadedBills?.data ?? sampleBills)
@@ -81,7 +82,7 @@ function App() {
   const [powerPlannerDataSource, setPowerPlannerDataSource] =
     useState<PowerPlannerDataSource | null>(loadedPowerPlanner?.data ?? null)
   const [dataProvenance, setDataProvenance] = useState<DataProvenance>(
-    () => loadDataProvenance(loadedBills?.data),
+    initialDataProvenance,
   )
   const [expiresAt, setExpiresAt] = useState(
     loadedBills?.expiresAt ?? createExpiry().expiresAt,
@@ -106,9 +107,9 @@ function App() {
 
   useEffect(() => {
     if (powerPlannerDataSource) {
-      saveWithExpiry(powerPlannerKey, powerPlannerDataSource)
+      saveWithExpiry(powerPlannerStorageKey, powerPlannerDataSource)
     } else {
-      localStorage.removeItem(powerPlannerKey)
+      localStorage.removeItem(powerPlannerStorageKey)
     }
   }, [powerPlannerDataSource])
 
@@ -143,7 +144,7 @@ function App() {
     localStorage.removeItem(profileKey)
     localStorage.removeItem(scenarioKey)
     localStorage.removeItem(ratePlansKey)
-    localStorage.removeItem(powerPlannerKey)
+    localStorage.removeItem(powerPlannerStorageKey)
     localStorage.removeItem(dataProvenanceStorageKey)
     localStorage.removeItem(legacyDataModeStorageKey)
     setBills(sampleBills)
