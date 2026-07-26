@@ -9,6 +9,7 @@ import {
 } from '../data/sampleBills'
 import {
   cleanupExpiredStorageSnapshots,
+  getNextStorageSnapshotExpiry,
   getNextStorageExpiry,
   initializeStorageAfterMount,
   purgeExpiredStorageSnapshot,
@@ -348,10 +349,21 @@ describe('storage mutation lock and patch protocol', () => {
     )
   })
 
-  it('schedules live expiry from the active pointer and ignores an earlier inactive orphan', async () => {
+  it('keeps active UI expiry separate while tracking every scoped snapshot expiry', async () => {
     expect(
       (await startNewStorageSnapshot(makeData(), now, 'earlier-orphan')).ok,
     ).toBe(true)
+    const earlierKey = storageSnapshotKeyFor('earlier-orphan')
+    const nativeRemoveItem = Storage.prototype.removeItem
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key,
+    ) {
+      if (key === earlierKey) {
+        throw new DOMException('remove failed', 'QuotaExceededError')
+      }
+      nativeRemoveItem.call(this, key)
+    })
     expect(
       (
         await startNewStorageSnapshot(
@@ -363,9 +375,10 @@ describe('storage mutation lock and patch protocol', () => {
     ).toBe(true)
 
     expect(getNextStorageExpiry(now + 2_000)).toBe(now + 1_000 + dayMs)
+    expect(getNextStorageSnapshotExpiry(now + 2_000)).toBe(now + dayMs)
   })
 
-  it('keeps both uploads complete and lets the last locked pointer commit win', async () => {
+  it('removes the losing upload after the last locked pointer commit wins', async () => {
     const locks = installManualLock()
     const first = startNewStorageSnapshot(
       makeData(),
@@ -395,10 +408,127 @@ describe('storage mutation lock and patch protocol', () => {
     )
     expect(
       localStorage.getItem(storageSnapshotKeyFor('first-upload-session')),
-    ).not.toBeNull()
+    ).toBeNull()
     expect(
       localStorage.getItem(storageSnapshotKeyFor('second-upload-session')),
     ).not.toBeNull()
+  })
+
+  it('leaves only the current snapshot after repeated uploads', async () => {
+    for (const [index, sessionId] of [
+      'repeat-first',
+      'repeat-second',
+      'repeat-third',
+    ].entries()) {
+      expect(
+        (
+          await startNewStorageSnapshot(
+            makeData(),
+            now + index,
+            sessionId,
+          )
+        ).ok,
+      ).toBe(true)
+    }
+
+    expect(readStorageSnapshot(now + 3)?.session.sessionId).toBe('repeat-third')
+    expect(
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).filter((key) => key?.startsWith('el-bill:storage-snapshot:')),
+    ).toEqual([storageSnapshotKeyFor('repeat-third')])
+  })
+
+  it('keeps the new winner when prior snapshot deletion fails and reports retry work', async () => {
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'prior-upload')).ok,
+    ).toBe(true)
+    const priorKey = storageSnapshotKeyFor('prior-upload')
+    const nativeRemoveItem = Storage.prototype.removeItem
+    let rejectPriorRemoval = true
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key,
+    ) {
+      if (key === priorKey && rejectPriorRemoval) {
+        throw new DOMException('remove failed', 'QuotaExceededError')
+      }
+      nativeRemoveItem.call(this, key)
+    })
+
+    const winner = await startNewStorageSnapshot(
+      makeData(),
+      now + 1,
+      'retained-winner',
+    )
+
+    expect(winner).toEqual(
+      expect.objectContaining({
+        ok: true,
+        cleanupPendingSessionIds: ['prior-upload'],
+      }),
+    )
+    expect(readStorageSnapshot(now + 2)?.session.sessionId).toBe(
+      'retained-winner',
+    )
+    expect(localStorage.getItem(priorKey)).not.toBeNull()
+
+    rejectPriorRemoval = false
+    expect(await cleanupExpiredStorageSnapshots(now + 2)).toContain(priorKey)
+    expect(localStorage.getItem(priorKey)).toBeNull()
+    expect(readStorageSnapshot(now + 2)?.session.sessionId).toBe(
+      'retained-winner',
+    )
+  })
+
+  it('removes inactive and active snapshots at their exact 24-hour boundaries', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    expect(
+      (await startNewStorageSnapshot(makeData(), now, 'inactive-expiry')).ok,
+    ).toBe(true)
+    const inactiveKey = storageSnapshotKeyFor('inactive-expiry')
+    const nativeRemoveItem = Storage.prototype.removeItem
+    let rejectInactiveRemoval = true
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key,
+    ) {
+      if (key === inactiveKey && rejectInactiveRemoval) {
+        throw new DOMException('remove failed', 'QuotaExceededError')
+      }
+      nativeRemoveItem.call(this, key)
+    })
+    expect(
+      (
+        await startNewStorageSnapshot(
+          makeData(),
+          now + 1_000,
+          'active-expiry',
+        )
+      ).ok,
+    ).toBe(true)
+    rejectInactiveRemoval = false
+
+    vi.setSystemTime(now + dayMs)
+    expect(await cleanupExpiredStorageSnapshots(Date.now())).toContain(
+      inactiveKey,
+    )
+    expect(localStorage.getItem(inactiveKey)).toBeNull()
+    expect(
+      localStorage.getItem(storageSnapshotKeyFor('active-expiry')),
+    ).not.toBeNull()
+
+    vi.setSystemTime(now + 1_000 + dayMs)
+    expect(await cleanupExpiredStorageSnapshots(Date.now())).toContain(
+      storageSnapshotKeyFor('active-expiry'),
+    )
+    expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
+    expect(
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).filter((key) => key?.startsWith('el-bill:storage-snapshot:')),
+    ).toEqual([])
   })
 
   it('does not let stale expiry cleanup clear a newer upload pointer', async () => {
@@ -422,9 +552,10 @@ describe('storage mutation lock and patch protocol', () => {
     await locks.run(0)
     expect((await winner).ok).toBe(true)
     await locks.run(1)
-    expect(await cleanup).toContain(
-      storageSnapshotKeyFor('expired-session'),
-    )
+    expect(await cleanup).toEqual([])
+    expect(
+      localStorage.getItem(storageSnapshotKeyFor('expired-session')),
+    ).toBeNull()
 
     expect(readStorageSnapshot(now)?.session.sessionId).toBe('cleanup-winner')
     expect(

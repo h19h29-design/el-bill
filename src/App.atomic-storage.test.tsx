@@ -309,7 +309,7 @@ describe('App session-scoped storage integration', () => {
     )
   })
 
-  it('resets the UI after pointer-first deactivation and retries the inactive orphan after 60 seconds', async () => {
+  it('retries inactive orphan cleanup indefinitely with delays capped at 15 minutes', async () => {
     expect(
       (
         await startNewStorageSnapshot(
@@ -322,6 +322,11 @@ describe('App session-scoped storage integration', () => {
       ).ok,
     ).toBe(true)
     render(<App />)
+    await act(async () => {
+      for (let index = 0; index < 6; index += 1) {
+        await Promise.resolve()
+      }
+    })
     const snapshotKey = storageSnapshotKeyFor('reset-orphan')
     const nativeRemoveItem = Storage.prototype.removeItem
     let rejectSnapshotRemoval = true
@@ -346,20 +351,31 @@ describe('App session-scoped storage integration', () => {
     )
     expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
     expect(localStorage.getItem(snapshotKey)).not.toBeNull()
-    expect(vi.getTimerCount()).toBe(1)
 
     await act(async () => {
-      vi.advanceTimersByTime(59_999)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(59_999)
     })
     expect(localStorage.getItem(snapshotKey)).not.toBeNull()
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(localStorage.getItem(snapshotKey)).not.toBeNull()
+
+    for (const delay of [5, 15, 15]) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay * 60_000 - 1)
+      })
+      expect(localStorage.getItem(snapshotKey)).not.toBeNull()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      expect(localStorage.getItem(snapshotKey)).not.toBeNull()
+    }
+
     rejectSnapshotRemoval = false
     await act(async () => {
-      await vi.advanceTimersToNextTimerAsync()
-      for (let index = 0; index < 6; index += 1) {
-        await Promise.resolve()
-      }
+      await vi.advanceTimersByTimeAsync(15 * 60_000)
     })
     expect(localStorage.getItem(snapshotKey)).toBeNull()
   })

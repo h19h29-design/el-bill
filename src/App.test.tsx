@@ -157,6 +157,64 @@ describe('shared live storage expiry', () => {
     )
   })
 
+  it('removes inactive and active scoped snapshots by their own 24-hour boundaries', async () => {
+    vi.useFakeTimers()
+    const startedAt = Date.parse('2026-07-26T00:00:00.000Z')
+    vi.setSystemTime(startedAt)
+    expect(
+      (
+        await startNewStorageSnapshot(
+          makeData(),
+          startedAt,
+          'scheduled-inactive',
+        )
+      ).ok,
+    ).toBe(true)
+    const inactiveKey = storageSnapshotKeyFor('scheduled-inactive')
+    const nativeRemoveItem = Storage.prototype.removeItem
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key,
+    ) {
+      if (key === inactiveKey && Date.now() < startedAt + 24 * 60 * 60 * 1000) {
+        throw new DOMException('remove failed', 'QuotaExceededError')
+      }
+      nativeRemoveItem.call(this, key)
+    })
+    expect(
+      (
+        await startNewStorageSnapshot(
+          makeData(),
+          startedAt + 1_000,
+          'scheduled-active',
+        )
+      ).ok,
+    ).toBe(true)
+
+    render(<App />)
+    await flushStorageTasks()
+    expect(localStorage.getItem(inactiveKey)).not.toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000)
+    })
+    expect(localStorage.getItem(inactiveKey)).toBeNull()
+    expect(
+      localStorage.getItem(storageSnapshotKeyFor('scheduled-active')),
+    ).not.toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    await flushStorageTasks()
+    expect(localStorage.getItem(storageActivePointerKey)).toBeNull()
+    expect(
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).filter((key) => key?.startsWith('el-bill:storage-snapshot:')),
+    ).toEqual([])
+  })
+
   it('purges a malformed 25-day session instead of scheduling it', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'))

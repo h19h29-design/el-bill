@@ -25,7 +25,9 @@ import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import {
   cleanupExpiredStorageSnapshots,
+  getNextStorageSnapshotExpiry,
   getNextStorageExpiry,
+  getPendingStorageCleanupKeys,
   initializeStorageAfterMount,
   isSessionSnapshotStorageKey,
   readStorageSnapshot,
@@ -131,10 +133,9 @@ function App() {
     initialStorage.snapshot?.session ?? null,
   )
   const [expiryMessage, setExpiryMessage] = useState('')
-  const [orphanCleanupRetry, setOrphanCleanupRetry] = useState<{
-    sessionId: string
-    attempt: number
-  } | null>(null)
+  const [storageCleanupRetryAttempt, setStorageCleanupRetryAttempt] = useState<
+    number | null
+  >(null)
 
   const applySnapshot = useCallback((snapshot: StorageSnapshot) => {
     setStorageSession(snapshot.session)
@@ -165,6 +166,9 @@ function App() {
     void initializeStorageAfterMount(defaultStorageData())
       .then((initialized) => {
         if (cancelled) return
+        if (getPendingStorageCleanupKeys().length) {
+          setStorageCleanupRetryAttempt(0)
+        }
         if (initialized) {
           applySnapshot(initialized)
           return
@@ -227,50 +231,73 @@ function App() {
   }, [applySnapshot, resetInMemoryToSamples, storageSession])
 
   useEffect(() => {
-    if (!orphanCleanupRetry) return
+    if (storageCleanupRetryAttempt === null) return
     const delay =
       orphanCleanupRetryDelaysMs[
         Math.min(
-          orphanCleanupRetry.attempt,
+          storageCleanupRetryAttempt,
           orphanCleanupRetryDelaysMs.length - 1,
         )
       ]
     const timeoutId = window.setTimeout(() => {
       void cleanupExpiredStorageSnapshots()
         .then(() => {
-          const orphanStillExists =
-            localStorage.getItem(
-              storageSnapshotKeyFor(orphanCleanupRetry.sessionId),
-            ) !== null
-          if (!orphanStillExists) {
-            setOrphanCleanupRetry(null)
+          if (!getPendingStorageCleanupKeys().length) {
+            setStorageCleanupRetryAttempt(null)
             return
           }
-          const nextAttempt = orphanCleanupRetry.attempt + 1
-          setOrphanCleanupRetry(
-            nextAttempt < orphanCleanupRetryDelaysMs.length
-              ? {
-                  sessionId: orphanCleanupRetry.sessionId,
-                  attempt: nextAttempt,
-                }
-              : null,
+          setStorageCleanupRetryAttempt((attempt) =>
+            attempt === null ? 0 : attempt + 1,
           )
         })
         .catch(() => {
-          const nextAttempt = orphanCleanupRetry.attempt + 1
-          setOrphanCleanupRetry(
-            nextAttempt < orphanCleanupRetryDelaysMs.length
-              ? {
-                  sessionId: orphanCleanupRetry.sessionId,
-                  attempt: nextAttempt,
-                }
-              : null,
+          setStorageCleanupRetryAttempt((attempt) =>
+            attempt === null ? 0 : attempt + 1,
           )
           setExpiryMessage(storageFailureMessage)
         })
     }, delay)
     return () => window.clearTimeout(timeoutId)
-  }, [orphanCleanupRetry])
+  }, [storageCleanupRetryAttempt])
+
+  useEffect(() => {
+    let cancelled = false
+    let timeoutId: number | undefined
+    const schedulePhysicalExpiry = () => {
+      const nextExpiry = getNextStorageSnapshotExpiry()
+      if (nextExpiry === null) return
+      const remainingMs = nextExpiry - Date.now()
+      timeoutId = window.setTimeout(
+        () => {
+          void cleanupExpiredStorageSnapshots()
+            .then(() => {
+              if (cancelled) return
+              if (getPendingStorageCleanupKeys().length) {
+                setStorageCleanupRetryAttempt((attempt) => attempt ?? 0)
+                return
+              }
+              schedulePhysicalExpiry()
+            })
+            .catch(() => {
+              if (cancelled) return
+              setStorageCleanupRetryAttempt((attempt) => attempt ?? 0)
+              setExpiryMessage(storageFailureMessage)
+            })
+        },
+        Math.min(
+          remainingMs <= 0
+            ? orphanCleanupRetryDelaysMs[0]
+            : remainingMs,
+          maxBrowserTimeoutMs,
+        ),
+      )
+    }
+    schedulePhysicalExpiry()
+    return () => {
+      cancelled = true
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+    }
+  }, [storageSession])
 
   useEffect(() => {
     const adoptCurrentSnapshot = (missingMessage: string) => {
@@ -304,11 +331,16 @@ function App() {
     }
     const handleFocus = () => {
       void cleanupExpiredStorageSnapshots()
-        .then(() => adoptCurrentSnapshot(
-        Date.parse(storageSession?.expiresAt ?? '') <= Date.now()
-          ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
-          : '다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.',
-        ))
+        .then(() => {
+          setStorageCleanupRetryAttempt(
+            getPendingStorageCleanupKeys().length ? 0 : null,
+          )
+          adoptCurrentSnapshot(
+            Date.parse(storageSession?.expiresAt ?? '') <= Date.now()
+              ? '24시간이 지나 시연 데이터가 삭제되었습니다.'
+              : '다른 탭에서 저장 데이터가 삭제되어 시연 샘플로 전환했습니다.',
+          )
+        })
         .catch(() => setExpiryMessage(storageFailureMessage))
     }
     const handleVisibilityChange = () => {
@@ -352,7 +384,7 @@ function App() {
       const removal = await removeStorageSnapshot(sessionId)
       if (removal.ok && removal.outcome === 'active-deactivated') {
         if (!removal.snapshotRemoved) {
-          setOrphanCleanupRetry({ sessionId, attempt: 0 })
+          setStorageCleanupRetryAttempt(0)
           resetInMemoryToSamples(storageOrphanCleanupMessage)
         } else {
           resetInMemoryToSamples()
@@ -361,7 +393,7 @@ function App() {
       }
 
       if (!removal.ok && removal.outcome === 'orphan-retained') {
-        setOrphanCleanupRetry({ sessionId, attempt: 0 })
+        setStorageCleanupRetryAttempt(0)
       }
       const latest = readStorageSnapshot()
       if (latest) {
@@ -464,6 +496,9 @@ function App() {
     if (!result.ok) {
       handleStorageWriteFailure(result)
       return false
+    }
+    if (result.cleanupPendingSessionIds?.length) {
+      setStorageCleanupRetryAttempt(0)
     }
     applySnapshot(result.snapshot)
     setExpiryMessage('')

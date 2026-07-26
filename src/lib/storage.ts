@@ -64,7 +64,11 @@ interface LegacyPayload {
 }
 
 export type StorageSnapshotWriteResult =
-  | { ok: true; snapshot: StorageSnapshot }
+  | {
+      ok: true
+      snapshot: StorageSnapshot
+      cleanupPendingSessionIds?: string[]
+    }
   | {
       ok: false
       reason:
@@ -522,8 +526,9 @@ export const createStorageSession = (
 const removeSnapshotIfInactive = (sessionId: string) => {
   try {
     if (readStorageActivePointer()?.sessionId === sessionId) return false
-    localStorage.removeItem(storageSnapshotKeyFor(sessionId))
-    return true
+    const key = storageSnapshotKeyFor(sessionId)
+    localStorage.removeItem(key)
+    return localStorage.getItem(key) === null
   } catch {
     return false
   }
@@ -575,6 +580,7 @@ export const startNewStorageSnapshot = (
     return Promise.resolve({ ok: false, reason: 'invalid-data' })
   }
   return withStorageMutationLock(() => {
+    const previousActiveSessionId = readStorageActivePointer()?.sessionId
     const result = commitNewActiveSnapshotUnlocked({
       schemaVersion: 1,
       revision: 0,
@@ -582,12 +588,24 @@ export const startNewStorageSnapshot = (
       data,
     })
     if (result.ok) {
+      const cleanupPendingSessionIds: string[] = []
+      if (
+        previousActiveSessionId &&
+        previousActiveSessionId !== sessionId &&
+        readStorageActivePointer()?.sessionId === sessionId &&
+        !removeSnapshotIfInactive(previousActiveSessionId)
+      ) {
+        cleanupPendingSessionIds.push(previousActiveSessionId)
+      }
       try {
         localStorage.removeItem(legacyAtomicStorageSnapshotKey)
       } catch {
         // Cleanup retries after the next mount.
       }
       removeLegacyPerKeyStorage()
+      return cleanupPendingSessionIds.length
+        ? { ...result, cleanupPendingSessionIds }
+        : result
     }
     return result
   }).catch(() => ({ ok: false, reason: 'lock-error' }))
@@ -755,6 +773,15 @@ const sessionSnapshotKeys = () => {
   return keys
 }
 
+const sessionIdFromSnapshotKey = (key: string) => {
+  const encodedSessionId = key.slice(storageSnapshotPrefix.length)
+  try {
+    return decodeURIComponent(encodedSessionId)
+  } catch {
+    return encodedSessionId
+  }
+}
+
 const cleanupExpiredStorageSnapshotsUnlocked = (now: number) => {
   const removed: string[] = []
   const rawActivePointer = localStorage.getItem(storageActivePointerKey)
@@ -767,14 +794,21 @@ const cleanupExpiredStorageSnapshotsUnlocked = (now: number) => {
     }
   }
   const activeSessionId = readStorageActivePointer()?.sessionId
-  sessionSnapshotKeys().forEach((key) => {
-    const encodedSessionId = key.slice(storageSnapshotPrefix.length)
-    let sessionId: string
+  if (
+    activeSessionId &&
+    localStorage.getItem(storageSnapshotKeyFor(activeSessionId)) === null
+  ) {
     try {
-      sessionId = decodeURIComponent(encodedSessionId)
+      clearActivePointerUnlocked(activeSessionId)
+      if (readStorageActivePointer()?.sessionId !== activeSessionId) {
+        removed.push(storageActivePointerKey)
+      }
     } catch {
-      sessionId = encodedSessionId
+      // A later focus or timer pass retries deletion.
     }
+  }
+  sessionSnapshotKeys().forEach((key) => {
+    const sessionId = sessionIdFromSnapshotKey(key)
     const candidate = parseStorageSnapshot(localStorage.getItem(key), sessionId)
     const isActive = sessionId === activeSessionId
     if (isActive && candidate && !isSessionExpired(candidate.session, now)) {
@@ -808,6 +842,53 @@ export const getNextStorageExpiry = (now = Date.now()) => {
   if (!candidate) return now
   const expiresAt = Date.parse(candidate.session.expiresAt)
   return expiresAt <= now ? now : expiresAt
+}
+
+export const getPendingStorageCleanupKeys = (now = Date.now()) => {
+  const pending = new Set<string>()
+  const rawActivePointer = localStorage.getItem(storageActivePointerKey)
+  const active = parseActivePointer(rawActivePointer)
+  if (rawActivePointer && !active) pending.add(storageActivePointerKey)
+  if (
+    active &&
+    localStorage.getItem(storageSnapshotKeyFor(active.sessionId)) === null
+  ) {
+    pending.add(storageActivePointerKey)
+  }
+  sessionSnapshotKeys().forEach((key) => {
+    const sessionId = sessionIdFromSnapshotKey(key)
+    const candidate = parseStorageSnapshot(localStorage.getItem(key), sessionId)
+    if (
+      active?.sessionId !== sessionId ||
+      !candidate ||
+      isSessionExpired(candidate.session, now)
+    ) {
+      pending.add(key)
+    }
+  })
+  return [...pending]
+}
+
+export const getNextStorageSnapshotExpiry = (now = Date.now()) => {
+  const rawActivePointer = localStorage.getItem(storageActivePointerKey)
+  const active = parseActivePointer(rawActivePointer)
+  if (rawActivePointer && !active) return now
+  if (
+    active &&
+    localStorage.getItem(storageSnapshotKeyFor(active.sessionId)) === null
+  ) {
+    return now
+  }
+  let nextExpiry: number | null = null
+  for (const key of sessionSnapshotKeys()) {
+    const sessionId = sessionIdFromSnapshotKey(key)
+    const candidate = parseStorageSnapshot(localStorage.getItem(key), sessionId)
+    if (!candidate) return now
+    const expiresAt = Date.parse(candidate.session.expiresAt)
+    if (expiresAt <= now) return now
+    nextExpiry = nextExpiry === null ? expiresAt : Math.min(nextExpiry, expiresAt)
+  }
+  return nextExpiry
 }
 
 const removeLegacyPerKeyStorage = () => {
