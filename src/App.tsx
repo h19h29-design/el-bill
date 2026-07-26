@@ -30,10 +30,11 @@ import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import {
   dataProvenanceStorageKey,
+  isActiveStorageSession,
   isStoredMonthlyBillCollection,
   legacyDataModeStorageKey,
   loadDataProvenance,
-  loadWithExpiry,
+  loadForSession,
   powerPlannerStorageKey,
   purgeStorageSession,
   restorePowerPlannerState,
@@ -41,6 +42,7 @@ import {
   saveForSession,
   startNewStorageSession,
   storageSessionKey,
+  type StorageEntry,
   type StorageSession,
 } from './lib/storage'
 
@@ -62,14 +64,22 @@ const maxBrowserTimeoutMs = 2_147_483_647
 function App() {
   const initialStorageSession = restoreStorageSession(storageKeys)
 
-  const loadedBillsPayload = loadWithExpiry<unknown>(billsKey)
+  const loadedBillsPayload = initialStorageSession
+    ? loadForSession<unknown>(billsKey, initialStorageSession)
+    : null
   const loadedBills = isStoredMonthlyBillCollection(loadedBillsPayload?.data)
     ? { ...loadedBillsPayload, data: loadedBillsPayload.data }
     : null
   if (loadedBillsPayload && !loadedBills) localStorage.removeItem(billsKey)
-  const loadedProfile = loadWithExpiry<SchoolProfile>(profileKey)
-  const loadedScenario = loadWithExpiry<PeakScenario>(scenarioKey)
-  const loadedPlans = loadWithExpiry<RatePlan[]>(ratePlansKey)
+  const loadedProfile = initialStorageSession
+    ? loadForSession<SchoolProfile>(profileKey, initialStorageSession)
+    : null
+  const loadedScenario = initialStorageSession
+    ? loadForSession<PeakScenario>(scenarioKey, initialStorageSession)
+    : null
+  const loadedPlans = initialStorageSession
+    ? loadForSession<RatePlan[]>(ratePlansKey, initialStorageSession)
+    : null
   const [restoredPowerPlanner] = useState(() =>
     restorePowerPlannerState(
       loadDataProvenance(loadedBills?.data, initialStorageSession),
@@ -133,7 +143,7 @@ function App() {
     if (!storageSession) return
 
     const expireSession = () => {
-      if (!purgeStorageSession(storageKeys, storageSessionKey)) return
+      if (!purgeStorageSession(storageKeys, storageSession, storageSessionKey)) return
       setStorageSession(null)
       setBills(sampleBills)
       setProfile(defaultSchoolProfile)
@@ -145,17 +155,43 @@ function App() {
       setExpiryMessage('24시간이 지나 시연 데이터가 삭제되었습니다.')
     }
 
-    const remainingMs = Date.parse(storageSession.expiresAt) - Date.now()
-    if (remainingMs <= 0) {
-      expireSession()
-      return
+    let timeoutId: number | undefined
+    const scheduleExpiry = () => {
+      if (!isActiveStorageSession(storageSession)) return
+      const remainingMs = Date.parse(storageSession.expiresAt) - Date.now()
+      if (remainingMs <= 0) {
+        expireSession()
+        return
+      }
+      timeoutId = window.setTimeout(
+        scheduleExpiry,
+        Math.min(remainingMs, maxBrowserTimeoutMs),
+      )
     }
 
-    const timeoutId = window.setTimeout(
-      expireSession,
-      Math.min(remainingMs, maxBrowserTimeoutMs),
-    )
-    return () => window.clearTimeout(timeoutId)
+    scheduleExpiry()
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+    }
+  }, [storageSession])
+
+  useEffect(() => {
+    if (!storageSession) return
+    const handleStorageSessionChange = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage || event.key !== storageSessionKey) return
+      if (isActiveStorageSession(storageSession)) return
+      setStorageSession(null)
+      setBills(sampleBills)
+      setProfile(defaultSchoolProfile)
+      setScenario(defaultScenario)
+      setRatePlans(defaultRatePlans)
+      setPowerPlannerDataSource(null)
+      setDataProvenance({ bills: 'sample', powerPlanner: 'none' })
+      setActiveView('dashboard')
+      setExpiryMessage('다른 탭에서 저장 세션이 변경되어 시연 샘플로 전환했습니다.')
+    }
+    window.addEventListener('storage', handleStorageSessionChange)
+    return () => window.removeEventListener('storage', handleStorageSessionChange)
   }, [storageSession])
 
   const sortedBills = useMemo(() => sortBillsChronologically(bills), [bills])
@@ -193,16 +229,35 @@ function App() {
     setExpiryMessage('')
   }
 
-  const startUploadSession = () => {
-    const nextSession = startNewStorageSession()
+  const startUploadSession = (
+    nextBills: MonthlyBill[],
+    nextPowerPlannerDataSource: PowerPlannerDataSource | null,
+    nextProvenance: DataProvenance,
+  ) => {
+    const entries: StorageEntry[] = [
+      [billsKey, nextBills],
+      [profileKey, profile],
+      [scenarioKey, scenario],
+      [ratePlansKey, ratePlans],
+      [dataProvenanceStorageKey, nextProvenance],
+    ]
+    if (nextPowerPlannerDataSource) {
+      entries.push([powerPlannerStorageKey, nextPowerPlannerDataSource])
+    }
+    const nextSession = startNewStorageSession(entries)
+    if (!nextPowerPlannerDataSource) localStorage.removeItem(powerPlannerStorageKey)
     setStorageSession(nextSession)
     setExpiryMessage('')
   }
 
   const applyBillsAndOpenDiagnosis = (nextBills: MonthlyBill[]) => {
-    startUploadSession()
+    const nextProvenance: DataProvenance = {
+      ...dataProvenance,
+      bills: 'uploaded',
+    }
+    startUploadSession(nextBills, powerPlannerDataSource, nextProvenance)
     setBills(nextBills)
-    setDataProvenance((current) => ({ ...current, bills: 'uploaded' }))
+    setDataProvenance(nextProvenance)
     setActiveView('diagnosis')
   }
 
@@ -210,9 +265,15 @@ function App() {
     nextDataSource: PowerPlannerDataSource | null,
     origin: DataProvenance['powerPlanner'],
   ) => {
-    if (nextDataSource && origin === 'uploaded') startUploadSession()
+    const nextProvenance: DataProvenance = {
+      ...dataProvenance,
+      powerPlanner: origin,
+    }
+    if (nextDataSource && origin === 'uploaded') {
+      startUploadSession(bills, nextDataSource, nextProvenance)
+    }
     setPowerPlannerDataSource(nextDataSource)
-    setDataProvenance((current) => ({ ...current, powerPlanner: origin }))
+    setDataProvenance(nextProvenance)
     if (nextDataSource) {
       setActiveView('diagnosis')
     }

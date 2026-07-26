@@ -3,12 +3,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createStorageSession,
+  loadForSession,
   loadWithExpiry,
   purgeExpiredKeys,
   purgeStorageSession,
   restoreStorageSession,
   saveForSession,
   saveWithExpiry,
+  startNewStorageSession,
   storageSessionKey,
 } from './storage'
 
@@ -74,11 +76,11 @@ describe('local demo storage TTL harness', () => {
       24 * 60 * 60 * 1000,
     )
     expect(uploaded.expiresAt).not.toBe(first.expiresAt)
+    expect(uploaded.sessionId).not.toBe(first.sessionId)
   })
 
   it('keeps ordinary edits on the shared upload expiry', () => {
-    const session = createStorageSession()
-    saveForSession('el-bill:bills', { version: 1 }, session)
+    const session = startNewStorageSession([['el-bill:bills', { version: 1 }]])
 
     vi.advanceTimersByTime(23 * 60 * 60 * 1000)
     saveForSession('el-bill:profile', { version: 2 }, session)
@@ -96,7 +98,7 @@ describe('local demo storage TTL harness', () => {
     saveForSession('el-bill:profile', { version: 1 }, session)
 
     vi.advanceTimersByTime(24 * 60 * 60 * 1000)
-    expect(purgeStorageSession(['el-bill:bills', 'el-bill:profile'], storageSessionKey)).toBe(true)
+    expect(purgeStorageSession(['el-bill:bills', 'el-bill:profile'], session)).toBe(true)
     expect(localStorage.getItem('el-bill:bills')).toBeNull()
     expect(localStorage.getItem('el-bill:profile')).toBeNull()
     expect(localStorage.getItem(storageSessionKey)).toBeNull()
@@ -124,6 +126,74 @@ describe('local demo storage TTL harness', () => {
 
     expect(session?.expiresAt).toBe('2026-07-01T00:00:00.000Z')
     expect(JSON.parse(localStorage.getItem(storageSessionKey) ?? '{}')).toEqual(session)
+    expect(JSON.parse(localStorage.getItem('el-bill:bills') ?? '{}').sessionId).toBe(
+      session?.sessionId,
+    )
+  })
+
+  it('removes a payload whose session ID does not match the active session', () => {
+    const session = startNewStorageSession([], Date.now(), 'active-session')
+    localStorage.setItem(
+      'el-bill:bills',
+      JSON.stringify({ ...session, sessionId: 'stale-session', data: { version: 1 } }),
+    )
+
+    expect(loadForSession('el-bill:bills', session)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+  })
+
+  it('makes an uploaded payload and provenance reloadable in the new session immediately', () => {
+    const session = startNewStorageSession([
+      ['el-bill:bills', { version: 2 }],
+      ['el-bill:data-provenance', { bills: 'uploaded', powerPlanner: 'none' }],
+    ], Date.now(), 'upload-session')
+
+    expect(restoreStorageSession(['el-bill:bills', 'el-bill:data-provenance'])).toEqual(session)
+    expect(loadForSession<{ version: number }>('el-bill:bills', session)?.data).toEqual({ version: 2 })
+    expect(loadForSession('el-bill:data-provenance', session)?.data).toEqual({
+      bills: 'uploaded',
+      powerPlanner: 'none',
+    })
+  })
+
+  it('does not let a stale writer replace a newer session payload', () => {
+    const staleSession = startNewStorageSession(
+      [['el-bill:bills', { version: 1 }]],
+      Date.now(),
+      'stale-session',
+    )
+    const activeSession = startNewStorageSession(
+      [['el-bill:bills', { version: 2 }]],
+      Date.now() + 1,
+      'active-session',
+    )
+
+    expect(saveForSession('el-bill:bills', { version: 3 }, staleSession)).toBeNull()
+    expect(loadForSession('el-bill:bills', staleSession)).toBeNull()
+    expect(loadForSession<{ version: number }>('el-bill:bills', activeSession)?.data).toEqual({ version: 2 })
+  })
+
+  it('does not migrate a malformed session ID as legacy data', () => {
+    localStorage.setItem(
+      storageSessionKey,
+      JSON.stringify({
+        createdAt: '2026-06-30T00:00:00.000Z',
+        expiresAt: '2026-07-01T00:00:00.000Z',
+        sessionId: '',
+      }),
+    )
+    localStorage.setItem(
+      'el-bill:bills',
+      JSON.stringify({
+        createdAt: '2026-06-30T00:00:00.000Z',
+        expiresAt: '2026-07-01T00:00:00.000Z',
+        data: { version: 1 },
+      }),
+    )
+
+    expect(restoreStorageSession(['el-bill:bills'])).toBeNull()
+    expect(localStorage.getItem(storageSessionKey)).toBeNull()
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
   })
 
   it('removes malformed payloads with an invalid expiry timestamp', () => {

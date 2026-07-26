@@ -244,9 +244,18 @@ describe('shared live storage expiry', () => {
       JSON.stringify({
         createdAt: '2030-01-01T00:00:00.000Z',
         expiresAt: '2030-01-02T00:00:00.000Z',
+        sessionId: 'long-session',
       }),
     )
-    localStorage.setItem('el-bill:bills', stored(sampleBills))
+    localStorage.setItem(
+      'el-bill:bills',
+      JSON.stringify({
+        createdAt: '2030-01-01T00:00:00.000Z',
+        expiresAt: '2030-01-02T00:00:00.000Z',
+        sessionId: 'long-session',
+        data: sampleBills,
+      }),
+    )
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
 
     render(<App />)
@@ -256,5 +265,42 @@ describe('shared live storage expiry', () => {
         typeof delay === 'number' && delay <= 2_147_483_647,
       ),
     ).toBe(true)
+  })
+
+  it('reschedules after a capped timer interval before expiring the active session', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-26T00:00:00Z'))
+    const maxDelay = 2_147_483_647
+    const session = {
+      createdAt: '2026-07-26T00:00:00.000Z',
+      expiresAt: new Date(Date.now() + maxDelay + 1_000).toISOString(),
+      sessionId: 'capped-session',
+    }
+    localStorage.setItem('el-bill:storage-session', JSON.stringify(session))
+    localStorage.setItem('el-bill:bills', JSON.stringify({ ...session, data: sampleBills }))
+    localStorage.setItem(
+      'el-bill:data-provenance',
+      JSON.stringify({ ...session, data: { bills: 'uploaded', powerPlanner: 'none' } }),
+    )
+
+    render(<App />)
+    act(() => {
+      vi.advanceTimersByTime(maxDelay)
+    })
+    expect(localStorage.getItem('el-bill:bills')).not.toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(1_000)
+    })
+    expect(localStorage.getItem('el-bill:bills')).toBeNull()
+  })
+
+  it('does not show an expiry countdown without an active storage session', () => {
+    render(<App />)
+
+    expect(document.querySelector('.notice-detail')?.textContent).toContain(
+      '현재 저장된 사용자 데이터 없음',
+    )
+    expect(document.querySelector('.notice-detail')?.textContent).not.toContain('만료 예정')
   })
 })

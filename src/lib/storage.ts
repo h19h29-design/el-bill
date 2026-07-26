@@ -28,17 +28,22 @@ export interface PowerPlannerRestoration {
 interface StoredPayload<T> {
   createdAt: string
   expiresAt: string
+  sessionId: string
   data: T
 }
 
 export interface StorageSession {
   createdAt: string
   expiresAt: string
+  sessionId: string
 }
+
+type LegacySessionMetadata = Omit<StorageSession, 'sessionId'>
+export type StorageEntry = readonly [key: string, data: unknown]
 
 const isValidExpiry = (expiresAt: string) => Number.isFinite(Date.parse(expiresAt))
 
-const isStorageSession = (value: unknown): value is StorageSession => {
+const isSessionMetadata = (value: unknown): value is LegacySessionMetadata => {
   if (!value || typeof value !== 'object') return false
   const session = value as Record<string, unknown>
   return (
@@ -50,26 +55,87 @@ const isStorageSession = (value: unknown): value is StorageSession => {
   )
 }
 
+const isStorageSession = (value: unknown): value is StorageSession =>
+  isSessionMetadata(value) &&
+  typeof (value as Record<string, unknown>).sessionId === 'string' &&
+  Boolean((value as Record<string, unknown>).sessionId)
+
+const hasSessionIdField = (value: unknown) =>
+  Boolean(value && typeof value === 'object' &&
+    Object.prototype.hasOwnProperty.call(value, 'sessionId'))
+
 const isExpired = (session: StorageSession) => Date.parse(session.expiresAt) <= Date.now()
 
-const parseStoredPayload = <T>(raw: string | null): StoredPayload<T> | null => {
+const sessionsMatch = (left: StorageSession, right: StorageSession) =>
+  left.sessionId === right.sessionId &&
+  left.createdAt === right.createdAt &&
+  left.expiresAt === right.expiresAt
+
+const createSessionId = (): string =>
+  globalThis.crypto?.randomUUID?.() ??
+  `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+const parseStoredPayload = <T>(raw: string | null): (LegacySessionMetadata & {
+  data: T
+  sessionId?: string
+}) | null => {
   if (!raw) return null
   try {
-    const payload = JSON.parse(raw) as StoredPayload<T>
-    return isStorageSession(payload) ? payload : null
+    const payload = JSON.parse(raw) as unknown
+    return isSessionMetadata(payload) &&
+      Object.prototype.hasOwnProperty.call(payload, 'data') &&
+      (typeof (payload as Record<string, unknown>).sessionId === 'undefined' ||
+        typeof (payload as Record<string, unknown>).sessionId === 'string')
+      ? payload as LegacySessionMetadata & { data: T; sessionId?: string }
+      : null
   } catch {
     return null
   }
 }
 
-export const createStorageSession = (now = Date.now()): StorageSession => ({
+export const createStorageSession = (
+  now = Date.now(),
+  sessionId = createSessionId(),
+): StorageSession => ({
   createdAt: new Date(now).toISOString(),
   expiresAt: new Date(now + dayMs).toISOString(),
+  sessionId,
 })
 
-export const startNewStorageSession = (now = Date.now()): StorageSession => {
-  const session = createStorageSession(now)
+export const readStorageSession = (
+  sessionKey = storageSessionKey,
+): StorageSession | null => {
+  const rawSession = localStorage.getItem(sessionKey)
+  if (!rawSession) return null
+  try {
+    const session = JSON.parse(rawSession) as unknown
+    return isStorageSession(session) && !isExpired(session) ? session : null
+  } catch {
+    return null
+  }
+}
+
+export const isActiveStorageSession = (session: StorageSession) => {
+  const rawSession = localStorage.getItem(storageSessionKey)
+  if (!rawSession) return false
+  try {
+    const activeSession = JSON.parse(rawSession) as unknown
+    return isStorageSession(activeSession) && sessionsMatch(activeSession, session)
+  } catch {
+    return false
+  }
+}
+
+export const startNewStorageSession = (
+  entries: StorageEntry[] = [],
+  now = Date.now(),
+  sessionId = createSessionId(),
+): StorageSession => {
+  const session = createStorageSession(now, sessionId)
   localStorage.setItem(storageSessionKey, JSON.stringify(session))
+  entries.forEach(([key, data]) => {
+    localStorage.setItem(key, JSON.stringify({ ...session, data }))
+  })
   return session
 }
 
@@ -77,7 +143,8 @@ export const saveForSession = <T>(
   key: string,
   data: T,
   session: StorageSession,
-): StoredPayload<T> => {
+): StoredPayload<T> | null => {
+  if (!isActiveStorageSession(session)) return null
   const payload: StoredPayload<T> = { ...session, data }
   localStorage.setItem(key, JSON.stringify(payload))
   return payload
@@ -85,22 +152,24 @@ export const saveForSession = <T>(
 
 export const purgeStorageSession = (
   keys: string[],
+  expectedSession?: StorageSession,
   sessionKey = storageSessionKey,
 ) => {
-  const session = parseStoredPayload<never>(localStorage.getItem(sessionKey))
   const rawSession = localStorage.getItem(sessionKey)
-  const parsedSession = rawSession ? (() => {
-    try {
-      return JSON.parse(rawSession) as unknown
-    } catch {
-      return null
-    }
-  })() : null
-  const shouldPurge = !session && (!parsedSession || !isStorageSession(parsedSession))
-    ? Boolean(rawSession)
-    : Boolean(session && isExpired(session))
-
-  if (!shouldPurge) return false
+  if (!rawSession) return false
+  let session: unknown
+  try {
+    session = JSON.parse(rawSession) as unknown
+  } catch {
+    session = null
+  }
+  if (!isStorageSession(session)) {
+    keys.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(sessionKey)
+    return true
+  }
+  if (expectedSession && !sessionsMatch(session, expectedSession)) return false
+  if (!isExpired(session)) return false
   keys.forEach((key) => localStorage.removeItem(key))
   localStorage.removeItem(sessionKey)
   return true
@@ -119,6 +188,14 @@ export const restoreStorageSession = (
     try {
       const session = JSON.parse(rawSession) as unknown
       if (isStorageSession(session) && !isExpired(session)) return session
+      if (
+        isSessionMetadata(session) &&
+        !hasSessionIdField(session) &&
+        !isExpired({ ...session, sessionId: 'legacy' })
+      ) {
+        const migrated = migrateLegacyStorageSession(keys, session, sessionKey)
+        if (migrated) return migrated
+      }
     } catch {
       // Fall through to a safe full purge below.
     }
@@ -127,22 +204,74 @@ export const restoreStorageSession = (
     return null
   }
 
-  const legacyPayloads = keys
-    .map((key) => parseStoredPayload<unknown>(localStorage.getItem(key)))
-    .filter((payload): payload is StoredPayload<unknown> =>
-      Boolean(payload && !isExpired(payload)),
-    )
-  if (!legacyPayloads.length) return null
+  const migrated = migrateLegacyStorageSession(keys, undefined, sessionKey)
+  if (migrated) return migrated
+  return null
+}
 
-  const earliest = legacyPayloads.reduce((current, payload) =>
-    Date.parse(payload.expiresAt) < Date.parse(current.expiresAt) ? payload : current,
+const migrateLegacyStorageSession = (
+  keys: string[],
+  legacySession: LegacySessionMetadata | undefined,
+  sessionKey: string,
+): StorageSession | null => {
+  const payloads = keys.map((key) => ({
+    key,
+    payload: parseStoredPayload<unknown>(localStorage.getItem(key)),
+  }))
+  if (payloads.some(({ payload }) => hasSessionIdField(payload))) {
+    keys.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(sessionKey)
+    return null
+  }
+
+  const validPayloads = payloads.filter(({ payload }) =>
+    Boolean(payload && !isExpired({ ...payload, sessionId: 'legacy' })),
+  )
+  if (!validPayloads.length) {
+    keys.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(sessionKey)
+    return null
+  }
+
+  const candidates = [
+    ...(legacySession ? [legacySession] : []),
+    ...validPayloads.map(({ payload }) => payload as LegacySessionMetadata),
+  ].filter((candidate) => !isExpired({ ...candidate, sessionId: 'legacy' }))
+  const earliest = candidates.reduce((current, candidate) =>
+    Date.parse(candidate.expiresAt) < Date.parse(current.expiresAt) ? candidate : current,
   )
   const session: StorageSession = {
     createdAt: earliest.createdAt,
     expiresAt: earliest.expiresAt,
+    sessionId: createSessionId(),
   }
   localStorage.setItem(sessionKey, JSON.stringify(session))
+  payloads.forEach(({ key, payload }) => {
+    if (payload && !isExpired({ ...payload, sessionId: 'legacy' })) {
+      localStorage.setItem(key, JSON.stringify({ ...session, data: payload.data }))
+    } else {
+      localStorage.removeItem(key)
+    }
+  })
   return session
+}
+
+export const loadForSession = <T>(
+  key: string,
+  session: StorageSession,
+): StoredPayload<T> | null => {
+  const activeSession = readStorageSession()
+  if (!activeSession || !sessionsMatch(activeSession, session)) return null
+  const payload = parseStoredPayload<T>(localStorage.getItem(key))
+  if (!payload || isExpired({ ...payload, sessionId: payload.sessionId ?? 'legacy' })) {
+    localStorage.removeItem(key)
+    return null
+  }
+  if (!payload.sessionId || !sessionsMatch({ ...payload, sessionId: payload.sessionId }, activeSession)) {
+    localStorage.removeItem(key)
+    return null
+  }
+  return payload as StoredPayload<T>
 }
 
 const isDataProvenance = (value: unknown): value is DataProvenance => {
@@ -286,6 +415,7 @@ export const saveWithExpiry = <T>(key: string, data: T) => {
       ? {
           createdAt: existing.createdAt,
           expiresAt: existing.expiresAt,
+          sessionId: existing.sessionId ?? createSessionId(),
         }
       : createExpiry()),
     data,
@@ -323,7 +453,9 @@ export const loadDataProvenance = (
     }
     saveWithExpiry(dataProvenanceStorageKey, provenance)
   }
-  const storedProvenance = loadWithExpiry<unknown>(dataProvenanceStorageKey)
+  const storedProvenance = session
+    ? loadForSession<unknown>(dataProvenanceStorageKey, session)
+    : loadWithExpiry<unknown>(dataProvenanceStorageKey)
   if (storedProvenance) {
     if (isDataProvenance(storedProvenance.data)) {
       if (
@@ -362,7 +494,9 @@ export const restorePowerPlannerState = (
   session?: StorageSession | null,
 ): PowerPlannerRestoration => {
   if (canRestorePowerPlanner(provenance)) {
-    const payload = loadWithExpiry<unknown>(powerPlannerStorageKey)
+    const payload = session
+      ? loadForSession<unknown>(powerPlannerStorageKey, session)
+      : loadWithExpiry<unknown>(powerPlannerStorageKey)
     if (payload && isValidPowerPlannerDataSource(payload.data)) {
       return { provenance, powerPlannerData: payload.data }
     }

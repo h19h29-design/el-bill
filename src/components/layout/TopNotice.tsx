@@ -16,12 +16,12 @@ export function TopNotice({
 }: TopNoticeProps) {
   const expiresText = expiresAt
     ? new Date(expiresAt).toLocaleString('ko-KR', {
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : '24시간 후'
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    : null
 
   return (
     <div className="top-notice">
@@ -41,7 +41,7 @@ export function TopNotice({
                 : '미사용'
           }
         </span>
-        {' · '}만료 예정: {expiresText}
+        {' · '}{expiresText ? `만료 예정: ${expiresText}` : '현재 저장된 사용자 데이터 없음'}
       </span>
       {expiryMessage && (
         <span className="notice-detail" role="status">
