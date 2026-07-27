@@ -19,6 +19,11 @@ import {
   applyRatePlanIntent,
 } from './persistedIntents'
 import {
+  cleanupExpiredBillEntryDraft,
+  removeBillEntryDraft,
+  writeBillEntryDraft,
+} from './billDraftStorage'
+import {
   cleanupExpiredStorageSnapshots,
   getNextStorageSnapshotExpiry,
   getNextStorageExpiry,
@@ -143,9 +148,15 @@ describe('storage mutation lock and patch protocol', () => {
     await cleanupExpiredStorageSnapshots(now)
     await purgeExpiredStorageSnapshot('missing-session', now)
     await initializeStorageAfterMount(makeData(), now)
+    await writeBillEntryDraft([], undefined, now)
+    await cleanupExpiredBillEntryDraft(now)
+    await removeBillEntryDraft()
     await removeStorageSnapshot('locked-session')
 
     expect(lockNames).toEqual([
+      storageMutationLockName,
+      storageMutationLockName,
+      storageMutationLockName,
       storageMutationLockName,
       storageMutationLockName,
       storageMutationLockName,

@@ -112,17 +112,17 @@ let fallbackMutationQueue: Promise<unknown> = Promise.resolve()
 export const usesSameTabStorageLockFallback = () =>
   typeof navigator === 'undefined' || !navigator.locks?.request
 
-const withStorageMutationLock = async <T>(
-  operation: () => T | Promise<T>,
+export const runWithStorageMutationLock = async <T>(
+  callback: () => T | Promise<T>,
 ): Promise<T> => {
   if (typeof navigator !== 'undefined' && navigator.locks?.request) {
     return await navigator.locks.request(
       storageMutationLockName,
       { mode: 'exclusive' },
-      operation,
+      callback,
     )
   }
-  const run = fallbackMutationQueue.then(operation, operation)
+  const run = fallbackMutationQueue.then(callback, callback)
   fallbackMutationQueue = run.then(
     () => undefined,
     () => undefined,
@@ -489,7 +489,7 @@ export const startNewStorageSnapshot = (
   if (!sessionId) {
     return Promise.resolve({ ok: false, reason: 'invalid-data' })
   }
-  return withStorageMutationLock(() => {
+  return runWithStorageMutationLock(() => {
     const previousActiveSessionId = readStorageActivePointer()?.sessionId
     const result = commitNewActiveSnapshotUnlocked({
       schemaVersion: 1,
@@ -530,7 +530,7 @@ export const rotateNewStorageSnapshot = (
   if (!sessionId) {
     return Promise.resolve({ ok: false, reason: 'invalid-data' })
   }
-  return withStorageMutationLock(() => {
+  return runWithStorageMutationLock(() => {
     const rotationTime = now ?? Date.now()
     const previousActiveSessionId = readStorageActivePointer()?.sessionId
     let baseData: StorageSnapshotData
@@ -600,7 +600,7 @@ export const updateStorageSnapshot = (
   patchOrUpdater: StorageSnapshotPatch | StorageSnapshotUpdater,
   now?: number,
 ): Promise<StorageSnapshotWriteResult> =>
-  withStorageMutationLock(() => {
+  runWithStorageMutationLock(() => {
     const before = readStorageActivePointer()
     if (!before) return { ok: false, reason: 'missing' } as const
     if (before.sessionId !== expectedSessionId) {
@@ -671,7 +671,7 @@ const clearActivePointerUnlocked = (expectedSessionId: string) => {
 export const removeStorageSnapshot = (
   expectedSessionId: string,
 ): Promise<StorageSnapshotRemovalResult> =>
-  withStorageMutationLock(() => {
+  runWithStorageMutationLock(() => {
     const activeSessionId = readStorageActivePointer()?.sessionId
     if (activeSessionId === expectedSessionId) {
       try {
@@ -728,7 +728,7 @@ export const purgeExpiredStorageSnapshot = (
   expectedSessionId: string,
   now?: number,
 ) =>
-  withStorageMutationLock(() => {
+  runWithStorageMutationLock(() => {
     const key = storageSnapshotKeyFor(expectedSessionId)
     const raw = localStorage.getItem(key)
     if (!raw) return false
@@ -812,7 +812,7 @@ const cleanupExpiredStorageSnapshotsUnlocked = (now: number) => {
 }
 
 export const cleanupExpiredStorageSnapshots = (now?: number) =>
-  withStorageMutationLock(() =>
+  runWithStorageMutationLock(() =>
     cleanupExpiredStorageSnapshotsUnlocked(now ?? Date.now()),
   )
 
@@ -1161,7 +1161,7 @@ export const initializeStorageAfterMount = (
   fallbackData: StorageSnapshotData,
   now?: number,
 ) =>
-  withStorageMutationLock(() => {
+  runWithStorageMutationLock(() => {
     const currentTime = now ?? Date.now()
     const activeBeforeCleanup = readStorageActivePointer()
     if (activeBeforeCleanup) {
