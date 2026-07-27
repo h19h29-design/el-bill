@@ -2,12 +2,40 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import ExcelJS from 'exceljs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
 import { BillUpload } from './BillUpload'
 
 afterEach(cleanup)
+
+const toArrayBuffer = (buffer: ArrayBuffer | Uint8Array) =>
+  buffer instanceof ArrayBuffer
+    ? buffer
+    : buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength,
+      ) as ArrayBuffer
+
+const createSyntheticWorkbook = async () => {
+  const workbook = new ExcelJS.Workbook()
+  for (const [year, rows] of [
+    [2025, [[11, 31_200, 5_180_000], [12, 47_600, 7_890_000]]],
+    [2026, [[1, 49_200, 8_160_000], [2, 45_400, 7_530_000]]],
+  ] as const) {
+    const sheet = workbook.addWorksheet(`${year} 시연`)
+    sheet.addRows([
+      ['월분', '사용량(kWh)', `${year}학년도`],
+      ...rows,
+    ])
+  }
+  return new File(
+    [toArrayBuffer(await workbook.xlsx.writeBuffer())],
+    'monthly-bills.xlsx',
+    { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+  )
+}
 
 describe('bill upload tariff configuration', () => {
   it('uses accessible tabs to switch bill input modes', async () => {
@@ -30,6 +58,59 @@ describe('bill upload tariff configuration', () => {
 
     await user.keyboard('{ArrowRight}')
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: '직접 입력' }))
+
+    await user.keyboard('{Home}')
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '파일 업로드' }))
+
+    await user.keyboard('{End}')
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '직접 입력' }))
+
+    await user.keyboard('{ArrowLeft}')
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '표 붙여넣기' }))
+
+    expect(document.getElementById('bill-input-panel-file')?.hidden).toBe(true)
+    expect(screen.getByRole('tabpanel', { name: '표 붙여넣기' }).hidden).toBe(false)
+    expect(document.getElementById('bill-input-panel-manual')?.hidden).toBe(true)
+  })
+
+  it('hides a file candidate with its inactive panel and preserves it on return', async () => {
+    const user = userEvent.setup()
+    const view = render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={async () => true}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    fireEvent.change(view.container.querySelector('input[accept=".csv"]')!, {
+      target: {
+        files: [
+          new File(
+            ['연도,월,사용량,총 전기요금\n2026,7,42000,6420000'],
+            'billing.csv',
+            { type: 'text/csv' },
+          ),
+        ],
+      },
+    })
+
+    await user.click(view.getByRole('tab', { name: '파일 업로드' }))
+    expect(await view.findByRole('button', { name: '이 데이터로 분석 시작' })).toBeTruthy()
+
+    await user.click(view.getByRole('tab', { name: '표 붙여넣기' }))
+    expect(view.queryByRole('heading', { name: '새 입력 데이터' })).toBeNull()
+    expect(view.queryByRole('button', { name: '이 데이터로 분석 시작' })).toBeNull()
+
+    await user.click(view.getByRole('tab', { name: '직접 입력' }))
+    expect(view.queryByRole('heading', { name: '새 입력 데이터' })).toBeNull()
+    expect(view.queryByRole('button', { name: '이 데이터로 분석 시작' })).toBeNull()
+
+    await user.click(view.getByRole('tab', { name: '파일 업로드' }))
+    expect(await view.findByRole('heading', { name: '새 입력 데이터' })).toBeTruthy()
+    expect(await view.findByRole('button', { name: '이 데이터로 분석 시작' })).toBeTruthy()
   })
 
   it('saves uploaded file candidates with the uploaded origin', async () => {
@@ -58,6 +139,32 @@ describe('bill upload tariff configuration', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '이 매핑으로 분석 시작' }))
     expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'uploaded')
+  })
+
+  it('saves a synthetic multi-sheet XLSX candidate with the uploaded origin', async () => {
+    const onBillsChange = vi.fn(async () => true)
+    const { container } = render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    fireEvent.change(container.querySelector('input[accept=".xlsx,.xls"]')!, {
+      target: { files: [await createSyntheticWorkbook()] },
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: '이 매핑으로 분석 시작' }))
+    expect(onBillsChange).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ year: 2025, month: 11 }),
+        expect.objectContaining({ year: 2026, month: 2 }),
+      ]),
+      'uploaded',
+    )
   })
 
   it('shows configuration guidance and blocks analysis without an exact plan', async () => {

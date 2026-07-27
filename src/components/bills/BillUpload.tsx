@@ -28,6 +28,18 @@ const modes: Array<{ id: BillInputMode; label: string; Icon: typeof FileUp }> = 
 const storageFailureMessage =
   '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.'
 
+const emptyCandidates = (): Record<BillInputMode, BillInputCandidate | null> => ({
+  file: null,
+  paste: null,
+  manual: null,
+})
+
+const emptyMessages = (): Record<BillInputMode, string> => ({
+  file: '',
+  paste: '',
+  manual: '',
+})
+
 export function BillUpload({
   bills,
   profile,
@@ -35,8 +47,8 @@ export function BillUpload({
   onBillsChange,
 }: BillUploadProps) {
   const [activeMode, setActiveMode] = useState<BillInputMode>('file')
-  const [candidate, setCandidate] = useState<BillInputCandidate | null>(null)
-  const [message, setMessage] = useState('')
+  const [candidates, setCandidates] = useState(emptyCandidates)
+  const [messages, setMessages] = useState(emptyMessages)
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const hasExactRatePlan = useMemo(
     () => Boolean(findExactRatePlan(profile, ratePlans)),
@@ -62,19 +74,33 @@ export function BillUpload({
     selectMode(modes[nextIndex].id, true)
   }
 
-  const handleCandidateChange = useCallback((nextCandidate: BillInputCandidate | null) => {
-    setCandidate(nextCandidate)
-    setMessage('')
+  const handleCandidateChange = useCallback((
+    mode: BillInputMode,
+    nextCandidate: BillInputCandidate | null,
+  ) => {
+    setCandidates((current) => ({ ...current, [mode]: nextCandidate }))
+    setMessages((current) => ({ ...current, [mode]: '' }))
   }, [])
+  const handleFileCandidateChange = useCallback(
+    (nextCandidate: BillInputCandidate | null) => {
+      handleCandidateChange('file', nextCandidate)
+    },
+    [handleCandidateChange],
+  )
 
-  const handleConfirm = async (nextCandidate: BillInputCandidate) => {
+  const handleConfirm = async (
+    mode: BillInputMode,
+    nextCandidate: BillInputCandidate,
+  ) => {
     let saved = false
     try {
       saved = await onBillsChange(nextCandidate.bills, nextCandidate.origin)
     } catch {
       saved = false
     }
-    if (!saved) setMessage(storageFailureMessage)
+    if (!saved) {
+      setMessages((current) => ({ ...current, [mode]: storageFailureMessage }))
+    }
   }
 
   return (
@@ -117,8 +143,15 @@ export function BillUpload({
         <FileBillInput
           profile={profile}
           ratePlans={ratePlans}
-          onCandidateChange={handleCandidateChange}
-          onApplyCandidate={handleConfirm}
+          onCandidateChange={handleFileCandidateChange}
+          onApplyCandidate={(candidate) => handleConfirm('file', candidate)}
+        />
+        <BillInputPreview
+          candidate={candidates.file}
+          currentBills={bills}
+          hasExactRatePlan={hasExactRatePlan}
+          onConfirm={(candidate) => handleConfirm('file', candidate)}
+          message={messages.file}
         />
       </section>
       <section
@@ -131,6 +164,13 @@ export function BillUpload({
         <section className="panel input-mode-shell">
           <h2>표 붙여넣기</h2>
         </section>
+        <BillInputPreview
+          candidate={candidates.paste}
+          currentBills={bills}
+          hasExactRatePlan={hasExactRatePlan}
+          onConfirm={(candidate) => handleConfirm('paste', candidate)}
+          message={messages.paste}
+        />
       </section>
       <section
         id="bill-input-panel-manual"
@@ -142,15 +182,14 @@ export function BillUpload({
         <section className="panel input-mode-shell">
           <h2>직접 입력</h2>
         </section>
+        <BillInputPreview
+          candidate={candidates.manual}
+          currentBills={bills}
+          hasExactRatePlan={hasExactRatePlan}
+          onConfirm={(candidate) => handleConfirm('manual', candidate)}
+          message={messages.manual}
+        />
       </section>
-
-      <BillInputPreview
-        candidate={candidate}
-        currentBills={bills}
-        hasExactRatePlan={hasExactRatePlan}
-        onConfirm={handleConfirm}
-        message={message}
-      />
     </div>
   )
 }
