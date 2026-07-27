@@ -378,15 +378,19 @@ const assertPowerPlannerHtmlLimits = (text: string) => {
   }
 }
 
-const parseCsvMatrix = (text: string) => {
+export const parseDelimitedMatrix = (
+  text: string,
+  delimiter: ',' | '\t',
+) => {
+  const source = text.replace(/^\uFEFF/, '')
   const rows: string[][] = []
   let row: string[] = []
   let cell = ''
   let quoted = false
 
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index]
-    const next = text[index + 1]
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index]
+    const next = source[index + 1]
 
     if (char === '"') {
       if (quoted && next === '"') {
@@ -398,7 +402,7 @@ const parseCsvMatrix = (text: string) => {
       continue
     }
 
-    if (char === ',' && !quoted) {
+    if (char === delimiter && !quoted) {
       row.push(cell.trim())
       cell = ''
       continue
@@ -422,7 +426,7 @@ const parseCsvMatrix = (text: string) => {
 }
 
 const parseCsvSheet = (text: string, name: string): ParsedSheet => {
-  const matrix = parseCsvMatrix(text)
+  const matrix = parseDelimitedMatrix(text, ',')
   const headers = (matrix[0] ?? []).map((header, index) =>
     (index === 0 ? header.replace(/^\uFEFF/, '') : header).trim(),
   )

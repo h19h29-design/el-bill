@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   getWorkbookLimitMessage,
   mapRowsToBills,
+  parseDelimitedMatrix,
   parseWorkbook,
   validateUploadFile,
 } from './excel'
@@ -240,6 +241,13 @@ const powerPlannerHtmlFixture = `
 </html>`
 
 describe('synthetic workbook parser harness', () => {
+  it('preserves quoted CSV cells through the exported delimiter parser', () => {
+    expect(parseDelimitedMatrix('연도,메모\r\n2026,"첫 줄\n둘째 줄"', ',')).toEqual([
+      ['연도', '메모'],
+      ['2026', '첫 줄\n둘째 줄'],
+    ])
+  })
+
   it('parses the checked-in synthetic XLSX fixture', async () => {
     const buffer = await readFile('e2e/fixtures/monthly-bills.xlsx')
     const arrayBuffer = buffer.buffer.slice(
