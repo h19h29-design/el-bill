@@ -685,6 +685,52 @@ textarea:focus {
   border-radius: 7px;
 }
 
+.paste-sample-scroll {
+  overflow-x: auto;
+  border: 1px solid #dce8f5;
+  border-radius: 6px;
+}
+
+.paste-sample-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.paste-sample-table caption {
+  padding: 8px;
+  color: #315879;
+  text-align: left;
+  font-weight: 800;
+}
+
+.paste-sample-table th,
+.paste-sample-table td {
+  padding: 7px 9px;
+  border-top: 1px solid #e5eef7;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.paste-sample-table th {
+  color: #315879;
+  background: #f2f8ff;
+}
+
+.manual-global-issues {
+  padding: 10px 12px;
+  color: #8b3b32;
+  background: #fff8f3;
+  border: 1px solid #efc8bc;
+  border-radius: 6px;
+}
+
+.manual-global-issues:focus-visible {
+  outline: 3px solid rgba(180, 83, 9, 0.28);
+  outline-offset: 2px;
+}
+
 .manual-bill-grid {
   width: 100%;
   min-width: 980px;

@@ -33,7 +33,17 @@ const mappingFields = [
   ['note', '메모', false],
 ] as const
 
-const requiredMappingFields = ['year', 'month', 'usageKwh', 'totalBillWon']
+const requiredMappingFields = ['year', 'month', 'usageKwh', 'totalBillWon'] as const
+
+const getRequiredMappingCollisions = (mapping: Record<string, string>) => {
+  const fieldsByHeader = new Map<string, string[]>()
+  requiredMappingFields.forEach((field) => {
+    const header = mapping[field]
+    if (!header) return
+    fieldsByHeader.set(header, [...(fieldsByHeader.get(header) ?? []), field])
+  })
+  return [...fieldsByHeader.values()].filter((fields) => fields.length > 1)
+}
 
 export function PastedBillInput({
   importContext,
@@ -46,7 +56,13 @@ export function PastedBillInput({
   const [message, setMessage] = useState('')
   const [showMapping, setShowMapping] = useState(false)
 
-  const hasRequiredMapping = requiredMappingFields.every((field) => mapping[field])
+  const requiredMappingCollisions = useMemo(
+    () => getRequiredMappingCollisions(mapping),
+    [mapping],
+  )
+  const hasRequiredMapping =
+    requiredMappingFields.every((field) => mapping[field]) &&
+    requiredMappingCollisions.length === 0
   const pendingBills = useMemo(
     () => sheet && hasRequiredMapping
       ? mapRowsToBills(sheet.rows, mapping, importContext)
@@ -90,13 +106,16 @@ export function PastedBillInput({
       const parsed = parsePastedBillSheet(text)
       const nextMapping = buildBillColumnMapping(parsed.headers)
       const missingRequired = requiredMappingFields.some((field) => !nextMapping[field])
+      const hasRequiredCollision = getRequiredMappingCollisions(nextMapping).length > 0
       setSheet(parsed)
       setMapping(nextMapping)
-      setShowMapping(missingRequired)
+      setShowMapping(missingRequired || hasRequiredCollision)
       setMessage(
         parsed.rows.length
-          ? missingRequired
-            ? '필수 컬럼을 지정해 주세요.'
+          ? missingRequired || hasRequiredCollision
+            ? hasRequiredCollision
+              ? '필수 항목은 서로 다른 컬럼으로 지정해 주세요.'
+              : '필수 컬럼을 지정해 주세요.'
             : ''
           : '헤더 다음에 인식할 고지서 행을 입력해 주세요.',
       )
@@ -164,6 +183,9 @@ export function PastedBillInput({
         {sheet && !isValidCandidate && hasRequiredMapping && pendingBills.length !== sheet.rows.length && (
           <p className="empty-state" role="status">필수 값이 비어 있거나 올바르지 않은 행이 있습니다. 모든 행을 보완해 주세요.</p>
         )}
+        {sheet && requiredMappingCollisions.length > 0 && (
+          <p className="empty-state" role="status">필수 항목은 서로 다른 컬럼으로 지정해 주세요.</p>
+        )}
         {sheet && periodValidation.issues.length > 0 && (
           <ul className="diagnostics-list">
             {periodValidation.issues.map((issue) => <li key={`${issue.code}-${issue.period}`}>{issue.message}</li>)}
@@ -178,6 +200,23 @@ export function PastedBillInput({
             <span>{sheet.rows.length}행</span>
           </div>
           <p className="field-hint">인식한 헤더: {sheet.headers.join(', ') || '없음'}</p>
+          <div className="paste-sample-scroll">
+            <table className="paste-sample-table" aria-label="붙여넣기 행 미리보기">
+              <caption>인식한 행 미리보기 (처음 {Math.min(sheet.rows.length, 5)}행)</caption>
+              <thead>
+                <tr>
+                  {sheet.headers.slice(0, 12).map((header) => <th key={header} scope="col">{header}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {sheet.rows.slice(0, 5).map((row, rowIndex) => (
+                  <tr key={rowIndex}>
+                    {sheet.headers.slice(0, 12).map((header) => <td key={header}>{String(row[header] ?? '')}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <button type="button" className="outline-action" onClick={() => setShowMapping((current) => !current)}>
             컬럼 매핑 {showMapping ? '접기' : '수정'}
           </button>

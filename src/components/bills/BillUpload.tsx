@@ -1,11 +1,10 @@
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ClipboardPaste, FileUp, PenLine } from 'lucide-react'
-import { removeBillEntryDraft } from '../../lib/billDraftStorage'
 import { findExactRatePlan } from '../../lib/diagnosis'
 import type { BillDataOrigin, MonthlyBill, RatePlan, SchoolProfile } from '../../types'
 import { BillInputPreview, type BillInputCandidate } from './BillInputPreview'
 import { FileBillInput } from './FileBillInput'
-import { ManualBillInput } from './ManualBillInput'
+import { ManualBillInput, type ManualBillDraftLifecycle } from './ManualBillInput'
 import { PastedBillInput } from './PastedBillInput'
 
 export type BillInputMode = 'file' | 'paste' | 'manual'
@@ -54,6 +53,7 @@ export function BillUpload({
   const [candidates, setCandidates] = useState(emptyCandidates)
   const [messages, setMessages] = useState(emptyMessages)
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const manualDraftLifecycleRef = useRef<ManualBillDraftLifecycle | null>(null)
   const hasExactRatePlan = useMemo(
     () => Boolean(findExactRatePlan(profile, ratePlans)),
     [profile, ratePlans],
@@ -109,6 +109,12 @@ export function BillUpload({
     },
     [handleCandidateChange],
   )
+  const handleManualDraftLifecycleChange = useCallback(
+    (lifecycle: ManualBillDraftLifecycle | null) => {
+      manualDraftLifecycleRef.current = lifecycle
+    },
+    [],
+  )
 
   const handleConfirm = async (
     mode: BillInputMode,
@@ -125,7 +131,13 @@ export function BillUpload({
       return
     }
     if (mode === 'manual') {
-      await removeBillEntryDraft()
+      const removal = await manualDraftLifecycleRef.current?.remove()
+      if (!removal?.ok) {
+        setMessages((current) => ({
+          ...current,
+          manual: '분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다. 입력은 유지됩니다.',
+        }))
+      }
     }
   }
 
@@ -211,6 +223,7 @@ export function BillUpload({
           importContext={importContext}
           onCandidateChange={handleManualCandidateChange}
           onOpenGuide={onOpenGuide}
+          onDraftLifecycleChange={handleManualDraftLifecycleChange}
         />
         <BillInputPreview
           candidate={candidates.manual}

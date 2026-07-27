@@ -11,10 +11,12 @@ import {
 import { parseDelimitedMatrix } from '../../lib/excel'
 import {
   readBillEntryDraft,
-  removeBillEntryDraft,
-  writeBillEntryDraft,
 } from '../../lib/billDraftStorage'
 import type { PersonalBillInputProps } from './PastedBillInput'
+import {
+  createManualBillDraftLifecycle,
+  type ManualBillDraftLifecycle,
+} from './manualBillDraftLifecycle'
 
 const basicFields: ManualBillDraftField[] = [
   'yearMonth',
@@ -64,6 +66,7 @@ const numericFields = new Set<ManualBillDraftField>([
   'vatWon',
   'fundWon',
 ])
+const maximumManualPasteCharacters = 200_000
 
 const localYearMonth = () => {
   const now = new Date()
@@ -94,6 +97,12 @@ const rowHasContent = (row: ManualBillDraftRow) =>
 
 const inputKey = (rowId: string, field: ManualBillDraftField) => `${rowId}-${field}`
 
+interface ManualBillInputProps extends PersonalBillInputProps {
+  onDraftLifecycleChange?: (lifecycle: ManualBillDraftLifecycle | null) => void
+}
+
+export type { ManualBillDraftLifecycle } from './manualBillDraftLifecycle'
+
 const formatNumericDisplay = (value: string) => {
   const normalized = value
     .trim()
@@ -110,7 +119,8 @@ export function ManualBillInput({
   importContext,
   onCandidateChange,
   onOpenGuide,
-}: PersonalBillInputProps) {
+  onDraftLifecycleChange,
+}: ManualBillInputProps) {
   const [initialDraft] = useState(() => readBillEntryDraft())
   const [lastYearMonth, setLastYearMonth] = useState(localYearMonth)
   const [rows, setRows] = useState<ManualBillDraftRow[]>(() => initialDraft?.rows ?? [])
@@ -120,9 +130,26 @@ export function ManualBillInput({
     initialDraft ? '이전 입력 초안을 복원했습니다.' : '',
   )
   const inputRefs = useRef(new Map<string, HTMLInputElement>())
-  const revisionRef = useRef<number | undefined>(initialDraft?.revision)
   const skipInitialWrite = useRef(true)
-  const draftWriteQueue = useRef(Promise.resolve())
+  const globalIssueRef = useRef<HTMLElement | null>(null)
+  const lifecycleRef = useRef<ManualBillDraftLifecycle | null>(null)
+  if (!lifecycleRef.current) {
+    lifecycleRef.current = createManualBillDraftLifecycle({
+      initialRevision: initialDraft?.revision,
+      onStatus: (status) => {
+        if (status === 'saved') {
+          setDraftMessage('입력 초안이 이 브라우저에 최대 24시간 보관됩니다')
+          return
+        }
+        setDraftMessage(
+          status === 'remove-failed'
+            ? '초안을 삭제하지 못했습니다. 입력을 유지합니다.'
+            : '초안을 저장하지 못했습니다. 입력은 화면에 유지됩니다.',
+        )
+      },
+    })
+  }
+  const draftLifecycle = lifecycleRef.current
 
   const visibleFields = useMemo(
     () => showDetails ? [...basicFields, ...detailFields] : basicFields,
@@ -145,6 +172,17 @@ export function ManualBillInput({
     })
     return issues
   }, [validation.issues])
+  const globalIssues = useMemo(
+    () => validation.issues.filter((issue) => !issue.rowId),
+    [validation.issues],
+  )
+
+  useEffect(() => () => draftLifecycle.dispose(), [draftLifecycle])
+
+  useEffect(() => {
+    onDraftLifecycleChange?.(draftLifecycle)
+    return () => onDraftLifecycleChange?.(null)
+  }, [draftLifecycle, onDraftLifecycleChange])
 
   useEffect(() => {
     onCandidateChange(
@@ -163,22 +201,12 @@ export function ManualBillInput({
       skipInitialWrite.current = false
       return
     }
-    if (!rows.length) return
-
-    const snapshot = rows.map((row) => ({ ...row }))
-    const timer = window.setTimeout(() => {
-      draftWriteQueue.current = draftWriteQueue.current.then(async () => {
-        const result = await writeBillEntryDraft(snapshot, revisionRef.current)
-        if (result.ok) {
-          revisionRef.current = result.draft.revision
-          setDraftMessage('입력 초안이 이 브라우저에 최대 24시간 보관됩니다')
-          return
-        }
-        setDraftMessage('초안을 저장하지 못했습니다. 입력은 화면에 유지됩니다.')
-      })
-    }, 300)
-    return () => window.clearTimeout(timer)
-  }, [rows])
+    if (!rows.length) {
+      void draftLifecycle.remove()
+      return
+    }
+    draftLifecycle.schedule(rows)
+  }, [draftLifecycle, rows])
 
   const updateCell = (rowId: string, field: ManualBillDraftField, value: string) => {
     setTouchedRowIds((current) => new Set(current).add(rowId))
@@ -243,6 +271,11 @@ export function ManualBillInput({
     field: ManualBillDraftField,
   ) => {
     const text = event.clipboardData.getData('text')
+    if (text.length > maximumManualPasteCharacters) {
+      event.preventDefault()
+      setDraftMessage('붙여넣기 내용은 200,000자 이하로 입력해 주세요.')
+      return
+    }
     if (!text.includes('\t') && !text.includes('\n') && !text.includes('\r')) return
     const firstNonEmptyLine = text.split(/\r?\n/).find((line) => line.trim()) ?? ''
     const matrix = parseDelimitedMatrix(text, firstNonEmptyLine.includes('\t') ? '\t' : ',')
@@ -279,12 +312,8 @@ export function ManualBillInput({
 
   const resetRows = async () => {
     if (!rows.length || !window.confirm('입력한 모든 행을 초기화할까요?')) return
-    const removed = await removeBillEntryDraft()
-    if (!removed && readBillEntryDraft()) {
-      setDraftMessage('초안을 삭제하지 못했습니다. 입력을 유지합니다.')
-      return
-    }
-    revisionRef.current = undefined
+    const removal = await draftLifecycle.remove()
+    if (!removal.ok) return
     setRows([])
     setTouchedRowIds(new Set())
     setDraftMessage('')
@@ -301,9 +330,12 @@ export function ManualBillInput({
 
   const focusFirstIssue = () => {
     const issue = validation.issues.find((item) => item.rowId)
-    if (!issue) return
-    const field = issue.field === 'period' ? 'yearMonth' : issue.field
-    inputRefs.current.get(inputKey(issue.rowId, field))?.focus()
+    if (issue) {
+      const field = issue.field === 'period' ? 'yearMonth' : issue.field
+      inputRefs.current.get(inputKey(issue.rowId, field))?.focus()
+      return
+    }
+    globalIssueRef.current?.focus()
   }
 
   return (
@@ -356,7 +388,31 @@ export function ManualBillInput({
             </div>
             <span>{rows.length}/36행</span>
           </div>
-          {validation.issues.length > 0 && <button type="button" className="outline-action first-error-action" onClick={focusFirstIssue}>첫 오류로 이동</button>}
+          {validation.issues.length > 0 && (
+            <button
+              type="button"
+              className="outline-action first-error-action"
+              aria-controls={globalIssues.length ? 'manual-global-issues' : undefined}
+              onClick={focusFirstIssue}
+            >
+              첫 오류로 이동
+            </button>
+          )}
+          {globalIssues.length > 0 && (
+            <section
+              ref={globalIssueRef}
+              id="manual-global-issues"
+              className="manual-global-issues"
+              role="status"
+              aria-label="기간 확인 필요"
+              tabIndex={-1}
+            >
+              <strong>기간 확인 필요</strong>
+              <ul className="diagnostics-list">
+                {globalIssues.map((issue) => <li key={issue.message}>{issue.message}</li>)}
+              </ul>
+            </section>
+          )}
           <div className="manual-grid-scroll">
             <table className="manual-bill-grid">
               <thead>

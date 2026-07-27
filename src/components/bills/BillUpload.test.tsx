@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ExcelJS from 'exceljs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,8 @@ import { BillUpload } from './BillUpload'
 afterEach(() => {
   cleanup()
   localStorage.clear()
+  vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 const makeDraft = (patch: Record<string, string> = {}) => ({
@@ -91,6 +93,70 @@ describe('bill upload tariff configuration', () => {
       'manual',
     ))
     await waitFor(() => expect(readBillEntryDraft()).toBeNull())
+  })
+
+  it('cancels a pending manual draft write before an apply removes the draft', async () => {
+    const user = userEvent.setup()
+    const onBillsChange = vi.fn(async () => true)
+    await writeBillEntryDraft([makeDraft()])
+
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: '직접 입력' }))
+    const apply = await screen.findByRole('button', { name: '이 데이터로 분석 시작' })
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByLabelText('2026-07 사용량(kWh)'), { target: { value: '50,000' } })
+    fireEvent.click(apply)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'manual')
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(301)
+    })
+
+    expect(readBillEntryDraft()).toBeNull()
+  })
+
+  it('surfaces a failed manual draft removal after the analysis save succeeds', async () => {
+    const user = userEvent.setup()
+    const onBillsChange = vi.fn(async () => true)
+    await writeBillEntryDraft([makeDraft()])
+    const nativeRemoveItem = Storage.prototype.removeItem
+    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key) {
+      if (key.startsWith('el-bill:bill-entry-draft')) throw new Error('storage unavailable')
+      return nativeRemoveItem.call(this, key)
+    })
+
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: '직접 입력' }))
+    await user.click(screen.getByRole('button', { name: '이 데이터로 분석 시작' }))
+
+    await waitFor(() => expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'manual'))
+    expect(screen.getByText(/분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다/)).toBeTruthy()
+    expect(screen.getByLabelText('2026-07 사용량(kWh)')).toBeTruthy()
+    expect(readBillEntryDraft()).not.toBeNull()
+    removeItemSpy.mockRestore()
   })
 
   it('uses accessible tabs to switch bill input modes', async () => {

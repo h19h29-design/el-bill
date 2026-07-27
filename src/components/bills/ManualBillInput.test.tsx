@@ -1,10 +1,10 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
-import { writeBillEntryDraft } from '../../lib/billDraftStorage'
+import { readBillEntryDraft, writeBillEntryDraft } from '../../lib/billDraftStorage'
 import type { BillImportContext } from '../../types'
 import { ManualBillInput } from './ManualBillInput'
 
@@ -49,6 +49,7 @@ afterEach(() => {
   cleanup()
   localStorage.clear()
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe('ManualBillInput', () => {
@@ -115,6 +116,37 @@ describe('ManualBillInput', () => {
     expect((screen.getByLabelText('2026-06 총 전기요금(원)') as HTMLInputElement).value).toBe('200')
   })
 
+  it('rejects an oversized matrix paste before changing the current rows', async () => {
+    const user = userEvent.setup()
+    renderInput()
+
+    await user.clear(screen.getByLabelText('마지막 청구월'))
+    await user.type(screen.getByLabelText('마지막 청구월'), '2026-07')
+    await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
+    const usage = screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement
+    fireEvent.paste(usage, {
+      clipboardData: { getData: () => `${'9'.repeat(200_000)}\t100` },
+    })
+
+    expect(usage.value).toBe('')
+    expect(screen.getByText(/200,000자 이하/)).not.toBeNull()
+  })
+
+  it('clips multi-cell paste at the final visible column', async () => {
+    const user = userEvent.setup()
+    renderInput()
+
+    await user.clear(screen.getByLabelText('마지막 청구월'))
+    await user.type(screen.getByLabelText('마지막 청구월'), '2026-07')
+    await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
+    fireEvent.paste(screen.getByLabelText('2026-07 총 전기요금(원)'), {
+      clipboardData: { getData: () => '100\t20\tignored' },
+    })
+
+    expect((screen.getByLabelText('2026-07 총 전기요금(원)') as HTMLInputElement).value).toBe('100')
+    expect((screen.getByLabelText('2026-07 최대수요전력(kW)') as HTMLInputElement).value).toBe('20')
+  })
+
   it('shows required-cell issues for an edited but incomplete row', async () => {
     const user = userEvent.setup()
     renderInput()
@@ -133,10 +165,54 @@ describe('ManualBillInput', () => {
     await user.clear(screen.getByLabelText('마지막 청구월'))
     await user.type(screen.getByLabelText('마지막 청구월'), '2026-07')
     await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
-    const usage = screen.getByLabelText('2026-07 사용량(kWh)')
+    const usage = screen.getAllByLabelText('2026-07 사용량(kWh)').at(-1)!
     await user.click(usage)
     await user.keyboard('{Shift>}{ArrowRight}{/Shift}')
 
+    expect(document.activeElement).toBe(usage)
+  })
+
+  it('moves across visible grid cells with Tab, Shift+Tab, Enter, and arrow keys', async () => {
+    const user = userEvent.setup()
+    renderInput()
+
+    await user.clear(screen.getByLabelText('마지막 청구월'))
+    await user.type(screen.getByLabelText('마지막 청구월'), '2026-07')
+    await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
+
+    const julyUsage = screen.getByLabelText('2026-07 사용량(kWh)')
+    const julyTotal = screen.getByLabelText('2026-07 총 전기요금(원)')
+    const juneUsage = screen.getByLabelText('2026-06 사용량(kWh)')
+    const juneTotal = screen.getByLabelText('2026-06 총 전기요금(원)')
+    await user.click(julyUsage)
+
+    await user.keyboard('{Tab}')
+    expect(document.activeElement).toBe(julyTotal)
+    await user.keyboard('{Shift>}{Tab}{/Shift}')
+    expect(document.activeElement).toBe(julyUsage)
+    await user.keyboard('{Enter}')
+    expect(document.activeElement).toBe(juneUsage)
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toBe(juneTotal)
+    await user.keyboard('{ArrowLeft}')
+    expect(document.activeElement).toBe(juneUsage)
+    await user.keyboard('{ArrowUp}')
+    expect(document.activeElement).toBe(julyUsage)
+    await user.keyboard('{ArrowDown}')
+    expect(document.activeElement).toBe(juneUsage)
+  })
+
+  it('does not intercept composing keyboard input', async () => {
+    const user = userEvent.setup()
+    renderInput()
+
+    await user.clear(screen.getByLabelText('마지막 청구월'))
+    await user.type(screen.getByLabelText('마지막 청구월'), '2026-07')
+    await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
+    const usage = screen.getByLabelText('2026-07 사용량(kWh)')
+    await user.click(usage)
+
+    fireEvent.keyDown(usage, { key: 'ArrowRight', isComposing: true })
     expect(document.activeElement).toBe(usage)
   })
 
@@ -162,6 +238,41 @@ describe('ManualBillInput', () => {
     expect(document.activeElement).toBe(screen.getAllByLabelText('2026-07 연월')[0])
   })
 
+  it('renders focusable global period issues when a month is missing', async () => {
+    const user = userEvent.setup()
+    renderInput()
+
+    await user.clear(screen.getByLabelText('마지막 청구월'))
+    await user.type(screen.getByLabelText('마지막 청구월'), '2026-07')
+    await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
+    await user.type(screen.getByLabelText('2026-07 사용량(kWh)'), '10')
+    await user.type(screen.getByLabelText('2026-07 총 전기요금(원)'), '100')
+    await user.type(screen.getByLabelText('2026-05 사용량(kWh)'), '20')
+    await user.type(screen.getByLabelText('2026-05 총 전기요금(원)'), '200')
+
+    const globalIssue = screen.getByRole('status', { name: '기간 확인 필요' })
+    expect(globalIssue.textContent).toMatch(/missing/)
+    const firstIssueAction = screen.getByRole('button', { name: '첫 오류로 이동' })
+    expect(firstIssueAction.getAttribute('aria-controls')).toBe('manual-global-issues')
+    await user.click(firstIssueAction)
+    expect(document.activeElement).toBe(globalIssue)
+  })
+
+  it('connects invalid cells to their visible issue text', async () => {
+    const user = userEvent.setup()
+    renderInput()
+
+    await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
+    await user.click(screen.getByRole('button', { name: '입력행 추가' }))
+    await user.type(screen.getByLabelText('연월'), '2026-07')
+    const usage = screen.getAllByLabelText('2026-07 사용량(kWh)').at(-1)!
+
+    expect(usage.getAttribute('aria-invalid')).toBe('true')
+    const issueId = usage.getAttribute('aria-describedby')
+    expect(issueId).not.toBeNull()
+    expect(document.getElementById(issueId ?? '')?.textContent).toBe('0보다 큰 숫자를 입력해 주세요.')
+  })
+
   it('caps direct entry at 36 rows', async () => {
     const user = userEvent.setup()
     renderInput()
@@ -179,5 +290,141 @@ describe('ManualBillInput', () => {
 
     expect((screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement).value).toBe('48,365 kWh')
     expect(screen.getByText(/이전 입력 초안을 복원했습니다/)).not.toBeNull()
+  })
+
+  it('does not restore a draft at its fixed 24-hour expiry', async () => {
+    vi.useFakeTimers()
+    const createdAt = Date.parse('2026-07-27T00:00:00.000Z')
+    vi.setSystemTime(createdAt)
+    await writeBillEntryDraft([makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' })])
+    vi.setSystemTime(createdAt + 24 * 60 * 60 * 1000)
+
+    renderInput()
+
+    expect(screen.queryByLabelText('2026-07 사용량(kWh)')).toBeNull()
+  })
+
+  it('writes only after the full 300ms debounce interval', async () => {
+    vi.useFakeTimers()
+    renderInput()
+
+    fireEvent.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
+    expect(readBillEntryDraft()).toBeNull()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(299)
+    })
+    expect(readBillEntryDraft()).toBeNull()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+
+    expect(readBillEntryDraft()?.rows).toHaveLength(12)
+  })
+
+  it('retains rows and reports a failed debounced save', async () => {
+    vi.useFakeTimers()
+    const stored = await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
+    ])
+    if (!stored.ok) throw new Error('draft setup failed')
+    const nativeSetItem = Storage.prototype.setItem
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith('el-bill:bill-entry-draft:')) throw new Error('storage unavailable')
+      return nativeSetItem.call(this, key, value)
+    })
+    renderInput()
+
+    fireEvent.change(screen.getByLabelText('2026-07 사용량(kWh)'), { target: { value: '20' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300)
+    })
+
+    expect(screen.getByText(/초안을 저장하지 못했습니다/)).not.toBeNull()
+    expect((screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement).value).toBe('20')
+    expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('10')
+    setItemSpy.mockRestore()
+  })
+
+  it('retains rows and reports a failed reset removal', async () => {
+    const user = userEvent.setup()
+    await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
+    ])
+    const nativeRemoveItem = Storage.prototype.removeItem
+    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key) {
+      if (key.startsWith('el-bill:bill-entry-draft')) throw new Error('storage unavailable')
+      return nativeRemoveItem.call(this, key)
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderInput()
+
+    await user.click(screen.getByRole('button', { name: '전체 초기화' }))
+
+    expect(screen.getByText(/초안을 삭제하지 못했습니다/)).not.toBeNull()
+    expect(screen.getByLabelText('2026-07 사용량(kWh)')).not.toBeNull()
+    expect(readBillEntryDraft()).not.toBeNull()
+    removeItemSpy.mockRestore()
+  })
+
+  it('cancels a pending write before a confirmed reset removes the draft', async () => {
+    vi.useFakeTimers()
+    await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
+    ])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderInput()
+
+    fireEvent.change(screen.getByLabelText('2026-07 사용량(kWh)'), { target: { value: '20' } })
+    fireEvent.click(screen.getByRole('button', { name: '전체 초기화' }))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(301)
+    })
+
+    expect(readBillEntryDraft()).toBeNull()
+    expect(screen.queryByLabelText('2026-07 사용량(kWh)')).toBeNull()
+  })
+
+  it('keeps the newer stored draft when a revision-safe write becomes stale', async () => {
+    vi.useFakeTimers()
+    const initial = await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
+    ])
+    if (!initial.ok) throw new Error('draft setup failed')
+    renderInput()
+    await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '20', totalBillWon: '100' }),
+    ], initial.draft.revision)
+
+    fireEvent.change(screen.getByLabelText('2026-07 사용량(kWh)'), { target: { value: '30' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300)
+    })
+
+    expect(screen.getByText(/초안을 저장하지 못했습니다/)).not.toBeNull()
+    expect((screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement).value).toBe('30')
+    expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('20')
+  })
+
+  it('removes the stored draft after the last row is deleted and stays empty after reload', async () => {
+    const user = userEvent.setup()
+    await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
+    ])
+    const view = render(
+      <ManualBillInput
+        importContext={importContext}
+        onCandidateChange={() => undefined}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '2026-07행 삭제' }))
+    await waitFor(() => expect(readBillEntryDraft()).toBeNull())
+    view.unmount()
+    renderInput()
+
+    expect(screen.queryByLabelText('2026-07 사용량(kWh)')).toBeNull()
   })
 })
