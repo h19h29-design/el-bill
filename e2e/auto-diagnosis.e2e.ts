@@ -133,7 +133,7 @@ test('production preview serves hashed entry and lazy chunks', async ({ page }) 
   await page.goto('/')
 
   const entryScript = await page
-    .locator('script[type="module"][src]')
+    .locator('script[type="module"][src^="/assets/index-"]')
     .getAttribute('src')
   expect(entryScript).toMatch(/^\/assets\/index-[A-Za-z0-9_-]+\.js$/)
 
