@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const useLocalChrome = process.platform === 'darwin' && !process.env.CI
-const baseURL = 'http://127.0.0.1:4173'
+const externalBaseURL = process.env.PLAYWRIGHT_BASE_URL
+const baseURL = externalBaseURL ?? 'http://127.0.0.1:4173'
 
 export default defineConfig({
   testDir: './e2e',
@@ -24,11 +25,13 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command:
-      'npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
-    url: baseURL,
-    reuseExistingServer: false,
-    timeout: 180_000,
-  },
+  webServer: externalBaseURL
+    ? undefined
+    : {
+        command:
+          'npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
+        url: baseURL,
+        reuseExistingServer: false,
+        timeout: 180_000,
+      },
 })

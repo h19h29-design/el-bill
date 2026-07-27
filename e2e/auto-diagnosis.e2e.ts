@@ -43,6 +43,52 @@ const powerPlannerHtmlFixture = `
 </html>`
 
 const storageMutationLockName = 'el-bill:storage-mutation'
+const billDraftPointerKey = 'el-bill:bill-entry-draft-active'
+const standardBillCsvHeader =
+  '연도,월,사용량(kWh),총 전기요금(원),요금적용전력(kW),최대수요전력(kW),기본요금(원),전력량요금(원),역률요금(원),기후환경요금(원),연료비조정액(원),부가세(원),전력산업기반기금(원),메모'
+const personalBillMonths = Array.from({ length: 12 }, (_, index) => {
+  const monthIndex = 2025 * 12 + 7 + index
+  return {
+    year: Math.floor(monthIndex / 12),
+    month: (monthIndex % 12) + 1,
+    usageKwh: 48_000 + index * 750,
+    totalBillWon: 7_100_000 + index * 112_500,
+  }
+})
+const pastedBillText = [
+  '연도\t월\t사용량(kWh)\t총 전기요금(원)',
+  ...personalBillMonths.map(
+    ({ year, month, usageKwh, totalBillWon }) =>
+      `${year}\t${month}\t${usageKwh}\t${totalBillWon}`,
+  ),
+].join('\n')
+const manualBillMatrix = [...personalBillMonths]
+  .reverse()
+  .map(({ usageKwh, totalBillWon }) => `${usageKwh}\t${totalBillWon}`)
+  .join('\n')
+
+const clearBrowserStorage = async (page: Page) => {
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+}
+
+const openDesktopView = async (page: Page, name: string) => {
+  await page.locator('.sidebar-nav').getByRole('button', { name, exact: true }).click()
+}
+
+const assertNoHorizontalOverlap = async (
+  leftLocator: ReturnType<Page['locator']>,
+  rightLocator: ReturnType<Page['locator']>,
+) => {
+  const [left, right] = await Promise.all([
+    leftLocator.boundingBox(),
+    rightLocator.boundingBox(),
+  ])
+  expect(left).not.toBeNull()
+  expect(right).not.toBeNull()
+  expect(left!.x + left!.width).toBeLessThanOrEqual(right!.x)
+}
 
 const readActiveStorageState = (page: Page) =>
   page.evaluate(() => {
@@ -111,11 +157,11 @@ test('checked-in synthetic XLSX reaches recognized mapping and analysis state', 
   await expect(
     page.locator('.recognition-grid article').filter({ hasText: '필수 컬럼' }),
   ).toContainText('연도, 월, 사용량, 총 전기요금')
-  await expect(page.getByRole('heading', { name: '새 파일 분석 미리보기' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
 
   await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
   await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
-  await expect(page.getByText('사용자 고지서 분석', { exact: false })).toBeVisible()
+  await expect(page.getByText('파일 업로드 고지서 분석', { exact: false })).toBeVisible()
 })
 
 test('tariff-full calculation mode persists into diagnosis and documents after reload', async ({
@@ -213,12 +259,12 @@ test('two tabs merge different active-session edits under Web Locks', async ({ p
     .first()
     .setInputFiles(resolve('e2e/fixtures/monthly-bills.xlsx'))
   await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
-  await expect(page.getByText('고지서: 사용자 업로드', { exact: true })).toBeVisible()
+  await expect(page.getByText('고지서: 파일 업로드', { exact: true })).toBeVisible()
 
   const secondPage = await page.context().newPage()
   await secondPage.goto('/')
   await expect(
-    secondPage.getByText('고지서: 사용자 업로드', { exact: true }),
+    secondPage.getByText('고지서: 파일 업로드', { exact: true }),
   ).toBeVisible()
   expect(
     await page.evaluate(() => typeof navigator.locks?.request),
@@ -565,13 +611,13 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await expect(
     page.locator('.recognition-grid article').filter({ hasText: '누락 컬럼' }),
   ).toContainText('없음')
-  await expect(page.getByRole('heading', { name: '새 파일 분석 미리보기' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
   await expect(page.getByText('아직 적용 전')).toBeVisible()
   await expect(page.getByRole('heading', { name: '현재 적용 데이터' })).toBeVisible()
   await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
   await expectViewHeading('자동진단')
-  await expect(page.getByText('사용자 고지서 분석', { exact: false })).toBeVisible()
-  await expect(page.getByText('고지서: 사용자 업로드', { exact: true })).toBeVisible()
+  await expect(page.getByText('파일 업로드 고지서 분석', { exact: false })).toBeVisible()
+  await expect(page.getByText('고지서: 파일 업로드', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '계산 근거 분해' })).toBeVisible()
 
   await clickSidebar('파워플래너')
@@ -698,4 +744,204 @@ test('mobile core workflow keeps navigation and wide content usable', async ({ p
   }))
   expect(previewSize.scrollWidth).toBeGreaterThan(previewSize.clientWidth)
   expect(previewSize.scrollWidth).toBeGreaterThanOrEqual(680)
+})
+
+test('pasted bill rows apply through automatic diagnosis', async ({ page }) => {
+  await clearBrowserStorage(page)
+  await openDesktopView(page, '고지서 입력')
+
+  await page.getByRole('tab', { name: '표 붙여넣기' }).click()
+  await page.getByLabel('붙여넣을 표').fill(pastedBillText)
+  await page.getByRole('button', { name: '붙여넣은 표 확인' }).click()
+
+  await expect(page.getByText('12개월을 인식했습니다.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
+  await expect(page.getByLabel('입력 데이터 요약')).toContainText('붙여넣은 표')
+  await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
+
+  await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
+  await expect(page.getByText('고지서: 표 붙여넣기', { exact: true })).toBeVisible()
+  await expect(page.getByText('표 붙여넣기 고지서 분석', { exact: false })).toBeVisible()
+})
+
+test('manual bill multi-cell draft restores before apply', async ({ page }) => {
+  await clearBrowserStorage(page)
+  await openDesktopView(page, '고지서 입력')
+
+  await page.getByRole('tab', { name: '직접 입력' }).click()
+  await page.getByLabel('마지막 청구월').fill('2026-07')
+  await page.getByRole('button', { name: '최근 12개월 입력행 생성' }).click()
+  await page.getByLabel('2026-07 사용량(kWh)').evaluate((input, matrix) => {
+    const transfer = new DataTransfer()
+    transfer.setData('text/plain', matrix)
+    input.dispatchEvent(
+      new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: transfer,
+      }),
+    )
+  }, manualBillMatrix)
+
+  await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
+  await expect
+    .poll(() =>
+      page.evaluate((pointerKey) => localStorage.getItem(pointerKey), billDraftPointerKey),
+    )
+    .not.toBeNull()
+
+  await page.reload()
+  await openDesktopView(page, '고지서 입력')
+  await page.getByRole('tab', { name: '직접 입력' }).click()
+
+  await expect(page.getByText('이전 입력 초안을 복원했습니다.')).toBeVisible()
+  await expect(page.getByLabel('2026-07 사용량(kWh)')).toHaveValue('56250')
+  await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
+  await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
+
+  await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
+  await expect(page.getByText('고지서: 직접 입력', { exact: true })).toBeVisible()
+  await expect(page.getByText('직접 입력 고지서 분석', { exact: false })).toBeVisible()
+})
+
+test('usage guide copies prompt and downloads an exact BOM CSV template', async ({
+  context,
+  page,
+}, testInfo) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await clearBrowserStorage(page)
+  await openDesktopView(page, '사용 안내')
+
+  await page.getByRole('button', { name: 'GPT 변환 프롬프트 복사' }).click()
+  await expect(page.getByRole('status')).toContainText('프롬프트를 복사했습니다.')
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain('원본에 없는 값은 계산하거나 추측하지 마세요.')
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '표준 CSV 양식 다운로드' }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('el-bill-import.csv')
+  const downloadPath = testInfo.outputPath('el-bill-import.csv')
+  await download.saveAs(downloadPath)
+  const bytes = await readFile(downloadPath)
+
+  expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
+  expect(bytes.subarray(3).toString('utf8').split(/\r?\n/, 1)[0]).toBe(
+    standardBillCsvHeader,
+  )
+})
+
+test('expired bill draft is physically removed after reload', async ({ page }) => {
+  await clearBrowserStorage(page)
+  await openDesktopView(page, '고지서 입력')
+  await page.getByRole('tab', { name: '직접 입력' }).click()
+  await page.getByRole('button', { name: '최근 12개월 입력행 생성' }).click()
+
+  const draftKey = await expect
+    .poll(() =>
+      page.evaluate((pointerKey) => {
+        const pointerRaw = localStorage.getItem(pointerKey)
+        if (!pointerRaw) return null
+        const pointer = JSON.parse(pointerRaw) as {
+          sessionId: string
+          generationId?: string
+        }
+        return Array.from({ length: localStorage.length }, (_, index) =>
+          localStorage.key(index),
+        ).find(
+          (key) =>
+            key?.startsWith(
+              `el-bill:bill-entry-draft:v1:${encodeURIComponent(pointer.sessionId)}`,
+            ) && (!pointer.generationId || key.endsWith(encodeURIComponent(pointer.generationId))),
+        ) ?? null
+      }, billDraftPointerKey),
+    )
+    .not.toBeNull()
+    .then(() =>
+      page.evaluate((pointerKey) => {
+        const pointer = JSON.parse(localStorage.getItem(pointerKey) ?? 'null') as {
+          sessionId: string
+          generationId?: string
+        }
+        return Array.from({ length: localStorage.length }, (_, index) =>
+          localStorage.key(index),
+        ).find(
+          (key) =>
+            key?.startsWith(
+              `el-bill:bill-entry-draft:v1:${encodeURIComponent(pointer.sessionId)}`,
+            ) && (!pointer.generationId || key.endsWith(encodeURIComponent(pointer.generationId))),
+        )!
+      }, billDraftPointerKey),
+    )
+
+  await page.evaluate((key) => {
+    const draft = JSON.parse(localStorage.getItem(key) ?? 'null') as {
+      createdAt: string
+      expiresAt: string
+    }
+    const expiresAt = Date.now() - 60_000
+    draft.createdAt = new Date(expiresAt - 60 * 60 * 1000).toISOString()
+    draft.expiresAt = new Date(expiresAt).toISOString()
+    localStorage.setItem(key, JSON.stringify(draft))
+  }, draftKey)
+
+  await page.reload()
+  await openDesktopView(page, '고지서 입력')
+  await page.getByRole('tab', { name: '직접 입력' }).click()
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ key, pointerKey }) => ({
+          draft: localStorage.getItem(key),
+          pointer: localStorage.getItem(pointerKey),
+        }),
+        { key: draftKey, pointerKey: billDraftPointerKey },
+      ),
+    )
+    .toEqual({ draft: null, pointer: null })
+})
+
+test('mobile personal input tabs and guide navigation do not overlap', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await clearBrowserStorage(page)
+
+  await page.getByRole('button', { name: '주요 메뉴 열기' }).click()
+  await page.locator('.sidebar-nav').getByRole('button', {
+    name: '고지서 입력',
+    exact: true,
+  }).click()
+
+  const inputTabs = page.getByRole('tablist', { name: '고지서 입력 방식' })
+  const fileTab = inputTabs.getByRole('tab', { name: '파일 업로드' })
+  const pasteTab = inputTabs.getByRole('tab', { name: '표 붙여넣기' })
+  const manualTab = inputTabs.getByRole('tab', { name: '직접 입력' })
+  await assertNoHorizontalOverlap(fileTab, pasteTab)
+  await assertNoHorizontalOverlap(pasteTab, manualTab)
+
+  await pasteTab.click()
+  await expect(page.getByRole('tabpanel', { name: '표 붙여넣기' })).toBeVisible()
+  await manualTab.click()
+  await expect(page.getByRole('tabpanel', { name: '직접 입력' })).toBeVisible()
+  await fileTab.click()
+  await expect(page.getByRole('tabpanel', { name: '파일 업로드' })).toBeVisible()
+  await manualTab.click()
+  await page.getByRole('button', { name: '입력 안내' }).click()
+
+  const manualGuideHeading = page.getByRole('heading', {
+    name: '최근 12개월 직접 입력',
+  })
+  await expect(manualGuideHeading).toBeFocused()
+  const guideSelect = page.getByLabel('안내 항목 선택')
+  const guideMove = page.getByRole('button', { name: '이동' })
+  await assertNoHorizontalOverlap(guideSelect, guideMove)
+  await guideSelect.selectOption('gpt-csv')
+  await guideMove.click()
+  await expect(page.getByRole('heading', { name: 'GPT로 CSV 변환' })).toBeFocused()
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    .toBe(true)
 })
