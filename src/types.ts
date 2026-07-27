@@ -25,7 +25,7 @@ export interface CalculationSettings {
 
 export type DataConfidence = '데이터 충분' | '보통' | '낮음'
 
-export type BillDataOrigin = 'sample' | 'uploaded'
+export type BillDataOrigin = 'sample' | 'uploaded' | 'pasted' | 'manual'
 
 export type PowerPlannerDataOrigin = 'none' | 'sample' | 'uploaded'
 

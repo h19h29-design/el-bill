@@ -13,6 +13,7 @@ import {
 } from './data/sampleBills'
 import type {
   CalculationSettings,
+  BillDataOrigin,
   DataProvenance,
   MonthlyBill,
   PeakScenario,
@@ -22,6 +23,7 @@ import type {
 } from './types'
 import type { PowerPlannerDataSource } from './types'
 import { sortBillsChronologically } from './lib/calculations'
+import { isUserBillOrigin } from './lib/dataProvenance'
 import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import { defaultCalculationSettings } from './lib/calculationSettings'
@@ -390,7 +392,7 @@ function App() {
         ratePlans,
         scenario,
         powerPlannerDataSource,
-        billsAreUserUploaded: dataProvenance.bills === 'uploaded',
+        billsAreUserUploaded: isUserBillOrigin(dataProvenance.bills),
         calculationSettings,
       }),
     [
@@ -592,12 +594,15 @@ function App() {
     return true
   }
 
-  const applyBillsAndOpenDiagnosis = async (nextBills: MonthlyBill[]) => {
+  const applyBillsAndOpenDiagnosis = async (
+    nextBills: MonthlyBill[],
+    origin: Exclude<BillDataOrigin, 'sample'>,
+  ): Promise<boolean> => {
     if (!(await startUploadSession((latest) => ({
       bills: nextBills,
       provenance: {
         ...latest.provenance,
-        bills: 'uploaded',
+        bills: origin,
       },
     })))) {
       return false
@@ -780,7 +785,9 @@ function App() {
                   bills={bills}
                   profile={profile}
                   ratePlans={ratePlans}
-                  onBillsChange={applyBillsAndOpenDiagnosis}
+                  onBillsChange={(nextBills) =>
+                    applyBillsAndOpenDiagnosis(nextBills, 'uploaded')
+                  }
                 />
               )}
               {activeView === 'powerPlanner' && (

@@ -84,6 +84,24 @@ const storeCompleteLegacyUserData = () => {
 }
 
 describe('locked session-scoped snapshots', () => {
+  it.each(['pasted', 'manual'] as const)(
+    'round-trips %s bill provenance in an active snapshot',
+    async (bills) => {
+      const sessionId = `${bills}-provenance`
+      expect(
+        (
+          await startNewStorageSnapshot(
+            makeData({ bills, powerPlanner: 'none' }),
+            now,
+            sessionId,
+          )
+        ).ok,
+      ).toBe(true)
+
+      expect(readStorageSnapshot(now)?.data.provenance.bills).toBe(bills)
+    },
+  )
+
   it('restores custom calculation settings without changing the session expiry', async () => {
     const now = Date.parse('2026-07-26T00:00:00.000Z')
     const calculationSettings = {

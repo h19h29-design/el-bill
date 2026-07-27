@@ -194,7 +194,10 @@ const isDataProvenance = (value: unknown): value is DataProvenance => {
   if (!value || typeof value !== 'object') return false
   const provenance = value as Record<string, unknown>
   return (
-    (provenance.bills === 'sample' || provenance.bills === 'uploaded') &&
+    (provenance.bills === 'sample' ||
+      provenance.bills === 'uploaded' ||
+      provenance.bills === 'pasted' ||
+      provenance.bills === 'manual') &&
     (provenance.powerPlanner === 'none' ||
       provenance.powerPlanner === 'sample' ||
       provenance.powerPlanner === 'uploaded')

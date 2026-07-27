@@ -34,6 +34,7 @@ import {
   groupBillsForCharts,
 } from '../../lib/calculations'
 import { getPeakRiskLevel } from '../../lib/peak'
+import { getBillOriginLabel } from '../../lib/dataProvenance'
 
 interface DashboardProps {
   bills: MonthlyBill[]
@@ -114,11 +115,7 @@ export function Dashboard({
           </div>
           <span>자동진단 상태</span>
           <strong>
-            {dataProvenance.bills === 'sample'
-              ? '시연 샘플'
-              : diagnosis.completed
-                ? '분석 완료'
-                : '자료 필요'}
+            {getBillOriginLabel(dataProvenance.bills)}
           </strong>
           <small>
             {dataProvenance.bills === 'sample'

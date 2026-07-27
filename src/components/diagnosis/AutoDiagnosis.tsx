@@ -12,6 +12,7 @@ import type { AutoDiagnosisResult, DataProvenance, ViewKey } from '../../types'
 import { formatWon } from '../../lib/calculations'
 import { getCalculationModeLabel } from '../../lib/calculationSettings'
 import { rateChangeCaution } from '../../lib/documentTemplates'
+import { getBillOriginLabel } from '../../lib/dataProvenance'
 import { PlanCandidateTable } from './PlanCandidateTable'
 
 interface AutoDiagnosisProps {
@@ -106,7 +107,7 @@ export function AutoDiagnosis({
       <section className="diagnosis-hero">
         <div>
           <span className="flow-label">
-            {dataProvenance.bills === 'sample' ? '시연 샘플 고지서 분석' : '사용자 고지서 분석'}
+            {getBillOriginLabel(dataProvenance.bills)} 고지서 분석
             {' · '}
             {dataProvenance.powerPlanner === 'none'
               ? '파워플래너 미사용'

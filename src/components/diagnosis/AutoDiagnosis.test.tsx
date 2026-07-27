@@ -49,6 +49,29 @@ describe('automatic diagnosis period integrity', () => {
     expect(screen.getByText(/기후환경 12원\/kWh/)).toBeTruthy()
   })
 
+  it('shows the pasted bill provenance label', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+      billsAreUserUploaded: true,
+    })
+
+    render(
+      <AutoDiagnosis
+        diagnosis={diagnosis}
+        dataProvenance={{ bills: 'pasted', powerPlanner: 'none' }}
+        onNavigate={() => undefined}
+      />,
+    )
+
+    expect(document.querySelector('.flow-label')?.textContent).toContain(
+      '표 붙여넣기 고지서 분석',
+    )
+  })
+
   it('does not present a zero three-year value when 36 months are unavailable', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills.slice(-12),

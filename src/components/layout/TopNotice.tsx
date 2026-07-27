@@ -1,5 +1,6 @@
 import { Info, RotateCw } from 'lucide-react'
 import type { DataProvenance } from '../../types'
+import { getBillOriginLabel } from '../../lib/dataProvenance'
 
 interface TopNoticeProps {
   expiresAt?: string
@@ -30,7 +31,7 @@ export function TopNotice({
         브라우저 저장 데이터는 24시간 후 자동 삭제
       </span>
       <span className="notice-detail">
-        <span>고지서: {dataProvenance.bills === 'sample' ? '시연 샘플' : '사용자 업로드'}</span>
+        <span>고지서: {getBillOriginLabel(dataProvenance.bills)}</span>
         {' · '}
         <span>
           파워플래너: {

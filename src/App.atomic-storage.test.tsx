@@ -141,7 +141,7 @@ describe('App session-scoped storage integration', () => {
     render(<App />)
 
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
-      '고지서: 사용자 업로드',
+      '고지서: 파일 업로드',
     )
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
       '파워플래너: 사용자 업로드',
@@ -316,7 +316,7 @@ describe('App session-scoped storage integration', () => {
       )
     })
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
-      '고지서: 사용자 업로드',
+      '고지서: 파일 업로드',
     )
 
     expect(await removeStorageSnapshot('active-tab')).toEqual({

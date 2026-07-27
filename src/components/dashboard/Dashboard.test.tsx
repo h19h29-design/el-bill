@@ -43,6 +43,31 @@ describe('dashboard diagnosis consistency', () => {
     expect(screen.getByText('고지서 기반 차액 추정')).toBeTruthy()
   })
 
+  it('shows the distinct manual bill provenance label', () => {
+    const diagnosis = buildAutoDiagnosis({
+      bills: sampleBills,
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+      billsAreUserUploaded: true,
+    })
+
+    render(
+      <Dashboard
+        bills={sampleBills}
+        currentPlan={diagnosis.currentPlan}
+        candidatePlan={diagnosis.recommendedPlan}
+        scenario={defaultScenario}
+        diagnosis={diagnosis}
+        dataProvenance={{ bills: 'manual', powerPlanner: 'none' }}
+        onStartDiagnosis={() => undefined}
+      />,
+    )
+
+    expect(screen.getByText('직접 입력')).toBeTruthy()
+  })
+
   it('shows a period review hold instead of a recommended tariff when billing periods are invalid', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: [...sampleBills, { ...sampleBills.at(-1)!, id: 'duplicate-period' }],
