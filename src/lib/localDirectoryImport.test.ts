@@ -1,10 +1,11 @@
 /* @vitest-environment jsdom */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import {
   chooseNewestSupportedFile,
   selectNewestSupportedFile,
   supportsDirectoryPicker,
+  type DirectoryImportResult,
 } from './localDirectoryImport'
 
 type DirectoryEntry = {
@@ -39,6 +40,13 @@ afterEach(() => {
 })
 
 describe('local directory import', () => {
+  it('keeps the documented failure result union unchanged', () => {
+    expectTypeOf<Exclude<DirectoryImportResult, { ok: true }>>().toEqualTypeOf<{
+      ok: false
+      reason: 'unsupported' | 'cancelled' | 'no-supported-file' | 'read-error'
+    }>()
+  })
+
   it('returns the newest valid top-level bill export, breaking timestamp ties by filename', async () => {
     const newest = file('a-newest.csv', 1_740_000_000_000, 'year,month\n2026,7')
     const result = await selectNewestSupportedFile(directory([
@@ -104,13 +112,13 @@ describe('local directory import', () => {
     })
   })
 
-  it('reports picker permission denial separately from cancellation', async () => {
+  it('reports picker permission denial as a read error, not cancellation', async () => {
     ;(globalThis as { showDirectoryPicker?: () => Promise<never> }).showDirectoryPicker =
       vi.fn().mockRejectedValue(new DOMException('Permission denied', 'NotAllowedError'))
 
     await expect(chooseNewestSupportedFile()).resolves.toEqual({
       ok: false,
-      reason: 'permission-denied',
+      reason: 'read-error',
     })
   })
 

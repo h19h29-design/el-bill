@@ -142,7 +142,7 @@ describe('FileBillInput', () => {
     [
       'permission denial',
       () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError')),
-      '다운로드 폴더 접근 권한이 허용되지 않았습니다. 일반 파일 선택으로 다시 시도해 주세요.',
+      '다운로드 폴더의 파일을 읽지 못했습니다. 브라우저의 폴더 접근 권한을 확인한 뒤 일반 파일 선택으로 다시 시도해 주세요.',
     ],
     [
       'no supported file',
@@ -166,7 +166,7 @@ describe('FileBillInput', () => {
           },
         },
       ])),
-      '다운로드 폴더의 파일을 읽지 못했습니다. 일반 파일 선택으로 다시 시도해 주세요.',
+      '다운로드 폴더의 파일을 읽지 못했습니다. 브라우저의 폴더 접근 권한을 확인한 뒤 일반 파일 선택으로 다시 시도해 주세요.',
     ],
   ])('preserves an existing candidate after directory %s', async (_label, pickerResult, expectedMessage) => {
     const onCandidateChange = vi.fn()

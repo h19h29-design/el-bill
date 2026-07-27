@@ -5,10 +5,7 @@ export const supportsDirectoryPicker = () =>
 
 export type DirectoryImportResult =
   | { ok: true; file: File }
-  | {
-    ok: false
-    reason: 'unsupported' | 'cancelled' | 'permission-denied' | 'no-supported-file' | 'read-error'
-  }
+  | { ok: false; reason: 'unsupported' | 'cancelled' | 'no-supported-file' | 'read-error' }
 
 const hasSupportedExtension = (name: string) => /\.(xlsx|xls|csv)$/i.test(name)
 
@@ -65,9 +62,6 @@ export const selectNewestSupportedFile = async (
 const isPickerCancellation = (error: unknown) =>
   error instanceof DOMException && error.name === 'AbortError'
 
-const isPickerPermissionDenial = (error: unknown) =>
-  error instanceof DOMException && error.name === 'NotAllowedError'
-
 export const chooseNewestSupportedFile = async (): Promise<DirectoryImportResult> => {
   if (!supportsDirectoryPicker()) return { ok: false, reason: 'unsupported' }
 
@@ -78,7 +72,6 @@ export const chooseNewestSupportedFile = async (): Promise<DirectoryImportResult
       : { ok: false, reason: 'unsupported' }
   } catch (error) {
     if (isPickerCancellation(error)) return { ok: false, reason: 'cancelled' }
-    if (isPickerPermissionDenial(error)) return { ok: false, reason: 'permission-denied' }
     return { ok: false, reason: 'read-error' }
   }
 }
