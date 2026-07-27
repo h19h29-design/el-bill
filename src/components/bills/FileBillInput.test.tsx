@@ -44,6 +44,16 @@ const directoryWith = (file: File) => ({
   },
 })
 
+const directoryWithEntries = (entries: Array<{
+  kind: 'file' | 'directory'
+  name: string
+  getFile?: () => Promise<File>
+}>) => ({
+  values: async function* () {
+    yield* entries
+  },
+})
+
 afterEach(() => {
   cleanup()
   delete (globalThis as { showDirectoryPicker?: unknown }).showDirectoryPicker
@@ -126,6 +136,80 @@ describe('FileBillInput', () => {
     await waitFor(() => {
       expect(container.querySelector('.status-line')).toBeNull()
     })
+  })
+
+  it.each([
+    [
+      'permission denial',
+      () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError')),
+      '다운로드 폴더 접근 권한이 허용되지 않았습니다. 일반 파일 선택으로 다시 시도해 주세요.',
+    ],
+    [
+      'no supported file',
+      () => Promise.resolve(directoryWithEntries([
+        {
+          kind: 'file',
+          name: 'notes.txt',
+          getFile: async () => new File(['notes'], 'notes.txt'),
+        },
+      ])),
+      '다운로드 폴더에서 분석할 수 있는 XLSX, CSV, 또는 파워플래너 HTML XLS 파일을 찾지 못했습니다.',
+    ],
+    [
+      'directory read error',
+      () => Promise.resolve(directoryWithEntries([
+        {
+          kind: 'file',
+          name: 'bill.csv',
+          getFile: async () => {
+            throw new DOMException('Permission denied', 'NotAllowedError')
+          },
+        },
+      ])),
+      '다운로드 폴더의 파일을 읽지 못했습니다. 일반 파일 선택으로 다시 시도해 주세요.',
+    ],
+  ])('preserves an existing candidate after directory %s', async (_label, pickerResult, expectedMessage) => {
+    const onCandidateChange = vi.fn()
+    ;(globalThis as {
+      showDirectoryPicker?: () => Promise<unknown>
+    }).showDirectoryPicker = vi.fn().mockImplementation(pickerResult)
+
+    const { container, getByRole, getByText } = render(
+      <FileBillInput
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onCandidateChange={onCandidateChange}
+      />,
+    )
+
+    fireEvent.change(container.querySelector('input[accept=".csv"]')!, {
+      target: {
+        files: [
+          new File(
+            ['연도,월,사용량,총 전기요금\n2026,7,42000,6420000'],
+            'existing.csv',
+            { type: 'text/csv' },
+          ),
+        ],
+      },
+    })
+
+    await waitFor(() => {
+      expect(onCandidateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        origin: 'uploaded',
+        sourceLabel: 'existing.csv',
+      }))
+    })
+
+    fireEvent.click(getByRole('button', { name: '다운로드 폴더에서 최신 파일 찾기' }))
+
+    await waitFor(() => {
+      expect(getByText(expectedMessage)).toBeTruthy()
+    })
+    expect(onCandidateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      origin: 'uploaded',
+      sourceLabel: 'existing.csv',
+    }))
   })
 
   it('emits uploaded candidates from CSV files', async () => {

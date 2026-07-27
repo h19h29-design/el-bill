@@ -79,6 +79,20 @@ describe('local directory import', () => {
     expect(result).toEqual({ ok: false, reason: 'no-supported-file' })
   })
 
+  it('ignores unreadable unsupported file handles before a valid bill file', async () => {
+    const unreadableNotes = vi.fn().mockRejectedValue(
+      new DOMException('Permission denied', 'NotAllowedError'),
+    )
+    const valid = file('bill.CSV', 1_740_000_000_000, 'year,month\n2026,7')
+    const result = await selectNewestSupportedFile(directory([
+      { kind: 'file', name: 'notes.TxT', getFile: unreadableNotes },
+      fileEntry(valid),
+    ]) as never)
+
+    expect(result).toEqual({ ok: true, file: valid })
+    expect(unreadableNotes).not.toHaveBeenCalled()
+  })
+
   it('reports directory picker cancellation without treating it as an import error', async () => {
     ;(globalThis as { showDirectoryPicker?: () => Promise<never> }).showDirectoryPicker =
       vi.fn().mockRejectedValue(new DOMException('The user aborted a request.', 'AbortError'))
@@ -87,6 +101,60 @@ describe('local directory import', () => {
     await expect(chooseNewestSupportedFile()).resolves.toEqual({
       ok: false,
       reason: 'cancelled',
+    })
+  })
+
+  it('reports picker permission denial separately from cancellation', async () => {
+    ;(globalThis as { showDirectoryPicker?: () => Promise<never> }).showDirectoryPicker =
+      vi.fn().mockRejectedValue(new DOMException('Permission denied', 'NotAllowedError'))
+
+    await expect(chooseNewestSupportedFile()).resolves.toEqual({
+      ok: false,
+      reason: 'permission-denied',
+    })
+  })
+
+  it('reports no supported file from a picker-selected directory', async () => {
+    ;(globalThis as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker =
+      vi.fn().mockResolvedValue(directory([
+        fileEntry(file('notes.txt', 1_740_000_000_000, 'notes')),
+      ]))
+
+    await expect(chooseNewestSupportedFile()).resolves.toEqual({
+      ok: false,
+      reason: 'no-supported-file',
+    })
+  })
+
+  it('reports a supported unreadable bill file as a read error', async () => {
+    const result = await selectNewestSupportedFile(directory([
+      {
+        kind: 'file',
+        name: 'BILL.CSV',
+        getFile: async () => {
+          throw new DOMException('Permission denied', 'NotAllowedError')
+        },
+      },
+    ]) as never)
+
+    expect(result).toEqual({ ok: false, reason: 'read-error' })
+  })
+
+  it('reports picker directory read errors', async () => {
+    ;(globalThis as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker =
+      vi.fn().mockResolvedValue(directory([
+        {
+          kind: 'file',
+          name: 'bill.csv',
+          getFile: async () => {
+            throw new DOMException('Permission denied', 'NotAllowedError')
+          },
+        },
+      ]))
+
+    await expect(chooseNewestSupportedFile()).resolves.toEqual({
+      ok: false,
+      reason: 'read-error',
     })
   })
 

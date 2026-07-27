@@ -156,9 +156,11 @@ export function FileBillInput({
     }
     if (result.reason === 'cancelled' || result.reason === 'unsupported') return
     setMessage(
-      result.reason === 'no-supported-file'
-        ? '다운로드 폴더에서 분석할 수 있는 XLSX, CSV, 또는 파워플래너 HTML XLS 파일을 찾지 못했습니다.'
-        : '다운로드 폴더의 파일을 읽지 못했습니다. 일반 파일 선택으로 다시 시도해 주세요.',
+      result.reason === 'permission-denied'
+        ? '다운로드 폴더 접근 권한이 허용되지 않았습니다. 일반 파일 선택으로 다시 시도해 주세요.'
+        : result.reason === 'no-supported-file'
+          ? '다운로드 폴더에서 분석할 수 있는 XLSX, CSV, 또는 파워플래너 HTML XLS 파일을 찾지 못했습니다.'
+          : '다운로드 폴더의 파일을 읽지 못했습니다. 일반 파일 선택으로 다시 시도해 주세요.',
     )
   }
 

@@ -5,7 +5,12 @@ export const supportsDirectoryPicker = () =>
 
 export type DirectoryImportResult =
   | { ok: true; file: File }
-  | { ok: false; reason: 'unsupported' | 'cancelled' | 'no-supported-file' | 'read-error' }
+  | {
+    ok: false
+    reason: 'unsupported' | 'cancelled' | 'permission-denied' | 'no-supported-file' | 'read-error'
+  }
+
+const hasSupportedExtension = (name: string) => /\.(xlsx|xls|csv)$/i.test(name)
 
 const hasXlsxSignature = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer, 0, 4)
@@ -42,7 +47,7 @@ export const selectNewestSupportedFile = async (
 
   try {
     for await (const handle of directory.values()) {
-      if (handle.kind !== 'file') continue
+      if (handle.kind !== 'file' || !hasSupportedExtension(handle.name)) continue
       const file = await handle.getFile()
       if (validateUploadFile(file) || !await hasSupportedContents(file)) continue
       candidates.push(file)
@@ -58,8 +63,10 @@ export const selectNewestSupportedFile = async (
 }
 
 const isPickerCancellation = (error: unknown) =>
-  error instanceof DOMException &&
-  (error.name === 'AbortError' || error.name === 'NotAllowedError')
+  error instanceof DOMException && error.name === 'AbortError'
+
+const isPickerPermissionDenial = (error: unknown) =>
+  error instanceof DOMException && error.name === 'NotAllowedError'
 
 export const chooseNewestSupportedFile = async (): Promise<DirectoryImportResult> => {
   if (!supportsDirectoryPicker()) return { ok: false, reason: 'unsupported' }
@@ -70,8 +77,8 @@ export const chooseNewestSupportedFile = async (): Promise<DirectoryImportResult
       ? selectNewestSupportedFile(directory)
       : { ok: false, reason: 'unsupported' }
   } catch (error) {
-    return isPickerCancellation(error)
-      ? { ok: false, reason: 'cancelled' }
-      : { ok: false, reason: 'read-error' }
+    if (isPickerCancellation(error)) return { ok: false, reason: 'cancelled' }
+    if (isPickerPermissionDenial(error)) return { ok: false, reason: 'permission-denied' }
+    return { ok: false, reason: 'read-error' }
   }
 }
