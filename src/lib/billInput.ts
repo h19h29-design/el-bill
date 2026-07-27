@@ -80,6 +80,8 @@ const mappingLabels = {
 } as const
 
 const requiredDraftFields = ['usageKwh', 'totalBillWon'] as const
+const maxManualBillRows = 36
+const rowLimitMessage = '고지서 입력은 최대 36행까지만 가능합니다.'
 
 const optionalNumericFields = [
   'maxDemandKw',
@@ -177,6 +179,7 @@ export const parsePastedBillSheet = (text: string): ParsedSheet => {
     text,
     firstNonEmptyLine.includes('\t') ? '\t' : ',',
   )
+  if (matrix.length - 1 > maxManualBillRows) throw new Error(rowLimitMessage)
   const headers = (matrix[0] ?? []).map((header, index) =>
     (index === 0 ? header.replace(/^\uFEFF/, '') : header).trim(),
   )
@@ -223,9 +226,21 @@ export const validateManualBillRows = (
   rows: ManualBillDraftRow[],
   context?: BillImportContext,
 ): BillInputValidation => {
+  if (rows.length > maxManualBillRows) {
+    return {
+      bills: [],
+      issues: [{
+        rowId: rows[maxManualBillRows]?.id ?? '',
+        field: 'period',
+        message: rowLimitMessage,
+      }],
+    }
+  }
+
   const issues: BillInputIssue[] = []
   const records: Record<string, unknown>[] = []
   const validRows: ManualBillDraftRow[] = []
+  const rowsByPeriod = new Map<string, ManualBillDraftRow[]>()
 
   for (const row of rows) {
     const period = parseYearMonth(trim(row.yearMonth))
@@ -233,6 +248,11 @@ export const validateManualBillRows = (
     if (!period) {
       addIssue(issues, row.id, 'yearMonth', '연월은 YYYY-MM 형식으로 입력해 주세요.')
       valid = false
+    } else {
+      const key = `${period.year}-${period.month}`
+      const periodRows = rowsByPeriod.get(key) ?? []
+      periodRows.push(row)
+      rowsByPeriod.set(key, periodRows)
     }
 
     const values: Partial<Record<ManualBillDraftField, number>> = {}
@@ -281,6 +301,13 @@ export const validateManualBillRows = (
     validRows.push(row)
   }
 
+  rowsByPeriod.forEach((periodRows, period) => {
+    if (periodRows.length < 2) return
+    periodRows.forEach((row) =>
+      addIssue(issues, row.id, 'period', `${period} billing period is duplicated.`),
+    )
+  })
+
   if (issues.length) return { bills: [], issues }
 
   const mapping = {
@@ -308,15 +335,6 @@ export const validateManualBillRows = (
   }
 
   const periodValidation = validateBillPeriods(bills)
-  const rowsByPeriod = new Map<string, ManualBillDraftRow[]>()
-  validRows.forEach((row) => {
-    const period = parseYearMonth(row.yearMonth)
-    if (!period) return
-    const key = `${period.year}-${period.month}`
-    const periodRows = rowsByPeriod.get(key) ?? []
-    periodRows.push(row)
-    rowsByPeriod.set(key, periodRows)
-  })
 
   for (const issue of periodValidation.issues) {
     if (issue.code === 'duplicate-period') {
