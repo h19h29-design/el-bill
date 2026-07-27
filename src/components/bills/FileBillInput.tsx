@@ -14,6 +14,10 @@ import {
   type ParsedSheet,
   type WorkbookParseResult,
 } from '../../lib/excel'
+import {
+  chooseNewestSupportedFile,
+  supportsDirectoryPicker,
+} from '../../lib/localDirectoryImport'
 import { buildBillColumnMapping } from '../../lib/billInput'
 import { validateBillPeriods } from '../../lib/billPeriods'
 import { findExactRatePlan, summarizeWorkbookRecognition } from '../../lib/diagnosis'
@@ -55,6 +59,7 @@ export function FileBillInput({
   const [message, setMessage] = useState('')
   const [showManualMapping, setShowManualMapping] = useState(false)
   const [sourceLabel, setSourceLabel] = useState('')
+  const canChooseDirectory = supportsDirectoryPicker()
 
   const selectedSheet: ParsedSheet | undefined = useMemo(
     () =>
@@ -143,6 +148,20 @@ export function FileBillInput({
     event.currentTarget.querySelector('input')?.click()
   }
 
+  const handleNewestDirectoryFile = async () => {
+    const result = await chooseNewestSupportedFile()
+    if (result.ok) {
+      await handleFile(result.file)
+      return
+    }
+    if (result.reason === 'cancelled' || result.reason === 'unsupported') return
+    setMessage(
+      result.reason === 'no-supported-file'
+        ? '다운로드 폴더에서 분석할 수 있는 XLSX, CSV, 또는 파워플래너 HTML XLS 파일을 찾지 못했습니다.'
+        : '다운로드 폴더의 파일을 읽지 못했습니다. 일반 파일 선택으로 다시 시도해 주세요.',
+    )
+  }
+
   const applyMapping = () => {
     if (!selectedSheet) return
     if (!importContext) {
@@ -213,6 +232,17 @@ export function FileBillInput({
               }}
             />
           </label>
+          {canChooseDirectory ? (
+            <button
+              type="button"
+              className="outline-action"
+              onClick={() => void handleNewestDirectoryFile()}
+            >
+              다운로드 폴더에서 최신 파일 찾기
+            </button>
+          ) : (
+            <p>Chrome 또는 Edge에서는 다운로드 폴더에서 최신 파일을 찾을 수 있습니다.</p>
+          )}
         </div>
         {message && <p className="status-line">{message}</p>}
         {!importContext && (
