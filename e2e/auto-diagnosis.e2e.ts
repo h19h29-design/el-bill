@@ -73,6 +73,22 @@ const clearBrowserStorage = async (page: Page) => {
   await page.reload()
 }
 
+const expectBillDraftStorageRemoved = async (page: Page) => {
+  await expect
+    .poll(() =>
+      page.evaluate((pointerKey) => ({
+        pointer: localStorage.getItem(pointerKey),
+        generations: Array.from(
+          { length: localStorage.length },
+          (_, index) => localStorage.key(index),
+        ).filter((key) =>
+          key?.startsWith('el-bill:bill-entry-draft:v1:'),
+        ),
+      }), billDraftPointerKey),
+    )
+    .toEqual({ pointer: null, generations: [] })
+}
+
 const openDesktopView = async (page: Page, name: string) => {
   await page.locator('.sidebar-nav').getByRole('button', { name, exact: true }).click()
 }
@@ -159,7 +175,7 @@ test('checked-in synthetic XLSX reaches recognized mapping and analysis state', 
   ).toContainText('연도, 월, 사용량, 총 전기요금')
   await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
 
-  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+  await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
   await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
   await expect(page.getByText('파일 업로드 고지서 분석', { exact: false })).toBeVisible()
 })
@@ -179,7 +195,7 @@ test('tariff-full calculation mode persists into diagnosis and documents after r
     .locator('input[type="file"][accept=".xlsx,.xls"]')
     .first()
     .setInputFiles(resolve('e2e/fixtures/monthly-bills.xlsx'))
-  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+  await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
 
   await page.locator('.sidebar-nav').getByRole('button', {
     name: '설정',
@@ -258,7 +274,7 @@ test('two tabs merge different active-session edits under Web Locks', async ({ p
     .locator('input[type="file"][accept=".xlsx,.xls"]')
     .first()
     .setInputFiles(resolve('e2e/fixtures/monthly-bills.xlsx'))
-  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+  await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
   await expect(page.getByText('고지서: 파일 업로드', { exact: true })).toBeVisible()
 
   const secondPage = await page.context().newPage()
@@ -390,7 +406,7 @@ test('two tabs merge concurrent PowerPlanner uploads without losing bill or prof
     .locator('input[type="file"][accept=".xlsx,.xls"]')
     .first()
     .setInputFiles(resolve('e2e/fixtures/monthly-bills.xlsx'))
-  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+  await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
   await page.locator('.sidebar-nav').getByRole('button', {
     name: '학교정보',
     exact: true,
@@ -597,7 +613,12 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await page.reload()
 
   await expectViewHeading('통합 대시보드')
-  await expect(page.getByText('시연 샘플', { exact: true })).toBeVisible()
+  await expect(page.locator('.diagnosis-status-card')).toContainText(
+    '진단 완료',
+  )
+  await expect(page.locator('.diagnosis-status-card')).toContainText(
+    '고지서 출처: 시연 샘플',
+  )
   await page.getByRole('button', { name: '전기요금 자동진단 시작' }).click()
   await expectViewHeading('자동진단')
 
@@ -614,7 +635,7 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
   await expect(page.getByText('아직 적용 전')).toBeVisible()
   await expect(page.getByRole('heading', { name: '현재 적용 데이터' })).toBeVisible()
-  await page.getByRole('button', { name: '이 매핑으로 분석 시작' }).click()
+  await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
   await expectViewHeading('자동진단')
   await expect(page.getByText('파일 업로드 고지서 분석', { exact: false })).toBeVisible()
   await expect(page.getByText('고지서: 파일 업로드', { exact: true })).toBeVisible()
@@ -750,6 +771,16 @@ test('pasted bill rows apply through automatic diagnosis', async ({ page }) => {
   await clearBrowserStorage(page)
   await openDesktopView(page, '고지서 입력')
 
+  await page.getByRole('tab', { name: '직접 입력' }).click()
+  await page.getByRole('button', {
+    name: '최근 12개월 입력행 생성',
+  }).click()
+  await expect
+    .poll(() =>
+      page.evaluate((pointerKey) => localStorage.getItem(pointerKey), billDraftPointerKey),
+    )
+    .not.toBeNull()
+
   await page.getByRole('tab', { name: '표 붙여넣기' }).click()
   await page.getByLabel('붙여넣을 표').fill(pastedBillText)
   await page.getByRole('button', { name: '붙여넣은 표 확인' }).click()
@@ -760,6 +791,7 @@ test('pasted bill rows apply through automatic diagnosis', async ({ page }) => {
   await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
 
   await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
+  await expectBillDraftStorageRemoved(page)
   await expect(page.getByText('고지서: 표 붙여넣기', { exact: true })).toBeVisible()
   await expect(page.getByText('표 붙여넣기 고지서 분석', { exact: false })).toBeVisible()
 })
@@ -852,11 +884,12 @@ test('manual bill multi-cell draft restores before apply', async ({ page }) => {
   await page.getByRole('tab', { name: '직접 입력' }).click()
 
   await expect(page.getByText('이전 입력 초안을 복원했습니다.')).toBeVisible()
-  await expect(page.getByLabel('2026-07 사용량(kWh)')).toHaveValue('56250')
+  await expect(page.getByLabel('2026-07 사용량(kWh)')).toHaveValue('56,250')
   await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
   await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
 
   await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
+  await expectBillDraftStorageRemoved(page)
   await expect(page.getByText('고지서: 직접 입력', { exact: true })).toBeVisible()
   await expect(page.getByText('직접 입력 고지서 분석', { exact: false })).toBeVisible()
 })

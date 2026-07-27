@@ -804,6 +804,22 @@ textarea:focus {
   font-size: 12px;
 }
 
+.paste-header-control {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  color: #315879;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.paste-header-control input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+
 .manual-controls,
 .manual-grid-toolbar,
 .manual-grid-actions {

@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ManualBillDraftRow } from '../../lib/billInput'
+import type {
+  BillDraftRemovalResult,
+  BillEntryDraftIdentity,
+} from '../../lib/billDraftStorage'
 import {
   createManualBillDraftLifecycle,
   type ManualBillDraftPersistence,
 } from './manualBillDraftLifecycle'
 
-const makeRow = (patch: Partial<ManualBillDraftRow> = {}): ManualBillDraftRow => ({
+const makeRow = (
+  patch: Partial<ManualBillDraftRow> = {},
+): ManualBillDraftRow => ({
   id: 'row-1',
   yearMonth: '2026-07',
   usageKwh: '10',
@@ -23,6 +29,13 @@ const makeRow = (patch: Partial<ManualBillDraftRow> = {}): ManualBillDraftRow =>
   ...patch,
 })
 
+const identityFor = (revision: number): BillEntryDraftIdentity => ({
+  sessionId: 'draft-session',
+  revision,
+  generationId: `generation-${revision}`,
+  storageKey: `el-bill:bill-entry-draft:v1:draft-session:generation-${revision}`,
+})
+
 const successfulWrite = (revision = 0) => ({
   ok: true as const,
   draft: {
@@ -33,11 +46,13 @@ const successfulWrite = (revision = 0) => ({
     expiresAt: '2026-07-02T00:00:00.000Z',
     rows: [makeRow()],
   },
+  identity: identityFor(revision),
 })
 
 const createPersistence = (): ManualBillDraftPersistence => ({
+  read: vi.fn(() => null),
   write: vi.fn(async () => successfulWrite()),
-  remove: vi.fn(async () => true),
+  remove: vi.fn(async () => ({ ok: true as const, removed: true })),
 })
 
 const deferred = <Value,>() => {
@@ -51,126 +66,160 @@ const deferred = <Value,>() => {
 afterEach(() => vi.useRealTimers())
 
 describe('manual bill draft lifecycle', () => {
-  it('cancels a pending debounce before removal', async () => {
+  it('flushes a pending debounce and CAS-removes the resulting identity before apply completes', async () => {
     vi.useFakeTimers()
     const persistence = createPersistence()
     const lifecycle = createManualBillDraftLifecycle({ persistence })
 
     lifecycle.schedule([makeRow()])
-    await lifecycle.remove()
+    const prepared = await lifecycle.prepareForApply()
+
+    expect(persistence.write).toHaveBeenCalledWith([makeRow()], undefined)
+    expect(prepared).toEqual({
+      ok: true,
+      token: { generation: 1, identity: identityFor(0) },
+    })
+    if (!prepared.ok) return
+    await expect(lifecycle.completeApply(prepared.token)).resolves.toEqual({
+      ok: true,
+    })
+    expect(persistence.remove).toHaveBeenCalledWith(identityFor(0))
     await vi.runAllTimersAsync()
-
-    expect(persistence.write).not.toHaveBeenCalled()
-    expect(persistence.remove).toHaveBeenCalledTimes(1)
-  })
-
-  it('waits for an in-flight write before removing the draft', async () => {
-    vi.useFakeTimers()
-    const persistence = createPersistence()
-    let finishWrite: ((value: ReturnType<typeof successfulWrite>) => void) | undefined
-    persistence.write = vi.fn(() => new Promise<ReturnType<typeof successfulWrite>>((resolve) => {
-      finishWrite = resolve
-    }))
-    const lifecycle = createManualBillDraftLifecycle({ persistence })
-
-    lifecycle.schedule([makeRow()])
-    await vi.advanceTimersByTimeAsync(300)
-    const removal = lifecycle.remove()
-    expect(persistence.remove).not.toHaveBeenCalled()
-    finishWrite?.(successfulWrite())
-    await removal
-
-    expect(persistence.remove).toHaveBeenCalledTimes(1)
-  })
-
-  it('reports a removal failure without treating a stale write completion as saved', async () => {
-    vi.useFakeTimers()
-    const persistence = createPersistence()
-    const statuses: string[] = []
-    let finishWrite: ((value: ReturnType<typeof successfulWrite>) => void) | undefined
-    persistence.write = vi.fn(() => new Promise<ReturnType<typeof successfulWrite>>((resolve) => {
-      finishWrite = resolve
-    }))
-    persistence.remove = vi.fn(async () => false)
-    const lifecycle = createManualBillDraftLifecycle({
-      persistence,
-      onStatus: (status) => statuses.push(status),
-    })
-
-    lifecycle.schedule([makeRow()])
-    await vi.advanceTimersByTimeAsync(300)
-    const removal = lifecycle.remove()
-    finishWrite?.(successfulWrite())
-
-    await expect(removal).resolves.toEqual({ ok: false })
-    expect(statuses).not.toContain('saved')
-    expect(statuses).toContain('remove-failed')
-  })
-
-  it('converts rejected writes and removals into honest failure statuses', async () => {
-    vi.useFakeTimers()
-    const persistence = createPersistence()
-    const statuses: string[] = []
-    persistence.write = vi.fn(async () => { throw new Error('write failed') })
-    persistence.remove = vi.fn(async () => { throw new Error('remove failed') })
-    const lifecycle = createManualBillDraftLifecycle({
-      persistence,
-      onStatus: (status) => statuses.push(status),
-    })
-
-    lifecycle.schedule([makeRow()])
-    await vi.advanceTimersByTimeAsync(300)
-    await expect(lifecycle.remove()).resolves.toEqual({ ok: false })
-
-    expect(statuses).toContain('write-failed')
-    expect(statuses).toContain('remove-failed')
-  })
-
-  it('writes the latest edit scheduled during a successful removal without reviving the old snapshot', async () => {
-    vi.useFakeTimers()
-    const persistence = createPersistence()
-    const removal = deferred<boolean>()
-    persistence.remove = vi.fn(() => removal.promise)
-    const lifecycle = createManualBillDraftLifecycle({ persistence })
-
-    lifecycle.schedule([makeRow({ usageKwh: '10' })])
-    const remove = lifecycle.remove()
-    await Promise.resolve()
-    lifecycle.schedule([makeRow({ usageKwh: '20' })])
-    removal.resolve(true)
-    await expect(remove).resolves.toEqual({ ok: true })
-    await vi.advanceTimersByTimeAsync(300)
-
     expect(persistence.write).toHaveBeenCalledTimes(1)
-    expect(persistence.write).toHaveBeenLastCalledWith(
+  })
+
+  it('waits for an in-flight write before preparing exact removal', async () => {
+    vi.useFakeTimers()
+    const persistence = createPersistence()
+    const write = deferred<ReturnType<typeof successfulWrite>>()
+    persistence.write = vi.fn(() => write.promise)
+    const lifecycle = createManualBillDraftLifecycle({ persistence })
+
+    lifecycle.schedule([makeRow()])
+    await vi.advanceTimersByTimeAsync(300)
+    const preparation = lifecycle.prepareForApply()
+    expect(persistence.remove).not.toHaveBeenCalled()
+    write.resolve(successfulWrite())
+    const prepared = await preparation
+    expect(prepared).toEqual({
+      ok: true,
+      token: { generation: 1, identity: identityFor(0) },
+    })
+  })
+
+  it('reports rejected writes and removals as honest apply failures', async () => {
+    vi.useFakeTimers()
+    const persistence = createPersistence()
+    const statuses: string[] = []
+    persistence.write = vi.fn(async () => {
+      throw new Error('write failed')
+    })
+    const lifecycle = createManualBillDraftLifecycle({
+      persistence,
+      onStatus: (status) => statuses.push(status),
+    })
+
+    lifecycle.schedule([makeRow()])
+    await expect(lifecycle.prepareForApply()).resolves.toEqual({
+      ok: false,
+      reason: 'write-failed',
+    })
+    expect(statuses).toContain('write-failed')
+
+    const removalFailure = createManualBillDraftLifecycle({
+      initialRevision: 0,
+      initialIdentity: identityFor(0),
+      persistence: {
+        ...createPersistence(),
+        remove: vi.fn(async () => {
+          throw new Error('remove failed')
+        }),
+      },
+      onStatus: (status) => statuses.push(status),
+    })
+    const prepared = await removalFailure.prepareForApply()
+    if (!prepared.ok) return
+    await expect(
+      removalFailure.completeApply(prepared.token),
+    ).resolves.toEqual({ ok: false, reason: 'remove-failed' })
+    expect(statuses).toContain('remove-failed')
+  })
+
+  it('preserves an edit made while CAS removal is in flight and blocks apply completion', async () => {
+    vi.useFakeTimers()
+    const persistence = createPersistence()
+    const removal = deferred<BillDraftRemovalResult>()
+    persistence.remove = vi.fn(() => removal.promise)
+    const lifecycle = createManualBillDraftLifecycle({
+      initialRevision: 0,
+      initialIdentity: identityFor(0),
+      persistence,
+    })
+    const prepared = await lifecycle.prepareForApply()
+    if (!prepared.ok) return
+
+    const completion = lifecycle.completeApply(prepared.token)
+    lifecycle.schedule([makeRow({ usageKwh: '20' })])
+    removal.resolve({ ok: true, removed: true })
+
+    await expect(completion).resolves.toEqual({
+      ok: false,
+      reason: 'changed',
+    })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(persistence.write).toHaveBeenCalledWith(
       [expect.objectContaining({ usageKwh: '20' })],
       undefined,
     )
   })
 
-  it('writes the latest edit after a failed removal with the refreshed revision', async () => {
+  it('keeps a new edit after failed removal and retries from the refreshed identity', async () => {
     vi.useFakeTimers()
     const persistence = createPersistence()
-    const removal = deferred<boolean>()
+    const removal = deferred<BillDraftRemovalResult>()
     persistence.remove = vi.fn(() => removal.promise)
-    persistence.read = vi.fn(() => ({ ...successfulWrite(7).draft, revision: 7 }))
+    persistence.read = vi.fn(() => ({
+      draft: successfulWrite(7).draft,
+      identity: identityFor(7),
+    }))
     const lifecycle = createManualBillDraftLifecycle({
       initialRevision: 3,
+      initialIdentity: identityFor(3),
       persistence,
     })
+    const prepared = await lifecycle.prepareForApply()
+    if (!prepared.ok) return
 
-    lifecycle.schedule([makeRow({ usageKwh: '10' })])
-    const remove = lifecycle.remove()
-    await Promise.resolve()
+    const completion = lifecycle.completeApply(prepared.token)
     lifecycle.schedule([makeRow({ usageKwh: '30' })])
-    removal.resolve(false)
-    await expect(remove).resolves.toEqual({ ok: false })
-    await vi.advanceTimersByTimeAsync(300)
+    removal.resolve({ ok: false, reason: 'storage-error' })
 
-    expect(persistence.write).toHaveBeenCalledTimes(1)
-    expect(persistence.write).toHaveBeenLastCalledWith(
+    await expect(completion).resolves.toEqual({
+      ok: false,
+      reason: 'changed',
+    })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(persistence.write).toHaveBeenCalledWith(
       [expect.objectContaining({ usageKwh: '30' })],
       7,
     )
+  })
+
+  it('cancels a prepared apply without deleting its draft', async () => {
+    vi.useFakeTimers()
+    const persistence = createPersistence()
+    const lifecycle = createManualBillDraftLifecycle({
+      initialRevision: 0,
+      initialIdentity: identityFor(0),
+      persistence,
+    })
+    const prepared = await lifecycle.prepareForApply()
+    if (!prepared.ok) return
+
+    lifecycle.cancelApply(prepared.token)
+    await vi.runAllTimersAsync()
+
+    expect(persistence.remove).not.toHaveBeenCalled()
+    expect(persistence.write).not.toHaveBeenCalled()
   })
 })

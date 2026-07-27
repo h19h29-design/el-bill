@@ -78,6 +78,16 @@ describe('local directory import', () => {
     expect(result).toEqual({ ok: true, file: valid })
   })
 
+  it('skips a shorter-than-signature XLSX candidate and continues to a valid later file', async () => {
+    const valid = file('later.csv', 1_730_000_000_000, 'year,month\n2026,7')
+    const result = await selectNewestSupportedFile(directory([
+      fileEntry(file('short.xlsx', 1_740_000_000_000, new Uint8Array([0x50, 0x4b]))),
+      fileEntry(valid),
+    ]) as never)
+
+    expect(result).toEqual({ ok: true, file: valid })
+  })
+
   it('reports no supported file when every entry is unsupported', async () => {
     const result = await selectNewestSupportedFile(directory([
       fileEntry(file('notes.txt', 1_740_000_000_000, 'notes')),

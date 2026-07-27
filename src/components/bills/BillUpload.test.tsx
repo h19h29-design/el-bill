@@ -34,6 +34,11 @@ const makeDraft = (patch: Record<string, string> = {}) => ({
   ...patch,
 })
 
+const draftStorageKeys = () =>
+  Array.from({ length: localStorage.length }, (_, index) =>
+    localStorage.key(index),
+  ).filter((key) => key?.startsWith('el-bill:bill-entry-draft'))
+
 const toArrayBuffer = (buffer: ArrayBuffer | Uint8Array) =>
   buffer instanceof ArrayBuffer
     ? buffer
@@ -66,6 +71,7 @@ describe('bill upload tariff configuration', () => {
     const user = userEvent.setup()
     const onOpenGuide = vi.fn()
     const onBillsChange = vi.fn(async () => true)
+    const onAnalysisOpen = vi.fn()
     await writeBillEntryDraft([makeDraft()])
 
     render(
@@ -74,6 +80,7 @@ describe('bill upload tariff configuration', () => {
         profile={defaultSchoolProfile}
         ratePlans={defaultRatePlans}
         onBillsChange={onBillsChange}
+        onAnalysisOpen={onAnalysisOpen}
         onOpenGuide={onOpenGuide}
       />,
     )
@@ -96,6 +103,7 @@ describe('bill upload tariff configuration', () => {
       'manual',
     ))
     await waitFor(() => expect(readBillEntryDraft()).toBeNull())
+    expect(onAnalysisOpen).toHaveBeenCalledTimes(1)
   })
 
   it('cancels a pending manual draft write before an apply removes the draft', async () => {
@@ -135,6 +143,7 @@ describe('bill upload tariff configuration', () => {
   it('surfaces a failed manual draft removal after the analysis save succeeds', async () => {
     const user = userEvent.setup()
     const onBillsChange = vi.fn(async () => true)
+    const onAnalysisOpen = vi.fn()
     await writeBillEntryDraft([makeDraft()])
     const nativeRemoveItem = Storage.prototype.removeItem
     const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key) {
@@ -148,6 +157,7 @@ describe('bill upload tariff configuration', () => {
         profile={defaultSchoolProfile}
         ratePlans={defaultRatePlans}
         onBillsChange={onBillsChange}
+        onAnalysisOpen={onAnalysisOpen}
         onOpenGuide={() => undefined}
       />,
     )
@@ -159,7 +169,14 @@ describe('bill upload tariff configuration', () => {
     expect(screen.getByText(/분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다/)).toBeTruthy()
     expect(screen.getByLabelText('2026-07 사용량(kWh)')).toBeTruthy()
     expect(readBillEntryDraft()).not.toBeNull()
+    expect(onAnalysisOpen).not.toHaveBeenCalled()
     removeItemSpy.mockRestore()
+
+    await user.click(
+      screen.getByRole('button', { name: '이 데이터로 분석 시작' }),
+    )
+    await waitFor(() => expect(onAnalysisOpen).toHaveBeenCalledTimes(1))
+    expect(readBillEntryDraft()).toBeNull()
   })
 
   it('retains manual candidate, rows, and draft when the analysis save fails', async () => {
@@ -187,6 +204,54 @@ describe('bill upload tariff configuration', () => {
     expect(screen.getByLabelText('2026-07 사용량(kWh)')).toBeTruthy()
     expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('48,365 kWh')
     expect(screen.getByText(/브라우저 저장소에 자료를 저장하지 못했습니다/)).toBeTruthy()
+  })
+
+  it('preserves edits made while apply persistence is in flight and blocks navigation', async () => {
+    let finishSave: (saved: boolean) => void = () => undefined
+    const onBillsChange = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishSave = resolve
+        }),
+    )
+    const onAnalysisOpen = vi.fn()
+    await writeBillEntryDraft([makeDraft()])
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onAnalysisOpen={onAnalysisOpen}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '직접 입력' }))
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '이 데이터로 분석 시작',
+      }),
+    )
+    await waitFor(() => expect(onBillsChange).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByLabelText('2026-07 사용량(kWh)'), {
+      target: { value: '51,000' },
+    })
+    await act(async () => {
+      finishSave(true)
+    })
+
+    expect(
+      await screen.findByText(/적용 중 입력 내용이 변경되어 이동하지 않았습니다/),
+    ).toBeTruthy()
+    expect(onAnalysisOpen).not.toHaveBeenCalled()
+    expect(
+      (screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement)
+        .value,
+    ).toBe('51,000')
+    await waitFor(() =>
+      expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('51,000'),
+    )
   })
 
   it('uses accessible tabs to switch bill input modes', async () => {
@@ -266,12 +331,17 @@ describe('bill upload tariff configuration', () => {
 
   it('saves uploaded file candidates with the uploaded origin', async () => {
     const onBillsChange = vi.fn(async () => true)
+    await writeBillEntryDraft([makeDraft()])
+    const onAnalysisOpen = vi.fn(() => {
+      expect(draftStorageKeys()).toEqual([])
+    })
     const { container } = render(
       <BillUpload
         bills={sampleBills}
         profile={defaultSchoolProfile}
         ratePlans={defaultRatePlans}
         onBillsChange={onBillsChange}
+        onAnalysisOpen={onAnalysisOpen}
         onOpenGuide={() => undefined}
       />,
     )
@@ -288,8 +358,51 @@ describe('bill upload tariff configuration', () => {
       },
     })
 
-    fireEvent.click(await screen.findByRole('button', { name: '이 매핑으로 분석 시작' }))
-    expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'uploaded')
+    fireEvent.click(await screen.findByRole('button', { name: '이 데이터로 분석 시작' }))
+    await waitFor(() =>
+      expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'uploaded'),
+    )
+    expect(onAnalysisOpen).toHaveBeenCalledTimes(1)
+    expect(draftStorageKeys()).toEqual([])
+  })
+
+  it('CAS-removes a manual draft before navigating after pasted data applies', async () => {
+    const user = userEvent.setup()
+    const onBillsChange = vi.fn(async () => true)
+    await writeBillEntryDraft([makeDraft()])
+    const onAnalysisOpen = vi.fn(() => {
+      expect(draftStorageKeys()).toEqual([])
+    })
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onAnalysisOpen={onAnalysisOpen}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: '표 붙여넣기' }))
+    fireEvent.change(screen.getByLabelText('붙여넣을 표'), {
+      target: {
+        value:
+          '연도\t월\t사용량(kWh)\t총 전기요금(원)\n2026\t7\t42000\t6420000',
+      },
+    })
+    await user.click(screen.getByRole('button', { name: '붙여넣은 표 확인' }))
+    await user.click(
+      await screen.findByRole('button', {
+        name: '이 데이터로 분석 시작',
+      }),
+    )
+
+    await waitFor(() =>
+      expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'pasted'),
+    )
+    expect(onAnalysisOpen).toHaveBeenCalledTimes(1)
+    expect(draftStorageKeys()).toEqual([])
   })
 
   it('saves a synthetic multi-sheet XLSX candidate with the uploaded origin', async () => {
@@ -308,13 +421,15 @@ describe('bill upload tariff configuration', () => {
       target: { files: [await createSyntheticWorkbook()] },
     })
 
-    fireEvent.click(await screen.findByRole('button', { name: '이 매핑으로 분석 시작' }))
-    expect(onBillsChange).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({ year: 2025, month: 11 }),
-        expect.objectContaining({ year: 2026, month: 2 }),
-      ]),
-      'uploaded',
+    fireEvent.click(await screen.findByRole('button', { name: '이 데이터로 분석 시작' }))
+    await waitFor(() =>
+      expect(onBillsChange).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ year: 2025, month: 11 }),
+          expect.objectContaining({ year: 2026, month: 2 }),
+        ]),
+        'uploaded',
+      ),
     )
   })
 
@@ -344,7 +459,7 @@ describe('bill upload tariff configuration', () => {
       },
     })
 
-    const startButton = await screen.findByRole('button', { name: '이 매핑으로 분석 시작' })
+    const startButton = await screen.findByRole('button', { name: '이 데이터로 분석 시작' })
     expect(startButton).toHaveProperty('disabled', true)
   })
 

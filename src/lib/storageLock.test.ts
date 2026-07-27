@@ -74,11 +74,16 @@ const setLocks = (locks: Pick<LockManager, 'request'> | undefined) => {
 }
 
 const installSerialLock = () => {
-  const names: string[] = []
+  const requests: Array<{
+    name: string
+    options: LockOptions | undefined
+  }> = []
   let tail = Promise.resolve<unknown>(undefined)
   setLocks({
     request: ((name: string, ...args: unknown[]) => {
-      names.push(name)
+      const options =
+        args.length > 1 ? (args[0] as LockOptions) : undefined
+      requests.push({ name, options })
       const callback = args.at(-1) as (lock: Lock) => unknown
       const run = tail.then(() =>
         callback({ name, mode: 'exclusive' } as Lock),
@@ -87,7 +92,7 @@ const installSerialLock = () => {
       return run
     }) as LockManager['request'],
   })
-  return names
+  return requests
 }
 
 const installManualLock = () => {
@@ -131,7 +136,7 @@ describe('storage mutation lock and patch protocol', () => {
   })
 
   it('uses one named exclusive Web Lock for every storage mutation', async () => {
-    const lockNames = installSerialLock()
+    const lockRequests = installSerialLock()
     expect(
       (await startNewStorageSnapshot(makeData(), now, 'locked-session')).ok,
     ).toBe(true)
@@ -148,22 +153,20 @@ describe('storage mutation lock and patch protocol', () => {
     await cleanupExpiredStorageSnapshots(now)
     await purgeExpiredStorageSnapshot('missing-session', now)
     await initializeStorageAfterMount(makeData(), now)
-    await writeBillEntryDraft([], undefined, now)
+    const draftWrite = await writeBillEntryDraft([], undefined, now)
     await cleanupExpiredBillEntryDraft(now)
-    await removeBillEntryDraft()
+    if (draftWrite.ok) {
+      await removeBillEntryDraft(draftWrite.identity)
+    }
     await removeStorageSnapshot('locked-session')
 
-    expect(lockNames).toEqual([
-      storageMutationLockName,
-      storageMutationLockName,
-      storageMutationLockName,
-      storageMutationLockName,
-      storageMutationLockName,
-      storageMutationLockName,
-      storageMutationLockName,
-      storageMutationLockName,
-      storageMutationLockName,
-    ])
+    expect(lockRequests).toHaveLength(9)
+    expect(lockRequests).toEqual(
+      lockRequests.map(() => ({
+        name: storageMutationLockName,
+        options: { mode: 'exclusive' },
+      })),
+    )
   })
 
   it('returns a lock error when Web Locks cannot acquire the mutation lock', async () => {
@@ -180,7 +183,7 @@ describe('storage mutation lock and patch protocol', () => {
   })
 
   it('merges two stale-tab patches into the latest snapshot under Web Locks', async () => {
-    const lockNames = installSerialLock()
+    const lockRequests = installSerialLock()
     expect(
       (await startNewStorageSnapshot(makeData(), now, 'patch-session')).ok,
     ).toBe(true)
@@ -221,7 +224,7 @@ describe('storage mutation lock and patch protocol', () => {
         }),
       }),
     )
-    expect(lockNames).toHaveLength(3)
+    expect(lockRequests).toHaveLength(3)
   })
 
   it('rotates a stale bill upload from the latest locked snapshot without overwriting settings', async () => {

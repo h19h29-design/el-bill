@@ -18,6 +18,10 @@ interface BillUploadProps {
     bills: MonthlyBill[],
     origin: Exclude<BillDataOrigin, 'sample'>,
   ) => Promise<boolean>
+  onAnalysisOpen?: () => void
+  onDraftLifecycleChange?: (
+    lifecycle: ManualBillDraftLifecycle | null,
+  ) => void
   onOpenGuide: (sectionId: string) => void
 }
 
@@ -29,6 +33,12 @@ const modes: Array<{ id: BillInputMode; label: string; Icon: typeof FileUp }> = 
 
 const storageFailureMessage =
   '브라우저 저장소에 자료를 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인한 뒤 다시 시도해 주세요.'
+const draftPreparationFailureMessage =
+  '입력 초안을 저장하지 못했습니다. 입력은 유지됩니다. 잠시 후 다시 시도해 주세요.'
+const draftRemovalFailureMessage =
+  '분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다. 입력은 유지됩니다. 다시 시도해 주세요.'
+const draftChangedMessage =
+  '적용 중 입력 내용이 변경되어 이동하지 않았습니다. 변경한 입력을 확인한 뒤 다시 시도해 주세요.'
 
 const emptyCandidates = (): Record<BillInputMode, BillInputCandidate | null> => ({
   file: null,
@@ -47,13 +57,19 @@ export function BillUpload({
   profile,
   ratePlans,
   onBillsChange,
+  onAnalysisOpen,
+  onDraftLifecycleChange,
   onOpenGuide,
 }: BillUploadProps) {
   const [activeMode, setActiveMode] = useState<BillInputMode>('file')
   const [candidates, setCandidates] = useState(emptyCandidates)
   const [messages, setMessages] = useState(emptyMessages)
+  const [confirmingMode, setConfirmingMode] = useState<BillInputMode | null>(
+    null,
+  )
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const manualDraftLifecycleRef = useRef<ManualBillDraftLifecycle | null>(null)
+  const confirmingRef = useRef(false)
   const hasExactRatePlan = useMemo(
     () => Boolean(findExactRatePlan(profile, ratePlans)),
     [profile, ratePlans],
@@ -112,14 +128,40 @@ export function BillUpload({
   const handleManualDraftLifecycleChange = useCallback(
     (lifecycle: ManualBillDraftLifecycle | null) => {
       manualDraftLifecycleRef.current = lifecycle
+      onDraftLifecycleChange?.(lifecycle)
     },
-    [],
+    [onDraftLifecycleChange],
   )
 
   const handleConfirm = async (
     mode: BillInputMode,
     nextCandidate: BillInputCandidate,
   ) => {
+    if (confirmingRef.current) return
+    const lifecycle = manualDraftLifecycleRef.current
+    if (!lifecycle) {
+      setMessages((current) => ({
+        ...current,
+        [mode]: draftPreparationFailureMessage,
+      }))
+      return
+    }
+    confirmingRef.current = true
+    setConfirmingMode(mode)
+    const prepared = await lifecycle.prepareForApply()
+    if (!prepared.ok) {
+      setMessages((current) => ({
+        ...current,
+        [mode]:
+          prepared.reason === 'changed'
+            ? draftChangedMessage
+            : draftPreparationFailureMessage,
+      }))
+      confirmingRef.current = false
+      setConfirmingMode(null)
+      return
+    }
+
     let saved = false
     try {
       saved = await onBillsChange(nextCandidate.bills, nextCandidate.origin)
@@ -127,18 +169,29 @@ export function BillUpload({
       saved = false
     }
     if (!saved) {
+      lifecycle.cancelApply(prepared.token)
       setMessages((current) => ({ ...current, [mode]: storageFailureMessage }))
+      confirmingRef.current = false
+      setConfirmingMode(null)
       return
     }
-    if (mode === 'manual') {
-      const removal = await manualDraftLifecycleRef.current?.remove()
-      if (!removal?.ok) {
-        setMessages((current) => ({
-          ...current,
-          manual: '분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다. 입력은 유지됩니다.',
-        }))
-      }
+
+    const completion = await lifecycle.completeApply(prepared.token)
+    if (!completion.ok) {
+      setMessages((current) => ({
+        ...current,
+        [mode]:
+          completion.reason === 'changed'
+            ? draftChangedMessage
+            : draftRemovalFailureMessage,
+      }))
+      confirmingRef.current = false
+      setConfirmingMode(null)
+      return
     }
+    confirmingRef.current = false
+    setConfirmingMode(null)
+    onAnalysisOpen?.()
   }
 
   return (
@@ -187,7 +240,6 @@ export function BillUpload({
           profile={profile}
           ratePlans={ratePlans}
           onCandidateChange={handleFileCandidateChange}
-          onApplyCandidate={(candidate) => handleConfirm('file', candidate)}
         />
         <BillInputPreview
           candidate={candidates.file}
@@ -195,6 +247,7 @@ export function BillUpload({
           hasExactRatePlan={hasExactRatePlan}
           onConfirm={(candidate) => handleConfirm('file', candidate)}
           message={messages.file}
+          isConfirming={confirmingMode === 'file'}
         />
       </section>
       <section
@@ -215,6 +268,7 @@ export function BillUpload({
           hasExactRatePlan={hasExactRatePlan}
           onConfirm={(candidate) => handleConfirm('paste', candidate)}
           message={messages.paste}
+          isConfirming={confirmingMode === 'paste'}
         />
       </section>
       <section
@@ -236,6 +290,7 @@ export function BillUpload({
           hasExactRatePlan={hasExactRatePlan}
           onConfirm={(candidate) => handleConfirm('manual', candidate)}
           message={messages.manual}
+          isConfirming={confirmingMode === 'manual'}
         />
       </section>
     </div>

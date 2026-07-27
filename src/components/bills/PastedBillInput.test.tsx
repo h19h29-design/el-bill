@@ -44,6 +44,42 @@ describe('PastedBillInput', () => {
     )
   })
 
+  it('defaults to a header row and retains every row in explicit no-header mode', async () => {
+    const user = userEvent.setup()
+    const { onCandidateChange } = renderInput()
+    const headerControl = screen.getByRole('checkbox', {
+      name: '첫 행을 헤더로 사용',
+    }) as HTMLInputElement
+
+    expect(headerControl.checked).toBe(true)
+    await user.click(headerControl)
+    await user.click(screen.getByLabelText('붙여넣을 표'))
+    await user.paste(
+      '2026\t7\t48365\t7138790\n2026\t6\t42000\t6500000',
+    )
+    await user.click(screen.getByRole('button', { name: '붙여넣은 표 확인' }))
+
+    expect(screen.getByText('2행')).not.toBeNull()
+    expect(screen.getByRole('columnheader', { name: '열 1' })).not.toBeNull()
+    expect(screen.getByRole('heading', { name: '컬럼 매핑' })).not.toBeNull()
+    expect((screen.getByLabelText('연도') as HTMLSelectElement).value).toBe('')
+    await user.selectOptions(screen.getByLabelText('연도'), '열 1')
+    await user.selectOptions(screen.getByLabelText('월'), '열 2')
+    await user.selectOptions(screen.getByLabelText('사용량'), '열 3')
+    await user.selectOptions(screen.getByLabelText('총 전기요금'), '열 4')
+
+    expect(screen.getByText('2개월을 인식했습니다.')).not.toBeNull()
+    expect(onCandidateChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        origin: 'pasted',
+        bills: expect.arrayContaining([
+          expect.objectContaining({ year: 2026, month: 7 }),
+          expect.objectContaining({ year: 2026, month: 6 }),
+        ]),
+      }),
+    )
+  })
+
   it('retains pasted text when parsing is rejected by the input limit', async () => {
     const user = userEvent.setup()
     renderInput()
@@ -97,6 +133,40 @@ describe('PastedBillInput', () => {
     expect((screen.getByLabelText('총 전기요금') as HTMLSelectElement).value).toBe('')
     expect(onCandidateChange).toHaveBeenLastCalledWith(null)
     expect(screen.queryByText('1개월을 인식했습니다.')).toBeNull()
+  })
+
+  it('leaves broad and ambiguous optional aliases unmapped', async () => {
+    const user = userEvent.setup()
+    renderInput()
+
+    await user.click(screen.getByLabelText('붙여넣을 표'))
+    await user.paste(
+      '연도\t월\t사용량(kWh)\t총 전기요금(원)\t기본요금 및 부가세\t부가세\t부가세(원)\n2026\t7\t48365\t7138790\t100\t200\t300',
+    )
+    await user.click(screen.getByRole('button', { name: '붙여넣은 표 확인' }))
+    await user.click(screen.getByRole('button', { name: '컬럼 매핑 수정' }))
+
+    expect((screen.getByLabelText('기본요금') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByLabelText('부가세') as HTMLSelectElement).value).toBe('')
+  })
+
+  it('reassigns an explicitly selected source column instead of mapping it twice', async () => {
+    const user = userEvent.setup()
+    const { onCandidateChange } = renderInput()
+
+    await user.click(screen.getByLabelText('붙여넣을 표'))
+    await user.paste(
+      '연도\t월\t사용량(kWh)\t총 전기요금(원)\t부가세(원)\n2026\t7\t48365\t7138790\t713879',
+    )
+    await user.click(screen.getByRole('button', { name: '붙여넣은 표 확인' }))
+    await user.click(screen.getByRole('button', { name: '컬럼 매핑 수정' }))
+    await user.selectOptions(
+      screen.getByLabelText('부가세'),
+      '총 전기요금(원)',
+    )
+
+    expect((screen.getByLabelText('총 전기요금') as HTMLSelectElement).value).toBe('')
+    expect(onCandidateChange).toHaveBeenLastCalledWith(null)
   })
 
   it.each([

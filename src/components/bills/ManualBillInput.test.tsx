@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
@@ -75,18 +75,59 @@ describe('ManualBillInput', () => {
     )
   })
 
-  it('formats numeric cell display values after editing without changing the shared candidate path', async () => {
+  it('formats only the unfocused display while preserving raw text and candidate value', async () => {
+    const user = userEvent.setup()
+    const { onCandidateChange } = renderInput()
+
+    await user.clear(screen.getByLabelText('마지막 청구월'))
+    await user.type(screen.getByLabelText('마지막 청구월'), '2026-07')
+    await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
+    const usage = screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement
+    const total = screen.getByLabelText('2026-07 총 전기요금(원)') as HTMLInputElement
+    await user.type(usage, '48,365 kWh')
+    await user.type(total, '7,138,790원')
+    const candidateBeforeRefocus = onCandidateChange.mock.calls
+      .map(([candidate]) => candidate)
+      .filter(Boolean)
+      .at(-1)
+
+    expect(usage.value).toBe('48,365')
+    await user.click(usage)
+    expect(usage.value).toBe('48,365 kWh')
+    await user.tab()
+    expect(usage.value).toBe('48,365')
+    expect(
+      onCandidateChange.mock.calls
+        .map(([candidate]) => candidate)
+        .filter(Boolean)
+        .at(-1),
+    ).toEqual(candidateBeforeRefocus)
+  })
+
+  it('shows horizontal-scroll guidance and marks a completed valid row accurately', async () => {
     const user = userEvent.setup()
     renderInput()
 
     await user.clear(screen.getByLabelText('마지막 청구월'))
     await user.type(screen.getByLabelText('마지막 청구월'), '2026-07')
     await user.click(screen.getByRole('button', { name: '최근 12개월 입력행 생성' }))
-    const usage = screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement
-    await user.type(usage, '48365')
-    await user.tab()
+    const usage = screen.getByLabelText('2026-07 사용량(kWh)')
+    const row = usage.closest('tr')
+    if (!row) throw new Error('manual row missing')
 
-    expect(usage.value).toBe('48,365')
+    expect(
+      screen.getByText('표를 좌우로 밀어 상세 항목을 확인하세요.'),
+    ).not.toBeNull()
+    expect(within(row).getByText('입력 대기')).not.toBeNull()
+
+    await user.type(usage, '48365')
+    await user.type(
+      screen.getByLabelText('2026-07 총 전기요금(원)'),
+      '7138790',
+    )
+
+    expect(within(row).getByText('입력 완료')).not.toBeNull()
+    expect(within(row).queryByText('입력 대기')).toBeNull()
   })
 
   it('shows detail columns and applies an entered power value to every row', async () => {
@@ -293,11 +334,14 @@ describe('ManualBillInput', () => {
     ])
     renderInput()
 
-    expect((screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement).value).toBe('48,365 kWh')
+    const usage = screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement
+    expect(usage.value).toBe('48,365')
+    fireEvent.focus(usage)
+    expect(usage.value).toBe('48,365 kWh')
     expect(screen.getByText(/이전 입력 초안을 복원했습니다/)).not.toBeNull()
   })
 
-  it('does not restore and physically removes a draft at its fixed 24-hour expiry', async () => {
+  it('does not restore an expired draft or mutate storage outside App maintenance', async () => {
     vi.useFakeTimers()
     const createdAt = Date.parse('2026-07-27T00:00:00.000Z')
     vi.setSystemTime(createdAt)
@@ -315,8 +359,8 @@ describe('ManualBillInput', () => {
     })
 
     expect(screen.queryByLabelText('2026-07 사용량(kWh)')).toBeNull()
-    expect(localStorage.getItem(draftKey)).toBeNull()
-    expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()
+    expect(localStorage.getItem(draftKey)).not.toBeNull()
+    expect(localStorage.getItem(billEntryDraftPointerKey)).not.toBeNull()
   })
 
   it('writes only after the full 300ms debounce interval', async () => {

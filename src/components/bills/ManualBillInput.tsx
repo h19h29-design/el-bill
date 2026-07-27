@@ -3,16 +3,14 @@ import { Trash2 } from 'lucide-react'
 import {
   applyMatrixToDraftRows,
   createManualBillRows,
+  formatManualBillNumericDisplay,
   validateManualBillRows,
   type BillInputIssue,
   type ManualBillDraftField,
   type ManualBillDraftRow,
 } from '../../lib/billInput'
 import { parseDelimitedMatrix } from '../../lib/excel'
-import {
-  cleanupExpiredBillEntryDraft,
-  readBillEntryDraft,
-} from '../../lib/billDraftStorage'
+import { readBillEntryDraftRecord } from '../../lib/billDraftStorage'
 import type { PersonalBillInputProps } from './PastedBillInput'
 import {
   createManualBillDraftLifecycle,
@@ -104,29 +102,19 @@ interface ManualBillInputProps extends PersonalBillInputProps {
 
 export type { ManualBillDraftLifecycle } from './manualBillDraftLifecycle'
 
-const formatNumericDisplay = (value: string) => {
-  const normalized = value
-    .trim()
-    .replace(/[\s,]/g, '')
-    .replace(/(?:kwh|kw|원)$/i, '')
-  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) return value
-  const number = Number(normalized)
-  return Number.isFinite(number)
-    ? number.toLocaleString('ko-KR', { maximumFractionDigits: 12 })
-    : value
-}
-
 export function ManualBillInput({
   importContext,
   onCandidateChange,
   onOpenGuide,
   onDraftLifecycleChange,
 }: ManualBillInputProps) {
-  const [initialDraft] = useState(() => readBillEntryDraft())
+  const [initialDraftRecord] = useState(() => readBillEntryDraftRecord())
+  const initialDraft = initialDraftRecord?.draft
   const [lastYearMonth, setLastYearMonth] = useState(localYearMonth)
   const [rows, setRows] = useState<ManualBillDraftRow[]>(() => initialDraft?.rows ?? [])
   const [touchedRowIds, setTouchedRowIds] = useState<Set<string>>(() => new Set())
   const [showDetails, setShowDetails] = useState(false)
+  const [focusedInputKey, setFocusedInputKey] = useState<string | null>(null)
   const [draftMessage, setDraftMessage] = useState(
     initialDraft ? '이전 입력 초안을 복원했습니다.' : '',
   )
@@ -137,6 +125,7 @@ export function ManualBillInput({
   if (!lifecycleRef.current) {
     lifecycleRef.current = createManualBillDraftLifecycle({
       initialRevision: initialDraft?.revision,
+      initialIdentity: initialDraftRecord?.identity,
       onStatus: (status) => {
         if (status === 'saved') {
           setDraftMessage('입력 초안이 이 브라우저에 최대 24시간 보관됩니다')
@@ -179,10 +168,6 @@ export function ManualBillInput({
   )
 
   useEffect(() => () => draftLifecycle.dispose(), [draftLifecycle])
-
-  useEffect(() => {
-    void cleanupExpiredBillEntryDraft()
-  }, [])
 
   useEffect(() => {
     onDraftLifecycleChange?.(draftLifecycle)
@@ -418,6 +403,9 @@ export function ManualBillInput({
               </ul>
             </section>
           )}
+          <p className="field-hint manual-scroll-hint">
+            표를 좌우로 밀어 상세 항목을 확인하세요.
+          </p>
           <div className="manual-grid-scroll">
             <table className="manual-bill-grid">
               <thead>
@@ -437,25 +425,29 @@ export function ManualBillInput({
                         const baseLabel = fieldLabels[field]
                         const label = row.yearMonth ? `${row.yearMonth} ${baseLabel}` : baseLabel
                         const issueId = cellIssues.length ? `issue-${row.id}-${field}` : undefined
+                        const key = inputKey(row.id, field)
                         return (
                           <td key={field}>
                             <input
                               ref={(element) => {
-                                const key = inputKey(row.id, field)
                                 if (element) inputRefs.current.set(key, element)
                                 else inputRefs.current.delete(key)
                               }}
                               aria-label={label}
                               aria-invalid={cellIssues.length > 0 || undefined}
                               aria-describedby={issueId}
-                              value={row[field]}
+                              value={
+                                numericFields.has(field) &&
+                                focusedInputKey !== key
+                                  ? formatManualBillNumericDisplay(row[field])
+                                  : row[field]
+                              }
                               inputMode={numericFields.has(field) ? 'decimal' : undefined}
                               onChange={(event) => updateCell(row.id, field, event.target.value)}
-                              onBlur={(event) => {
-                                if (numericFields.has(field)) {
-                                  updateCell(row.id, field, formatNumericDisplay(event.target.value))
-                                }
-                              }}
+                              onFocus={() => setFocusedInputKey(key)}
+                              onBlur={() => setFocusedInputKey((current) =>
+                                current === key ? null : current
+                              )}
                               onKeyDown={(event) => handleCellKeyDown(event, rowIndex, field)}
                               onPaste={(event) => handleCellPaste(event, rowIndex, field)}
                             />
@@ -464,7 +456,13 @@ export function ManualBillInput({
                         )
                       })}
                       <td>
-                        {rowIssues.length ? <span className="row-issue">보완 필요</span> : <span className="row-valid">입력 대기</span>}
+                        {rowIssues.length ? (
+                          <span className="row-issue">보완 필요</span>
+                        ) : rowHasContent(row) || touchedRowIds.has(row.id) ? (
+                          <span className="row-valid">입력 완료</span>
+                        ) : (
+                          <span className="row-valid">입력 대기</span>
+                        )}
                       </td>
                       <td>
                         <button

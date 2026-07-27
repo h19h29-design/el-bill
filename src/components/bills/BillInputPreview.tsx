@@ -19,6 +19,7 @@ interface BillInputPreviewProps {
   hasExactRatePlan: boolean
   onConfirm: (candidate: BillInputCandidate) => Promise<void> | void
   message?: string
+  isConfirming?: boolean
 }
 
 const requiredFields = ['연도', '월', '사용량', '총 전기요금']
@@ -43,6 +44,7 @@ export function BillInputPreview({
   hasExactRatePlan,
   onConfirm,
   message,
+  isConfirming = false,
 }: BillInputPreviewProps) {
   const recentBills = useMemo(
     () =>
@@ -127,7 +129,7 @@ export function BillInputPreview({
             <button
               type="button"
               className="primary-button"
-              disabled={cannotConfirm}
+              disabled={cannotConfirm || isConfirming}
               onClick={() => {
                 void onConfirm(candidate)
               }}

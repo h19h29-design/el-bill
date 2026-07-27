@@ -240,6 +240,9 @@ describe('FileBillInput', () => {
         sourceLabel: 'billing.csv',
       }))
     })
+    expect(
+      screen.queryByRole('button', { name: '이 매핑으로 분석 시작' }),
+    ).toBeNull()
   })
 
   it('keeps multi-sheet XLSX recognition and automatic rows aligned', async () => {

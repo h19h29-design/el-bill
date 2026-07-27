@@ -10,9 +10,9 @@ export type DirectoryImportResult =
 const hasSupportedExtension = (name: string) => /\.(xlsx|xls|csv)$/i.test(name)
 
 const hasXlsxSignature = (buffer: ArrayBuffer) => {
+  if (buffer.byteLength < 4) return false
   const bytes = new Uint8Array(buffer, 0, 4)
-  return bytes.length === 4 &&
-    bytes[0] === 0x50 &&
+  return bytes[0] === 0x50 &&
     bytes[1] === 0x4b &&
     bytes[2] === 0x03 &&
     bytes[3] === 0x04

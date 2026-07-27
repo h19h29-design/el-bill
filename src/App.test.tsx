@@ -19,6 +19,11 @@ import {
 } from './data/sampleBills'
 import { samplePowerPlannerDataSource } from './data/samplePowerPlanner'
 import {
+  billEntryDraftPointerKey,
+  readBillEntryDraft,
+  writeBillEntryDraft,
+} from './lib/billDraftStorage'
+import {
   startNewStorageSnapshot,
   storageActivePointerKey,
   storageSnapshotKeyFor,
@@ -54,6 +59,24 @@ const flushStorageTasks = async () => {
   })
 }
 
+const makeBillDraft = () => ({
+  id: 'app-draft-row',
+  yearMonth: '2026-07',
+  usageKwh: '48365',
+  totalBillWon: '7138790',
+  maxDemandKw: '',
+  appliedPowerKw: '',
+  baseChargeWon: '',
+  energyChargeWon: '',
+  powerFactorChargeWon: '',
+  climateChargeWon: '',
+  fuelAdjustmentWon: '',
+  vatWon: '',
+  fundWon: '',
+  note: '',
+})
+const dayMs = 24 * 60 * 60 * 1000
+
 afterEach(() => {
   cleanup()
   localStorage.clear()
@@ -62,6 +85,124 @@ afterEach(() => {
 })
 
 describe('data provenance persistence', () => {
+  it('physically cleans an expired bill-entry draft at App startup', async () => {
+    await writeBillEntryDraft([makeBillDraft()], undefined, 1_000)
+
+    render(<App />)
+
+    await waitFor(() =>
+      expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull(),
+    )
+    expect(readBillEntryDraft()).toBeNull()
+  })
+
+  it('physically cleans an active bill-entry draft at its fixed expiry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    await writeBillEntryDraft([makeBillDraft()], undefined, 1_000)
+
+    render(<App />)
+    await flushStorageTasks()
+    expect(localStorage.getItem(billEntryDraftPointerKey)).not.toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(dayMs + 1)
+    })
+
+    expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()
+  })
+
+  it.each(['focus', 'visibility'] as const)(
+    'cleans an expired bill-entry draft when App regains %s',
+    async (trigger) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(1_000)
+      await writeBillEntryDraft([makeBillDraft()], undefined, 1_000)
+      render(<App />)
+      await flushStorageTasks()
+
+      vi.setSystemTime(1_000 + dayMs + 1)
+      if (trigger === 'focus') {
+        fireEvent.focus(window)
+      } else {
+        Object.defineProperty(document, 'visibilityState', {
+          configurable: true,
+          value: 'visible',
+        })
+        document.dispatchEvent(new Event('visibilitychange'))
+      }
+      await flushStorageTasks()
+
+      expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()
+    },
+  )
+
+  it('surfaces draft cleanup failure and retries it on focus', async () => {
+    await writeBillEntryDraft([makeBillDraft()], undefined, 1_000)
+    const nativeRemoveItem = Storage.prototype.removeItem
+    const removeItem = vi
+      .spyOn(Storage.prototype, 'removeItem')
+      .mockImplementation(function (this: Storage, key) {
+        if (key.startsWith('el-bill:bill-entry-draft')) {
+          throw new DOMException('remove failed', 'UnknownError')
+        }
+        nativeRemoveItem.call(this, key)
+      })
+
+    render(<App />)
+    expect(
+      await screen.findByText(
+        '입력 초안을 정리하지 못했습니다. 입력은 유지됩니다. 잠시 후 자동으로 다시 시도합니다.',
+      ),
+    ).toBeTruthy()
+    expect(localStorage.getItem(billEntryDraftPointerKey)).not.toBeNull()
+
+    removeItem.mockRestore()
+    fireEvent.focus(window)
+
+    await waitFor(() =>
+      expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull(),
+    )
+    expect(
+      screen.queryByText(
+        '입력 초안을 정리하지 못했습니다. 입력은 유지됩니다. 잠시 후 자동으로 다시 시도합니다.',
+      ),
+    ).toBeNull()
+  })
+
+  it('deletes the active bill-entry draft on sample reset', async () => {
+    await writeBillEntryDraft([makeBillDraft()])
+    render(<App />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '시연 샘플로 초기화' }),
+    )
+
+    await waitFor(() =>
+      expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull(),
+    )
+  })
+
+  it('cancels a pending manual draft write on sample reset', async () => {
+    render(<App />)
+    fireEvent.click(
+      screen.getByRole('button', { name: '고지서 입력' }),
+    )
+    fireEvent.click(
+      await screen.findByRole('tab', { name: '직접 입력' }),
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: '최근 12개월 입력행 생성' }),
+    )
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '시연 샘플로 초기화' }),
+    )
+
+    await new Promise((resolve) => window.setTimeout(resolve, 350))
+    expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()
+  })
+
   it('opens the usage guide from the sidebar', async () => {
     render(<App />)
 

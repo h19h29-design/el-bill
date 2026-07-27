@@ -43,7 +43,7 @@ describe('dashboard diagnosis consistency', () => {
     expect(screen.getByText('고지서 기반 차액 추정')).toBeTruthy()
   })
 
-  it('shows the distinct manual bill provenance label', () => {
+  it('shows diagnosis completion and the distinct manual bill provenance label', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills,
       profile: defaultSchoolProfile,
@@ -65,7 +65,8 @@ describe('dashboard diagnosis consistency', () => {
       />,
     )
 
-    expect(screen.getByText('직접 입력')).toBeTruthy()
+    expect(screen.getByText('진단 완료')).toBeTruthy()
+    expect(screen.getByText(/고지서 출처: 직접 입력/)).toBeTruthy()
   })
 
   it('shows a period review hold instead of a recommended tariff when billing periods are invalid', () => {

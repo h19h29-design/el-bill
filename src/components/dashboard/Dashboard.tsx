@@ -114,10 +114,10 @@ export function Dashboard({
             <ClipboardCheck size={22} />
           </div>
           <span>자동진단 상태</span>
-          <strong>
-            {getBillOriginLabel(dataProvenance.bills)}
-          </strong>
+          <strong>{diagnosis.completed ? '진단 완료' : '추가 자료 필요'}</strong>
           <small>
+            고지서 출처: {getBillOriginLabel(dataProvenance.bills)}
+            {' · '}
             {dataProvenance.bills === 'sample'
               ? '실제 자료 업로드 전 예시 결과'
               : diagnosis.dataConfidence}

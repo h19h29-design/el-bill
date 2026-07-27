@@ -18,8 +18,10 @@ import {
   chooseNewestSupportedFile,
   supportsDirectoryPicker,
 } from '../../lib/localDirectoryImport'
-import { buildBillColumnMapping } from '../../lib/billInput'
-import { validateBillPeriods } from '../../lib/billPeriods'
+import {
+  assignBillColumnMapping,
+  buildBillColumnMapping,
+} from '../../lib/billInput'
 import { findExactRatePlan, summarizeWorkbookRecognition } from '../../lib/diagnosis'
 import type { BillInputCandidate } from './BillInputPreview'
 
@@ -27,7 +29,6 @@ interface FileBillInputProps {
   profile: SchoolProfile
   ratePlans: RatePlan[]
   onCandidateChange: (candidate: BillInputCandidate | null) => void
-  onApplyCandidate?: (candidate: BillInputCandidate) => Promise<void> | void
 }
 
 const mappingFields = [
@@ -51,7 +52,6 @@ export function FileBillInput({
   profile,
   ratePlans,
   onCandidateChange,
-  onApplyCandidate,
 }: FileBillInputProps) {
   const [parseResult, setParseResult] = useState<WorkbookParseResult | null>(null)
   const [selectedSheetName, setSelectedSheetName] = useState('')
@@ -88,11 +88,6 @@ export function FileBillInput({
       ? mapRowsToBills(selectedSheet.rows, mapping, importContext)
       : []
   }, [importContext, mapping, parseResult, selectedSheet])
-  const hasPeriodIssues = useMemo(
-    () => validateBillPeriods(pendingBills).issues.length > 0,
-    [pendingBills],
-  )
-
   useEffect(() => {
     onCandidateChange(
       parseResult && pendingBills.length
@@ -269,27 +264,6 @@ export function FileBillInput({
           </div>
           <p className={recognition.canAnalyze ? 'status-line' : 'empty-state'}>{recognition.guidance}</p>
           <div className="recognition-actions">
-            <button
-              type="button"
-              className="primary-button"
-              disabled={
-                !recognition.canAnalyze ||
-                !importContext ||
-                !pendingBills.length ||
-                hasPeriodIssues
-              }
-              onClick={() => {
-                if (pendingBills.length) {
-                  void onApplyCandidate?.({
-                    origin: 'uploaded',
-                    bills: pendingBills,
-                    sourceLabel,
-                  })
-                }
-              }}
-            >
-              이 매핑으로 분석 시작
-            </button>
             <button type="button" className="outline-action" onClick={() => setShowManualMapping(true)}>
               수동 매핑 수정
             </button>
@@ -313,7 +287,16 @@ export function FileBillInput({
             {mappingFields.map(([key, label, required]) => (
               <label key={key}>
                 {label}{required && <span className="required-dot">필수</span>}
-                <select value={mapping[key] ?? ''} onChange={(event) => setMapping((current) => ({ ...current, [key]: event.target.value }))}>
+                <select
+                  value={mapping[key] ?? ''}
+                  onChange={(event) => setMapping((current) =>
+                    assignBillColumnMapping(
+                      current,
+                      key,
+                      event.target.value,
+                    )
+                  )}
+                >
                   <option value="">미사용</option>
                   {selectedSheet.headers.map((header) => <option key={header} value={header}>{header}</option>)}
                 </select>

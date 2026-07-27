@@ -56,6 +56,47 @@ describe('UsageGuide', () => {
 
     await user.click(screen.getByRole('button', { name: '표준 CSV 양식 다운로드' }))
     expect(status.firstElementChild?.getAttribute('data-invocation-id')).not.toBe(firstDownloadInvocation)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    expect(URL.revokeObjectURL).toHaveBeenLastCalledWith('blob:standard-csv')
+  })
+
+  it('reports clipboard failure without announcing a successful copy', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(
+      new DOMException('permission denied', 'NotAllowedError'),
+    )
+    render(<UsageGuide onOpenBills={onOpenBills} />)
+
+    await user.click(screen.getByRole('button', {
+      name: 'GPT 변환 프롬프트 복사',
+    }))
+
+    expect(screen.getByRole('status').textContent).toContain(
+      '프롬프트를 복사하지 못했습니다',
+    )
+    expect(screen.getByRole('status').textContent).not.toContain(
+      '프롬프트를 복사했습니다',
+    )
+  })
+
+  it('revokes the CSV object URL when the synthetic download click throws', async () => {
+    const user = userEvent.setup()
+    vi.mocked(HTMLAnchorElement.prototype.click).mockImplementationOnce(() => {
+      throw new Error('synthetic click failed')
+    })
+    render(<UsageGuide onOpenBills={onOpenBills} />)
+
+    await user.click(screen.getByRole('button', {
+      name: '표준 CSV 양식 다운로드',
+    }))
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:standard-csv')
+    expect(screen.getByRole('status').textContent).toContain(
+      'CSV 양식을 만들지 못했습니다',
+    )
+    expect(screen.getByRole('status').textContent).not.toContain(
+      '다운로드를 시작했습니다',
+    )
   })
 
   it('uses one guide page heading and section headings beneath it', () => {

@@ -174,7 +174,7 @@ describe('App session-scoped storage integration', () => {
     })
     fireEvent.click(
       await screen.findByRole('button', {
-        name: '이 매핑으로 분석 시작',
+        name: '이 데이터로 분석 시작',
       }),
     )
 
@@ -221,7 +221,7 @@ describe('App session-scoped storage integration', () => {
     })
     fireEvent.click(
       await screen.findByRole('button', {
-        name: '이 매핑으로 분석 시작',
+        name: '이 데이터로 분석 시작',
       }),
     )
 

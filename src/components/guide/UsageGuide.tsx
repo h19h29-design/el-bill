@@ -57,17 +57,19 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
   }
 
   const handleDownloadTemplate = () => {
+    let url: string | null = null
     try {
       const blob = new Blob([createStandardBillCsv()], { type: 'text/csv;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
+      url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
       link.download = 'el-bill-import.csv'
       link.click()
-      URL.revokeObjectURL(url)
       announce('표준 CSV 양식 다운로드를 시작했습니다.')
     } catch {
       announce('CSV 양식을 만들지 못했습니다. 브라우저 설정을 확인해 주세요.')
+    } finally {
+      if (url) URL.revokeObjectURL(url)
     }
   }
 

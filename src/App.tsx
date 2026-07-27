@@ -1,4 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { AlertCircle, Building2, CalendarDays, ClipboardCheck } from 'lucide-react'
 import { Sidebar } from './components/layout/Sidebar'
 import { TopNotice } from './components/layout/TopNotice'
@@ -28,6 +36,14 @@ import { buildAutoDiagnosis } from './lib/diagnosis'
 import { buildPeakOperationPlan } from './lib/peakOperations'
 import { defaultCalculationSettings } from './lib/calculationSettings'
 import { normalizeRatePlanIdentityPart } from './lib/domainValidation'
+import {
+  billEntryDraftChangedEventName,
+  billEntryDraftPointerKey,
+  maintainBillEntryDraft,
+  readBillEntryDraftRecord,
+  removeBillEntryDraft,
+} from './lib/billDraftStorage'
+import type { ManualBillDraftLifecycle } from './components/bills/manualBillDraftLifecycle'
 import {
   applyPowerPlannerStorageIntent,
   type PowerPlannerSaveResult,
@@ -75,6 +91,8 @@ const storageLockFallbackMessage =
   '이 브라우저에서는 여러 탭 동시 편집을 안전하게 조정할 수 없습니다. 다른 탭을 닫고 한 탭에서만 사용하세요.'
 const storageOrphanCleanupMessage =
   '시연 샘플로 전환했지만 남은 브라우저 데이터 정리가 지연되고 있습니다. 잠시 후 자동으로 다시 정리합니다.'
+const billDraftCleanupMessage =
+  '입력 초안을 정리하지 못했습니다. 입력은 유지됩니다. 잠시 후 자동으로 다시 시도합니다.'
 
 const defaultStorageData = (): StorageSnapshotData => ({
   bills: sampleBills,
@@ -166,6 +184,14 @@ function App() {
   const [storageCleanupRetryAttempt, setStorageCleanupRetryAttempt] = useState<
     number | null
   >(null)
+  const [billDraftExpiresAt, setBillDraftExpiresAt] = useState<number | null>(
+    null,
+  )
+  const [billDraftCleanupRetryAttempt, setBillDraftCleanupRetryAttempt] =
+    useState<number | null>(null)
+  const [billDraftMaintenanceMessage, setBillDraftMaintenanceMessage] =
+    useState('')
+  const billDraftLifecycleRef = useRef<ManualBillDraftLifecycle | null>(null)
 
   const applySnapshot = useCallback((snapshot: StorageSnapshot) => {
     setStorageSession(snapshot.session)
@@ -197,6 +223,119 @@ function App() {
     setGuideSectionId(sectionId)
     setActiveView('guide')
   }
+
+  const runBillDraftMaintenance = useCallback(
+    async (scheduleRetry = true) => {
+      const result = await maintainBillEntryDraft()
+      if (result.ok) {
+        setBillDraftExpiresAt(result.expiresAt)
+        setBillDraftCleanupRetryAttempt(null)
+        setBillDraftMaintenanceMessage('')
+        return result
+      }
+      setBillDraftMaintenanceMessage(billDraftCleanupMessage)
+      if (scheduleRetry) {
+        setBillDraftCleanupRetryAttempt((attempt) => attempt ?? 0)
+      }
+      return result
+    },
+    [],
+  )
+
+  const registerBillDraftLifecycle = useCallback(
+    (lifecycle: ManualBillDraftLifecycle | null) => {
+      billDraftLifecycleRef.current = lifecycle
+    },
+    [],
+  )
+
+  useEffect(() => {
+    void runBillDraftMaintenance()
+  }, [runBillDraftMaintenance])
+
+  useEffect(() => {
+    let cancelled = false
+    let timeoutId: number | undefined
+    const schedule = (expiresAt: number) => {
+      const remainingMs = expiresAt - Date.now()
+      timeoutId = window.setTimeout(
+        () => {
+          void runBillDraftMaintenance().then((result) => {
+            if (
+              !cancelled &&
+              result.ok &&
+              result.expiresAt !== null
+            ) {
+              schedule(result.expiresAt)
+            }
+          })
+        },
+        Math.min(Math.max(remainingMs, 0), maxBrowserTimeoutMs),
+      )
+    }
+    if (billDraftExpiresAt !== null) schedule(billDraftExpiresAt)
+    return () => {
+      cancelled = true
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+    }
+  }, [billDraftExpiresAt, runBillDraftMaintenance])
+
+  useEffect(() => {
+    if (billDraftCleanupRetryAttempt === null) return
+    const delay =
+      orphanCleanupRetryDelaysMs[
+        Math.min(
+          billDraftCleanupRetryAttempt,
+          orphanCleanupRetryDelaysMs.length - 1,
+        )
+      ]
+    const timeoutId = window.setTimeout(() => {
+      void runBillDraftMaintenance(false).then((result) => {
+        if (!result.ok) {
+          setBillDraftCleanupRetryAttempt((attempt) =>
+            attempt === null ? 0 : attempt + 1,
+          )
+        }
+      })
+    }, delay)
+    return () => window.clearTimeout(timeoutId)
+  }, [billDraftCleanupRetryAttempt, runBillDraftMaintenance])
+
+  useEffect(() => {
+    const refreshDraft = () => {
+      void runBillDraftMaintenance()
+    }
+    const handleDraftStorage = (event: StorageEvent) => {
+      if (
+        event.storageArea === localStorage &&
+        event.key === billEntryDraftPointerKey
+      ) {
+        refreshDraft()
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshDraft()
+    }
+    window.addEventListener(
+      billEntryDraftChangedEventName,
+      refreshDraft,
+    )
+    window.addEventListener('storage', handleDraftStorage)
+    window.addEventListener('focus', refreshDraft)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.removeEventListener(
+        billEntryDraftChangedEventName,
+        refreshDraft,
+      )
+      window.removeEventListener('storage', handleDraftStorage)
+      window.removeEventListener('focus', refreshDraft)
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibilityChange,
+      )
+    }
+  }, [runBillDraftMaintenance])
 
   useEffect(() => {
     let cancelled = false
@@ -425,6 +564,31 @@ function App() {
   )
 
   const resetSample = async () => {
+    const lifecycle = billDraftLifecycleRef.current
+    if (lifecycle) {
+      const result = await lifecycle.remove()
+      if (!result.ok) {
+        setBillDraftMaintenanceMessage(billDraftCleanupMessage)
+        setBillDraftCleanupRetryAttempt((attempt) => attempt ?? 0)
+        return
+      }
+    } else {
+      const maintenance = await maintainBillEntryDraft()
+      if (!maintenance.ok) {
+        setBillDraftMaintenanceMessage(billDraftCleanupMessage)
+        setBillDraftCleanupRetryAttempt((attempt) => attempt ?? 0)
+        return
+      }
+      const record = readBillEntryDraftRecord()
+      const removal = await removeBillEntryDraft(record?.identity ?? null)
+      if (!removal.ok) {
+        setBillDraftMaintenanceMessage(billDraftCleanupMessage)
+        setBillDraftCleanupRetryAttempt((attempt) => attempt ?? 0)
+        return
+      }
+    }
+    setBillDraftMaintenanceMessage('')
+    setBillDraftExpiresAt(null)
     if (storageSession) {
       const sessionId = storageSession.sessionId
       const removal = await removeStorageSnapshot(sessionId)
@@ -605,7 +769,7 @@ function App() {
     return true
   }
 
-  const applyBillsAndOpenDiagnosis = async (
+  const applyBills = async (
     nextBills: MonthlyBill[],
     origin: Exclude<BillDataOrigin, 'sample'>,
   ): Promise<boolean> => {
@@ -618,7 +782,6 @@ function App() {
     })))) {
       return false
     }
-    setActiveView('diagnosis')
     return true
   }
 
@@ -754,6 +917,7 @@ function App() {
             }}
             expiryMessage={
               expiryMessage ||
+              billDraftMaintenanceMessage ||
               (usesSameTabStorageLockFallback()
                 ? storageLockFallbackMessage
                 : '')
@@ -804,7 +968,9 @@ function App() {
                   bills={bills}
                   profile={profile}
                   ratePlans={ratePlans}
-                  onBillsChange={applyBillsAndOpenDiagnosis}
+                  onBillsChange={applyBills}
+                  onAnalysisOpen={() => setActiveView('diagnosis')}
+                  onDraftLifecycleChange={registerBillDraftLifecycle}
                   onOpenGuide={openGuide}
                 />
               )}

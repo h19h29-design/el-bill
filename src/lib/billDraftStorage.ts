@@ -48,12 +48,40 @@ export interface BillEntryDraft {
   rows: ManualBillDraftRow[]
 }
 
+export interface BillEntryDraftIdentity {
+  sessionId: string
+  revision: number
+  generationId?: string
+  storageKey: string
+}
+
+export interface BillEntryDraftRecord {
+  draft: BillEntryDraft
+  identity: BillEntryDraftIdentity
+}
+
 export type BillDraftWriteResult =
-  | { ok: true; draft: BillEntryDraft }
+  | {
+      ok: true
+      draft: BillEntryDraft
+      identity: BillEntryDraftIdentity
+    }
   | {
       ok: false
       reason: 'invalid' | 'expired' | 'stale' | 'storage-error' | 'lock-error'
     }
+
+export type BillDraftRemovalResult =
+  | { ok: true; removed: boolean }
+  | { ok: false; reason: 'stale' | 'storage-error' | 'lock-error' }
+
+export type BillDraftMaintenanceResult =
+  | {
+      ok: true
+      removed: boolean
+      expiresAt: number | null
+    }
+  | { ok: false; reason: 'invalid' | 'storage-error' | 'lock-error' }
 
 interface BillEntryDraftPointer {
   version: 1
@@ -86,6 +114,7 @@ interface CleanupResult {
 }
 
 export const billEntryDraftPointerKey = 'el-bill:bill-entry-draft-active'
+export const billEntryDraftChangedEventName = 'el-bill:draft-changed'
 
 const toWellFormedIdentifier = (value: string) => {
   let result = ''
@@ -295,6 +324,29 @@ export const readBillEntryDraft = (
   }
 }
 
+export const readBillEntryDraftRecord = (
+  now = Date.now(),
+): BillEntryDraftRecord | null => {
+  if (!isValidNow(now)) return null
+  try {
+    const state = readDraftState(now)
+    if (state.status !== 'valid') return null
+    return {
+      draft: state.draft,
+      identity: {
+        sessionId: state.draft.sessionId,
+        revision: state.draft.revision,
+        ...(state.pointer.generationId
+          ? { generationId: state.pointer.generationId }
+          : {}),
+        storageKey: state.key,
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
 const listDraftKeysBounded = () => {
   const keys: string[] = []
   for (
@@ -390,8 +442,9 @@ export const writeBillEntryDraft = (
       }
       const current = state.status === 'valid' ? state.draft : null
       if (
-        expectedRevision !== undefined &&
-        current?.revision !== expectedRevision
+        (expectedRevision === undefined && current !== null) ||
+        (expectedRevision !== undefined &&
+          current?.revision !== expectedRevision)
       ) {
         if (state.status !== 'valid' && state.status !== 'missing') {
           const cleanup = cleanupDraftStorageUnlocked(now)
@@ -465,11 +518,27 @@ export const writeBillEntryDraft = (
         discardCandidate(candidateKey)
         return { ok: false, reason: 'storage-error' }
       }
-      return { ok: true, draft: next }
+      return {
+        ok: true,
+        draft: next,
+        identity: {
+          sessionId,
+          revision: next.revision,
+          generationId,
+          storageKey: candidateKey,
+        },
+      }
     } catch {
       return { ok: false, reason: 'storage-error' }
     }
-  }).catch(() => ({ ok: false, reason: 'lock-error' }))
+  })
+    .then((result) => {
+      if (result.ok) {
+        window.dispatchEvent(new Event(billEntryDraftChangedEventName))
+      }
+      return result
+    })
+    .catch(() => ({ ok: false, reason: 'lock-error' }))
 }
 
 const hasDraftKeys = () => {
@@ -487,11 +556,18 @@ const removeCurrentDraftUnlocked = () => {
   const hadData = pointerRaw !== null || listedKeys.length > 0
   let failed = false
 
-  if (activeKey && localStorage.getItem(activeKey) !== null) {
-    if (!removeStorageKey(activeKey)) failed = true
+  if (
+    pointerRaw !== null &&
+    !removeStorageKey(billEntryDraftPointerKey)
+  ) {
+    return false
   }
-  if (!failed && pointerRaw !== null) {
-    if (!removeStorageKey(billEntryDraftPointerKey)) failed = true
+  if (
+    activeKey &&
+    localStorage.getItem(activeKey) !== null &&
+    !removeStorageKey(activeKey)
+  ) {
+    failed = true
   }
   for (const key of listedKeys) {
     if (localStorage.getItem(key) === null) continue
@@ -507,25 +583,86 @@ const removeCurrentDraftUnlocked = () => {
   return hadData
 }
 
-export const removeBillEntryDraft = (): Promise<boolean> =>
-  runWithStorageMutationLock(() => {
+const identityMatches = (
+  state: DraftReadState,
+  expected: BillEntryDraftIdentity,
+) =>
+  (state.status === 'valid' || state.status === 'expired') &&
+  state.draft.sessionId === expected.sessionId &&
+  state.draft.revision === expected.revision &&
+  state.pointer.generationId === expected.generationId &&
+  state.key === expected.storageKey
+
+export const removeBillEntryDraft = (
+  expected: BillEntryDraftIdentity | null,
+): Promise<BillDraftRemovalResult> =>
+  runWithStorageMutationLock((): BillDraftRemovalResult => {
     try {
+      const state = readDraftState(Date.now())
+      if (expected === null) {
+        if (state.status !== 'missing') {
+          return { ok: false, reason: 'stale' }
+        }
+        if (!hasDraftKeys()) return { ok: true, removed: false }
+        return removeCurrentDraftUnlocked()
+          ? { ok: true, removed: true }
+          : { ok: false, reason: 'storage-error' }
+      }
+      if (!identityMatches(state, expected)) {
+        return { ok: false, reason: 'stale' }
+      }
       return removeCurrentDraftUnlocked()
+        ? { ok: true, removed: true }
+        : { ok: false, reason: 'storage-error' }
     } catch {
-      return false
+      return { ok: false, reason: 'storage-error' }
     }
-  }).catch(() => false)
+  })
+    .then((result) => {
+      if (result.ok) {
+        window.dispatchEvent(new Event(billEntryDraftChangedEventName))
+      }
+      return result
+    })
+    .catch(() => ({ ok: false, reason: 'lock-error' }))
+
+export const maintainBillEntryDraft = (
+  now = Date.now(),
+): Promise<BillDraftMaintenanceResult> => {
+  if (!isValidNow(now)) {
+    return Promise.resolve({ ok: false, reason: 'invalid' })
+  }
+  return runWithStorageMutationLock((): BillDraftMaintenanceResult => {
+    try {
+      const cleanup = cleanupDraftStorageUnlocked(now)
+      if (cleanup.failed) {
+        return { ok: false, reason: 'storage-error' }
+      }
+      const state = readDraftState(now)
+      return {
+        ok: true,
+        removed: cleanup.removed,
+        expiresAt:
+          state.status === 'valid'
+            ? Date.parse(state.draft.expiresAt)
+            : null,
+      }
+    } catch {
+      return { ok: false, reason: 'storage-error' }
+    }
+  })
+    .then((result) => {
+      if (result.ok && result.removed) {
+        window.dispatchEvent(new Event(billEntryDraftChangedEventName))
+      }
+      return result
+    })
+    .catch(() => ({ ok: false, reason: 'lock-error' }))
+}
 
 export const cleanupExpiredBillEntryDraft = (
   now = Date.now(),
-): Promise<boolean> => {
-  if (!isValidNow(now)) return Promise.resolve(false)
-  return runWithStorageMutationLock(() => {
-    try {
-      const result = cleanupDraftStorageUnlocked(now)
-      return !result.failed && result.removed
-    } catch {
-      return false
-    }
-  }).catch(() => false)
-}
+): Promise<boolean> =>
+  maintainBillEntryDraft(now).then(
+    (result) => result.ok && result.removed,
+  )

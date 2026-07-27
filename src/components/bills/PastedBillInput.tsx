@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { BillImportContext } from '../../types'
 import { mapRowsToBills } from '../../lib/excel'
 import {
+  assignBillColumnMapping,
   buildBillColumnMapping,
   parsePastedBillSheet,
 } from '../../lib/billInput'
@@ -34,45 +35,9 @@ const mappingFields = [
 ] as const
 
 const requiredMappingFields = ['year', 'month', 'usageKwh', 'totalBillWon'] as const
-type RequiredMappingField = typeof requiredMappingFields[number]
-
-const automaticRequiredSynonyms: Record<RequiredMappingField, readonly string[]> = {
-  year: ['연도', '년도', '청구연도', '청구년도'],
-  month: ['월', '월분', '청구월', '청구월분'],
-  usageKwh: ['사용량', '사용량kwh', '전력사용량', '전력사용량kwh'],
-  totalBillWon: [
-    '총전기요금',
-    '총전기요금원',
-    '전기요금',
-    '전기요금원',
-    '청구금액',
-    '청구금액원',
-    '납부금액',
-    '납부금액원',
-    '청구요금',
-    '청구요금원',
-    '납부요금',
-    '납부요금원',
-  ],
-}
-
-const normalizeRequiredHeader = (header: string) =>
-  header.toLocaleLowerCase('ko-KR').replace(/[\s()[\]{}_-]/g, '')
-
-const buildAutomaticRequiredMapping = (headers: string[]) =>
-  Object.fromEntries(
-    requiredMappingFields.map((field) => {
-      const matches = headers.filter((header) =>
-        automaticRequiredSynonyms[field].includes(normalizeRequiredHeader(header)),
-      )
-      return [field, matches.length === 1 ? matches[0] : '']
-    }),
-  ) as Record<RequiredMappingField, string>
-
-const getRequiredMappingCollisions = (mapping: Record<string, string>) => {
+const getMappingCollisions = (mapping: Record<string, string>) => {
   const fieldsByHeader = new Map<string, string[]>()
-  requiredMappingFields.forEach((field) => {
-    const header = mapping[field]
+  Object.entries(mapping).forEach(([field, header]) => {
     if (!header) return
     fieldsByHeader.set(header, [...(fieldsByHeader.get(header) ?? []), field])
   })
@@ -89,18 +54,19 @@ export function PastedBillInput({
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [message, setMessage] = useState('')
   const [showMapping, setShowMapping] = useState(false)
+  const [firstRowIsHeader, setFirstRowIsHeader] = useState(true)
 
-  const requiredMappingCollisions = useMemo(
-    () => getRequiredMappingCollisions(mapping),
+  const mappingCollisions = useMemo(
+    () => getMappingCollisions(mapping),
     [mapping],
   )
   const missingRequiredMapping = requiredMappingFields.some((field) => !mapping[field])
   const hasRequiredMapping =
     !missingRequiredMapping &&
-    requiredMappingCollisions.length === 0
+    mappingCollisions.length === 0
   const mappingMessage = sheet?.rows.length
-    ? requiredMappingCollisions.length > 0
-      ? '필수 항목은 서로 다른 컬럼으로 지정해 주세요.'
+    ? mappingCollisions.length > 0
+      ? '각 원본 컬럼은 하나의 항목에만 지정해 주세요.'
       : missingRequiredMapping
         ? '필수 컬럼을 지정해 주세요.'
         : ''
@@ -145,16 +111,15 @@ export function PastedBillInput({
     }
 
     try {
-      const parsed = parsePastedBillSheet(text)
-      const nextMapping = {
-        ...buildBillColumnMapping(parsed.headers),
-        ...buildAutomaticRequiredMapping(parsed.headers),
-      }
+      const parsed = parsePastedBillSheet(text, { firstRowIsHeader })
+      const nextMapping = buildBillColumnMapping(parsed.headers)
       const missingRequired = requiredMappingFields.some((field) => !nextMapping[field])
-      const hasRequiredCollision = getRequiredMappingCollisions(nextMapping).length > 0
+      const hasMappingCollision = getMappingCollisions(nextMapping).length > 0
       setSheet(parsed)
       setMapping(nextMapping)
-      setShowMapping(missingRequired || hasRequiredCollision)
+      setShowMapping(
+        !firstRowIsHeader || missingRequired || hasMappingCollision,
+      )
       setMessage(
         parsed.rows.length
           ? ''
@@ -174,6 +139,15 @@ export function PastedBillInput({
 
   const changeText = (value: string) => {
     setText(value)
+    if (!sheet) return
+    setSheet(null)
+    setMapping({})
+    setShowMapping(false)
+    setMessage('')
+  }
+
+  const changeHeaderMode = (checked: boolean) => {
+    setFirstRowIsHeader(checked)
     if (!sheet) return
     setSheet(null)
     setMapping({})
@@ -203,6 +177,14 @@ export function PastedBillInput({
           />
         </label>
         <p id="paste-input-limit" className="field-hint">최대 200,000자, 최대 36행까지 확인합니다.</p>
+        <label className="paste-header-control">
+          <input
+            type="checkbox"
+            checked={firstRowIsHeader}
+            onChange={(event) => changeHeaderMode(event.target.checked)}
+          />
+          첫 행을 헤더로 사용
+        </label>
         <div className="manual-grid-actions">
           <button type="button" className="primary-button" onClick={inspectPaste}>붙여넣은 표 확인</button>
           <button
@@ -271,10 +253,13 @@ export function PastedBillInput({
                 <select
                   aria-label={label}
                   value={mapping[field] ?? ''}
-                  onChange={(event) => setMapping((current) => ({
-                    ...current,
-                    [field]: event.target.value,
-                  }))}
+                  onChange={(event) => setMapping((current) =>
+                    assignBillColumnMapping(
+                      current,
+                      field,
+                      event.target.value,
+                    )
+                  )}
                 >
                   <option value="">미사용</option>
                   {sheet.headers.map((header) => <option key={header} value={header}>{header}</option>)}

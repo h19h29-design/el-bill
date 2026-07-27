@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { standardBillCsvHeaders } from '../lib/billInput'
 import {
@@ -24,6 +25,15 @@ describe('usage guide content', () => {
     expect(gptBillConversionPrompt).toContain(
       '학교명, 고객번호, 주소, 담당자 연락처, 계좌·납부정보는 CSV에 포함하지 않습니다.',
     )
+  })
+
+  it('matches the exact approved UTF-8 GPT prompt fixture', () => {
+    expect(Buffer.byteLength(gptBillConversionPrompt, 'utf8')).toBe(1922)
+    expect(
+      createHash('sha256')
+        .update(gptBillConversionPrompt, 'utf8')
+        .digest('hex'),
+    ).toBe('ca414ef9496f8bc7765c9596cc7ba3c699a3713405acbcf54bf739571247f4af')
   })
 
   it('keeps the browser-local deletion policy separate from external AI uploads', () => {
