@@ -4,7 +4,11 @@ import { findExactRatePlan } from '../../lib/diagnosis'
 import type { BillDataOrigin, MonthlyBill, RatePlan, SchoolProfile } from '../../types'
 import { BillInputPreview, type BillInputCandidate } from './BillInputPreview'
 import { FileBillInput } from './FileBillInput'
-import { ManualBillInput, type ManualBillDraftLifecycle } from './ManualBillInput'
+import {
+  ManualBillInput,
+  manualBillDraftConflictMessage,
+  type ManualBillDraftLifecycle,
+} from './ManualBillInput'
 import { PastedBillInput } from './PastedBillInput'
 
 export type BillInputMode = 'file' | 'paste' | 'manual'
@@ -153,9 +157,11 @@ export function BillUpload({
       setMessages((current) => ({
         ...current,
         [mode]:
-          prepared.reason === 'changed'
-            ? draftChangedMessage
-            : draftPreparationFailureMessage,
+          prepared.reason === 'conflict'
+            ? manualBillDraftConflictMessage
+            : prepared.reason === 'changed'
+              ? draftChangedMessage
+              : draftPreparationFailureMessage,
       }))
       confirmingRef.current = false
       setConfirmingMode(null)
@@ -181,9 +187,11 @@ export function BillUpload({
       setMessages((current) => ({
         ...current,
         [mode]:
-          completion.reason === 'changed'
-            ? draftChangedMessage
-            : draftRemovalFailureMessage,
+          completion.reason === 'conflict'
+            ? manualBillDraftConflictMessage
+            : completion.reason === 'changed'
+              ? draftChangedMessage
+              : draftRemovalFailureMessage,
       }))
       confirmingRef.current = false
       setConfirmingMode(null)

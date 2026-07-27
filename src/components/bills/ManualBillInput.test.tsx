@@ -11,7 +11,10 @@ import {
   writeBillEntryDraft,
 } from '../../lib/billDraftStorage'
 import type { BillImportContext } from '../../types'
-import { ManualBillInput } from './ManualBillInput'
+import {
+  ManualBillInput,
+  type ManualBillDraftLifecycle,
+} from './ManualBillInput'
 
 const importContext: BillImportContext = {
   appliedPowerKw: 497,
@@ -445,7 +448,7 @@ describe('ManualBillInput', () => {
     expect(screen.queryByLabelText('2026-07 사용량(kWh)')).toBeNull()
   })
 
-  it('keeps the newer stored draft when a revision-safe write becomes stale', async () => {
+  it('keeps the newer stored draft and reports a revision-safe write conflict', async () => {
     vi.useFakeTimers()
     const initial = await writeBillEntryDraft([
       makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
@@ -461,8 +464,58 @@ describe('ManualBillInput', () => {
       await vi.advanceTimersByTimeAsync(300)
     })
 
-    expect(screen.getByText(/초안을 저장하지 못했습니다/)).not.toBeNull()
+    expect(
+      screen.getByText(
+        /다른 탭에서 입력 초안이 변경되었습니다.*새로고침하거나 다시 열어/,
+      ),
+    ).not.toBeNull()
     expect((screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement).value).toBe('30')
+    expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('20')
+  })
+
+  it('shows cross-tab conflict guidance and keeps the manual rows on screen', async () => {
+    const initial = await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
+    ])
+    if (!initial.ok) throw new Error('draft setup failed')
+    const lifecycleHolder: { current: ManualBillDraftLifecycle | null } = {
+      current: null,
+    }
+    render(
+      <ManualBillInput
+        importContext={importContext}
+        onCandidateChange={() => undefined}
+        onOpenGuide={() => undefined}
+        onDraftLifecycleChange={(lifecycle) => {
+          lifecycleHolder.current = lifecycle
+        }}
+      />,
+    )
+    await waitFor(() => expect(lifecycleHolder.current).not.toBeNull())
+    const lifecycle = lifecycleHolder.current
+    if (!lifecycle) throw new Error('draft lifecycle missing')
+    const prepared = await lifecycle.prepareForApply()
+    if (!prepared.ok) throw new Error('draft preparation failed')
+
+    const newer = await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '20', totalBillWon: '100' }),
+    ], initial.draft.revision)
+    if (!newer.ok) throw new Error('newer draft setup failed')
+    await act(async () => {
+      await expect(lifecycle.completeApply(prepared.token)).resolves.toEqual({
+        ok: false,
+        reason: 'conflict',
+      })
+    })
+
+    expect(
+      screen.getByText(
+        /다른 탭에서 입력 초안이 변경되었습니다.*새로고침하거나 다시 열어/,
+      ),
+    ).not.toBeNull()
+    expect(
+      (screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement).value,
+    ).toBe('10')
     expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('20')
   })
 

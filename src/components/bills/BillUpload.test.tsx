@@ -179,6 +179,57 @@ describe('bill upload tariff configuration', () => {
     expect(readBillEntryDraft()).toBeNull()
   })
 
+  it('requires reload after a cross-tab draft conflict blocks apply cleanup', async () => {
+    let finishSave: (saved: boolean) => void = () => undefined
+    const onBillsChange = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishSave = resolve
+        }),
+    )
+    const onAnalysisOpen = vi.fn()
+    const initial = await writeBillEntryDraft([makeDraft()])
+    if (!initial.ok) throw new Error('draft setup failed')
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onAnalysisOpen={onAnalysisOpen}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '직접 입력' }))
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '이 데이터로 분석 시작',
+      }),
+    )
+    await waitFor(() => expect(onBillsChange).toHaveBeenCalledTimes(1))
+    const newer = await writeBillEntryDraft([
+      makeDraft({ usageKwh: '50,000 kWh' }),
+    ], initial.draft.revision)
+    if (!newer.ok) throw new Error('newer draft setup failed')
+    await act(async () => {
+      finishSave(true)
+    })
+
+    const previewPanel = screen
+      .getByRole('heading', { name: '새 입력 데이터' })
+      .closest('section')
+    if (!previewPanel) throw new Error('preview panel missing')
+    await waitFor(() =>
+      expect(previewPanel.querySelector('.status-line')?.textContent).toMatch(
+        /다른 탭에서 입력 초안이 변경되었습니다.*새로고침하거나 다시 열어/,
+      ),
+    )
+    expect(previewPanel.textContent).not.toMatch(/다시 시도해 주세요/)
+    expect(onAnalysisOpen).not.toHaveBeenCalled()
+    expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('50,000 kWh')
+  })
+
   it('retains manual candidate, rows, and draft when the analysis save fails', async () => {
     const user = userEvent.setup()
     const onBillsChange = vi.fn(async () => false)

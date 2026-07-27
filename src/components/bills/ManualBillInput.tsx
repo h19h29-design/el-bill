@@ -66,6 +66,8 @@ const numericFields = new Set<ManualBillDraftField>([
   'fundWon',
 ])
 const maximumManualPasteCharacters = 200_000
+export const manualBillDraftConflictMessage =
+  '다른 탭에서 입력 초안이 변경되었습니다. 계속하려면 화면을 새로고침하거나 다시 열어 주세요.'
 
 const localYearMonth = () => {
   const now = new Date()
@@ -129,6 +131,10 @@ export function ManualBillInput({
       onStatus: (status) => {
         if (status === 'saved') {
           setDraftMessage('입력 초안이 이 브라우저에 최대 24시간 보관됩니다')
+          return
+        }
+        if (status === 'conflict') {
+          setDraftMessage(manualBillDraftConflictMessage)
           return
         }
         setDraftMessage(

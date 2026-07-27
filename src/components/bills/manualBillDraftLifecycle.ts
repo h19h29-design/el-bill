@@ -24,6 +24,7 @@ export type ManualBillDraftLifecycleStatus =
   | 'saved'
   | 'write-failed'
   | 'remove-failed'
+  | 'conflict'
 
 export interface ManualBillDraftApplyToken {
   generation: number
@@ -32,11 +33,15 @@ export interface ManualBillDraftApplyToken {
 
 export type ManualBillDraftPrepareResult =
   | { ok: true; token: ManualBillDraftApplyToken }
-  | { ok: false; reason: 'changed' | 'write-failed' }
+  | { ok: false; reason: 'changed' | 'write-failed' | 'conflict' }
 
 export type ManualBillDraftCompleteResult =
   | { ok: true }
-  | { ok: false; reason: 'changed' | 'remove-failed' }
+  | { ok: false; reason: 'changed' | 'remove-failed' | 'conflict' }
+
+export type ManualBillDraftRemoveResult =
+  | { ok: true }
+  | { ok: false; reason: 'remove-failed' | 'conflict' }
 
 interface ManualBillDraftLifecycleOptions {
   initialRevision?: number
@@ -53,7 +58,7 @@ export interface ManualBillDraftLifecycle {
     token: ManualBillDraftApplyToken,
   ) => Promise<ManualBillDraftCompleteResult>
   cancelApply: (token: ManualBillDraftApplyToken) => void
-  remove: () => Promise<{ ok: boolean }>
+  remove: () => Promise<ManualBillDraftRemoveResult>
   dispose: () => void
 }
 
@@ -85,6 +90,7 @@ export const createManualBillDraftLifecycle = ({
   let writeChain = Promise.resolve()
   let pending: PendingSnapshot | null = null
   let applyingToken: ManualBillDraftApplyToken | null = null
+  let conflicted = false
   let disposed = false
 
   const clearTimer = () => {
@@ -92,20 +98,17 @@ export const createManualBillDraftLifecycle = ({
     timer = null
   }
 
-  const refreshIdentity = () => {
-    try {
-      const record = persistence.read?.()
-      revision = record?.draft.revision
-      identity = record?.identity ?? null
-    } catch {
-      // Keep the last observed identity so a later retry remains a CAS operation.
-    }
+  const enterConflict = () => {
+    conflicted = true
+    clearTimer()
+    pending = null
+    onStatus?.('conflict')
   }
 
   const persist = (snapshot: PendingSnapshot) => {
     let outcome: BillDraftWriteResult | null = null
     writeChain = writeChain.then(async () => {
-      if (disposed) return
+      if (disposed || conflicted) return
       try {
         outcome = await persistence.write(snapshot.rows, revision)
       } catch {
@@ -122,7 +125,11 @@ export const createManualBillDraftLifecycle = ({
           onStatus?.('saved')
         }
       } else if (!disposed) {
-        onStatus?.('write-failed')
+        if (outcome.reason === 'stale') {
+          enterConflict()
+        } else {
+          onStatus?.('write-failed')
+        }
       }
     })
     return writeChain.then(() => outcome)
@@ -131,6 +138,7 @@ export const createManualBillDraftLifecycle = ({
   const armPendingWrite = () => {
     if (
       disposed ||
+      conflicted ||
       applyingToken !== null ||
       pending === null ||
       timer !== null
@@ -140,7 +148,7 @@ export const createManualBillDraftLifecycle = ({
     timer = setTimeout(() => {
       timer = null
       const snapshot = pending
-      if (!snapshot || applyingToken !== null || disposed) return
+      if (!snapshot || applyingToken !== null || disposed || conflicted) return
       pending = null
       void persist(snapshot).then(() => armPendingWrite())
     }, debounceMs)
@@ -152,7 +160,7 @@ export const createManualBillDraftLifecycle = ({
   }
 
   const schedule = (rows: ManualBillDraftRow[]) => {
-    if (disposed) return
+    if (disposed || conflicted) return
     generation += 1
     pending = {
       generation,
@@ -163,6 +171,9 @@ export const createManualBillDraftLifecycle = ({
   }
 
   const prepareForApply = async (): Promise<ManualBillDraftPrepareResult> => {
+    if (conflicted) {
+      return { ok: false, reason: 'conflict' }
+    }
     if (disposed || applyingToken !== null) {
       return { ok: false, reason: 'changed' }
     }
@@ -170,6 +181,10 @@ export const createManualBillDraftLifecycle = ({
     const applyGeneration = generation
     applyingToken = { generation: applyGeneration, identity }
     await writeChain
+    if (conflicted) {
+      releaseApply()
+      return { ok: false, reason: 'conflict' }
+    }
     if (disposed || generation !== applyGeneration) {
       releaseApply()
       return { ok: false, reason: 'changed' }
@@ -181,7 +196,10 @@ export const createManualBillDraftLifecycle = ({
       const result = await persist(snapshot)
       if (!result?.ok) {
         releaseApply()
-        return { ok: false, reason: 'write-failed' }
+        return {
+          ok: false,
+          reason: conflicted ? 'conflict' : 'write-failed',
+        }
       }
       if (disposed || generation !== applyGeneration) {
         releaseApply()
@@ -197,6 +215,9 @@ export const createManualBillDraftLifecycle = ({
   const completeApply = async (
     token: ManualBillDraftApplyToken,
   ): Promise<ManualBillDraftCompleteResult> => {
+    if (conflicted) {
+      return { ok: false, reason: 'conflict' }
+    }
     if (
       disposed ||
       applyingToken !== token ||
@@ -217,11 +238,14 @@ export const createManualBillDraftLifecycle = ({
     if (result.ok) {
       revision = undefined
       identity = null
-    } else {
-      refreshIdentity()
+    } else if (result.reason === 'stale') {
+      enterConflict()
     }
     releaseApply()
 
+    if (!result.ok && result.reason === 'stale') {
+      return { ok: false, reason: 'conflict' }
+    }
     if (changed) return { ok: false, reason: 'changed' }
     if (!result.ok) {
       onStatus?.('remove-failed')
@@ -235,8 +259,9 @@ export const createManualBillDraftLifecycle = ({
     releaseApply()
   }
 
-  const remove = async () => {
+  const remove = async (): Promise<ManualBillDraftRemoveResult> => {
     if (disposed) return { ok: true }
+    if (conflicted) return { ok: false, reason: 'conflict' }
     generation += 1
     const removalGeneration = generation
     pending = null
@@ -246,6 +271,10 @@ export const createManualBillDraftLifecycle = ({
       identity,
     }
     await writeChain
+    if (conflicted) {
+      releaseApply()
+      return { ok: false, reason: 'conflict' }
+    }
 
     const expectedIdentity = identity
     let result: BillDraftRemovalResult
@@ -257,12 +286,17 @@ export const createManualBillDraftLifecycle = ({
     if (result.ok) {
       revision = undefined
       identity = null
+    } else if (result.reason === 'stale') {
+      enterConflict()
     } else {
-      refreshIdentity()
       onStatus?.('remove-failed')
     }
     releaseApply()
-    return { ok: result.ok }
+    if (result.ok) return { ok: true }
+    return {
+      ok: false,
+      reason: result.reason === 'stale' ? 'conflict' : 'remove-failed',
+    }
   }
 
   const dispose = () => {
