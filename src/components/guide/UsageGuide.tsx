@@ -12,8 +12,15 @@ interface UsageGuideProps {
   onOpenBills: () => void
 }
 
+const defaultSectionId = usageGuideSections[0].id
+
+const resolveSectionId = (sectionId?: string | null) =>
+  usageGuideSections.find((section) => section.id === sectionId)?.id ?? defaultSectionId
+
 export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps) {
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState<{ id: number; message: string } | null>(null)
+  const [selectedSectionId, setSelectedSectionId] = useState<string>(() => resolveSectionId(requestedSectionId))
+  const statusInvocationId = useRef(0)
   const sectionHeadings = useRef<Record<string, HTMLHeadingElement | null>>({})
 
   const focusSection = useCallback((sectionId: string) => {
@@ -24,15 +31,28 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
   }, [])
 
   useEffect(() => {
-    if (requestedSectionId) focusSection(requestedSectionId)
+    if (!requestedSectionId) return
+    const sectionId = resolveSectionId(requestedSectionId)
+    setSelectedSectionId(sectionId)
+    focusSection(sectionId)
   }, [focusSection, requestedSectionId])
+
+  const announce = useCallback((message: string) => {
+    statusInvocationId.current += 1
+    setStatus({ id: statusInvocationId.current, message })
+  }, [])
+
+  const navigateToSection = useCallback((sectionId: string) => {
+    setSelectedSectionId(sectionId)
+    focusSection(sectionId)
+  }, [focusSection])
 
   const handleCopyPrompt = async () => {
     try {
       await navigator.clipboard.writeText(gptBillConversionPrompt)
-      setStatus('GPT 변환 프롬프트를 복사했습니다.')
+      announce('GPT 변환 프롬프트를 복사했습니다.')
     } catch {
-      setStatus('프롬프트를 복사하지 못했습니다. 브라우저 권한을 확인해 주세요.')
+      announce('프롬프트를 복사하지 못했습니다. 브라우저 권한을 확인해 주세요.')
     }
   }
 
@@ -45,20 +65,20 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
       link.download = 'el-bill-import.csv'
       link.click()
       URL.revokeObjectURL(url)
-      setStatus('표준 CSV 양식 다운로드를 시작했습니다.')
+      announce('표준 CSV 양식 다운로드를 시작했습니다.')
     } catch {
-      setStatus('CSV 양식을 만들지 못했습니다. 브라우저 설정을 확인해 주세요.')
+      announce('CSV 양식을 만들지 못했습니다. 브라우저 설정을 확인해 주세요.')
     }
   }
 
   const sectionHeading = (id: string, title: string) => (
-    <h2
+    <h3
       id={id}
       ref={(element) => { sectionHeadings.current[id] = element }}
       tabIndex={-1}
     >
       {title}
-    </h2>
+    </h3>
   )
 
   return (
@@ -72,7 +92,7 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
               href={`#${section.id}`}
               onClick={(event) => {
                 event.preventDefault()
-                focusSection(section.id)
+                navigateToSection(section.id)
               }}
             >
               {section.title}
@@ -85,22 +105,22 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
         <label>
           안내 항목 선택
           <select
-            defaultValue=""
-            onChange={(event) => {
-              if (event.target.value) focusSection(event.target.value)
-            }}
+            value={selectedSectionId}
+            onChange={(event) => setSelectedSectionId(event.target.value)}
           >
-            <option value="" disabled>목차에서 이동</option>
             {usageGuideSections.map((section) => (
               <option key={section.id} value={section.id}>{section.title}</option>
             ))}
           </select>
         </label>
+        <button type="button" className="outline-action" onClick={() => focusSection(selectedSectionId)}>
+          이동
+        </button>
       </div>
 
       <div className="guide-content">
         <header className="guide-header">
-          <h1>사용 방법 안내</h1>
+          <h2>사용 방법 안내</h2>
           <p>자료 입력부터 결과 확인과 문서 생성까지, 실제 원본을 확인하며 순서대로 진행합니다.</p>
         </header>
 
@@ -137,19 +157,24 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
         <section className="guide-section">
           {sectionHeading('gpt-csv', 'GPT로 CSV 변환')}
           <p>자료 형식이 복잡해 파일 인식과 붙여넣기가 어려울 때만 아래 프롬프트로 표준 CSV를 만듭니다. 변환 결과도 한전 원본으로 취급하지 않으므로 앱의 미리보기와 누락·중복 검사를 확인한 뒤 적용합니다.</p>
-          <div className="guide-actions">
-            <button type="button" className="outline-action" onClick={() => void handleCopyPrompt()}>
-              <ClipboardCopy size={17} aria-hidden="true" />
-              GPT 변환 프롬프트 복사
-            </button>
-            <button type="button" className="outline-action" onClick={handleDownloadTemplate}>
-              <Download size={17} aria-hidden="true" />
-              표준 CSV 양식 다운로드
-            </button>
-            <button type="button" className="primary-button" onClick={onOpenBills}>
-              <Upload size={17} aria-hidden="true" />
-              변환 결과 업로드
-            </button>
+          <div className="guide-action-feedback">
+            <div className="guide-actions" role="group" aria-label="GPT 변환 도구">
+              <button type="button" className="outline-action" aria-describedby="guide-action-status" onClick={() => void handleCopyPrompt()}>
+                <ClipboardCopy size={17} aria-hidden="true" />
+                GPT 변환 프롬프트 복사
+              </button>
+              <button type="button" className="outline-action" aria-describedby="guide-action-status" onClick={handleDownloadTemplate}>
+                <Download size={17} aria-hidden="true" />
+                표준 CSV 양식 다운로드
+              </button>
+              <button type="button" className="primary-button" onClick={onOpenBills}>
+                <Upload size={17} aria-hidden="true" />
+                변환 결과 업로드
+              </button>
+            </div>
+            <p id="guide-action-status" className="guide-action-status" role="status" aria-live="polite" aria-atomic="true">
+              {status && <span key={status.id} data-invocation-id={status.id}>{status.message}</span>}
+            </p>
           </div>
           <p className="guide-warning"><strong>외부 AI 서비스 주의</strong>{externalAiPrivacyWarning}</p>
           <pre className="guide-prompt" aria-label="GPT 변환 프롬프트">{gptBillConversionPrompt}</pre>
@@ -193,7 +218,6 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
         </section>
       </div>
 
-      <p className="guide-status" role="status" aria-live="polite">{status}</p>
     </div>
   )
 }

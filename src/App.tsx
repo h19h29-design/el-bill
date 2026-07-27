@@ -762,13 +762,15 @@ function App() {
         </header>
 
         <section className="view-frame">
-          <div className="view-heading">
-            <span className="step-badge">{viewMeta[activeView].step}</span>
-            <div>
-              <h2>{viewMeta[activeView].title}</h2>
-              <p>{viewMeta[activeView].description}</p>
+          {activeView !== 'guide' && (
+            <div className="view-heading">
+              <span className="step-badge">{viewMeta[activeView].step}</span>
+              <div>
+                <h2>{viewMeta[activeView].title}</h2>
+                <p>{viewMeta[activeView].description}</p>
+              </div>
             </div>
-          </div>
+          )}
 
           <ViewErrorBoundary>
             <Suspense fallback={<ViewLoadingFallback />}>

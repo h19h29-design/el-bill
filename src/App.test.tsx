@@ -68,8 +68,10 @@ describe('data provenance persistence', () => {
     fireEvent.click(screen.getByRole('button', { name: '사용 안내' }))
 
     expect(
-      await screen.findByRole('heading', { name: '사용 방법 안내' }),
+      await screen.findByRole('heading', { name: '파일을 그대로 올리기', level: 3 }),
     ).toBeTruthy()
+    expect(document.querySelector('.view-heading')).toBeNull()
+    expect(screen.getAllByRole('heading', { level: 1 }).length).toBe(1)
   })
 
   it('restores calculation mode and factors from the active snapshot', async () => {
