@@ -301,14 +301,19 @@ export const validateManualBillRows = (
     validRows.push(row)
   }
 
-  rowsByPeriod.forEach((periodRows, period) => {
-    if (periodRows.length < 2) return
-    periodRows.forEach((row) =>
-      addIssue(issues, row.id, 'period', `${period} billing period is duplicated.`),
-    )
-  })
+  const addDuplicateIssues = () => {
+    rowsByPeriod.forEach((periodRows, period) => {
+      if (periodRows.length < 2) return
+      periodRows.forEach((row) =>
+        addIssue(issues, row.id, 'period', `${period} billing period is duplicated.`),
+      )
+    })
+  }
 
-  if (issues.length) return { bills: [], issues }
+  if (issues.length) {
+    addDuplicateIssues()
+    return { bills: [], issues }
+  }
 
   const mapping = {
     year: '연도',

@@ -120,6 +120,29 @@ describe('manual bill input normalization', () => {
       .toEqual(['a', 'b'])
   })
 
+  it('keeps shared gap diagnostics when duplicate periods are blocked', () => {
+    const result = validateManualBillRows(
+      [
+        makeDraft({ id: 'june', yearMonth: '2026-06', usageKwh: '10', totalBillWon: '100' }),
+        makeDraft({ id: 'july-a', yearMonth: '2026-07', usageKwh: '20', totalBillWon: '200' }),
+        makeDraft({ id: 'july-b', yearMonth: '2026-07', usageKwh: '30', totalBillWon: '300' }),
+        makeDraft({ id: 'september', yearMonth: '2026-09', usageKwh: '40', totalBillWon: '400' }),
+      ],
+      importContext,
+    )
+
+    expect(result.bills).toEqual([])
+    expect(result.issues.filter((issue) => issue.field === 'period').map((issue) => issue.rowId))
+      .toContain('july-a')
+    expect(result.issues.filter((issue) => issue.field === 'period').map((issue) => issue.rowId))
+      .toContain('july-b')
+    expect(result.issues).toContainEqual({
+      rowId: '',
+      field: 'period',
+      message: '2026-7 through 2026-8 billing period is missing.',
+    })
+  })
+
   it('does not mark empty optional fields as observed', () => {
     const result = validateManualBillRows(
       [makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' })],
