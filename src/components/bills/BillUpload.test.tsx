@@ -166,7 +166,11 @@ describe('bill upload tariff configuration', () => {
     await user.click(screen.getByRole('button', { name: '이 데이터로 분석 시작' }))
 
     await waitFor(() => expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'manual'))
-    expect(screen.getByText(/분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다/)).toBeTruthy()
+    expect(
+      screen.getByText(
+        /분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다.*추가 변경은 화면에만 유지됩니다.*다시 시도하거나.*새로고침/,
+      ),
+    ).toBeTruthy()
     expect(screen.getByLabelText('2026-07 사용량(kWh)')).toBeTruthy()
     expect(readBillEntryDraft()).not.toBeNull()
     expect(onAnalysisOpen).not.toHaveBeenCalled()

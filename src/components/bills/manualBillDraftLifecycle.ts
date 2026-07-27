@@ -91,6 +91,7 @@ export const createManualBillDraftLifecycle = ({
   let pending: PendingSnapshot | null = null
   let applyingToken: ManualBillDraftApplyToken | null = null
   let conflicted = false
+  let removalRecovery = false
   let disposed = false
 
   const clearTimer = () => {
@@ -100,15 +101,22 @@ export const createManualBillDraftLifecycle = ({
 
   const enterConflict = () => {
     conflicted = true
+    removalRecovery = false
     clearTimer()
     pending = null
     onStatus?.('conflict')
   }
 
+  const enterRemovalRecovery = () => {
+    removalRecovery = true
+    clearTimer()
+    onStatus?.('remove-failed')
+  }
+
   const persist = (snapshot: PendingSnapshot) => {
     let outcome: BillDraftWriteResult | null = null
     writeChain = writeChain.then(async () => {
-      if (disposed || conflicted) return
+      if (disposed || conflicted || removalRecovery) return
       try {
         outcome = await persistence.write(snapshot.rows, revision)
       } catch {
@@ -139,6 +147,7 @@ export const createManualBillDraftLifecycle = ({
     if (
       disposed ||
       conflicted ||
+      removalRecovery ||
       applyingToken !== null ||
       pending === null ||
       timer !== null
@@ -148,7 +157,13 @@ export const createManualBillDraftLifecycle = ({
     timer = setTimeout(() => {
       timer = null
       const snapshot = pending
-      if (!snapshot || applyingToken !== null || disposed || conflicted) return
+      if (
+        !snapshot ||
+        applyingToken !== null ||
+        disposed ||
+        conflicted ||
+        removalRecovery
+      ) return
       pending = null
       void persist(snapshot).then(() => armPendingWrite())
     }, debounceMs)
@@ -191,7 +206,7 @@ export const createManualBillDraftLifecycle = ({
     }
 
     const snapshot = pending
-    if (snapshot) {
+    if (snapshot && !removalRecovery) {
       pending = null
       const result = await persist(snapshot)
       if (!result?.ok) {
@@ -235,22 +250,26 @@ export const createManualBillDraftLifecycle = ({
     }
 
     const changed = generation !== token.generation
+    const wasRemovalRecovery = removalRecovery
     if (result.ok) {
       revision = undefined
       identity = null
+      removalRecovery = false
+      if (wasRemovalRecovery && !changed) pending = null
     } else if (result.reason === 'stale') {
       enterConflict()
+    } else {
+      enterRemovalRecovery()
     }
     releaseApply()
 
     if (!result.ok && result.reason === 'stale') {
       return { ok: false, reason: 'conflict' }
     }
-    if (changed) return { ok: false, reason: 'changed' }
     if (!result.ok) {
-      onStatus?.('remove-failed')
       return { ok: false, reason: 'remove-failed' }
     }
+    if (changed) return { ok: false, reason: 'changed' }
     return { ok: true }
   }
 
@@ -286,10 +305,11 @@ export const createManualBillDraftLifecycle = ({
     if (result.ok) {
       revision = undefined
       identity = null
+      removalRecovery = false
     } else if (result.reason === 'stale') {
       enterConflict()
     } else {
-      onStatus?.('remove-failed')
+      enterRemovalRecovery()
     }
     releaseApply()
     if (result.ok) return { ok: true }

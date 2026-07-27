@@ -40,7 +40,7 @@ const storageFailureMessage =
 const draftPreparationFailureMessage =
   '입력 초안을 저장하지 못했습니다. 입력은 유지됩니다. 잠시 후 다시 시도해 주세요.'
 const draftRemovalFailureMessage =
-  '분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다. 입력은 유지됩니다. 다시 시도해 주세요.'
+  '분석 데이터는 저장했지만 입력 초안을 삭제하지 못했습니다. 추가 변경은 화면에만 유지됩니다. 다시 시도하거나 화면을 새로고침해 주세요.'
 const draftChangedMessage =
   '적용 중 입력 내용이 변경되어 이동하지 않았습니다. 변경한 입력을 확인한 뒤 다시 시도해 주세요.'
 

@@ -191,3 +191,112 @@ started. No push, merge, SSH, or deployment action was performed.
 
 No new scoped concern remains. Previously documented whole-branch concerns
 and explicit deferrals are unchanged by this exceptional fix.
+
+## Scoped Re-Review Follow-Up - Transient Removal ABA
+
+Date: 2026-07-27
+
+Follow-up base: `6ba91bca5d0ec1572a2767e34bd9bb4767ea06e1`
+
+### Finding
+
+The first exceptional fix retained the original full identity after a
+transient removal failure, but `releaseApply()` made the lifecycle writable
+again. Draft writes compare an expected revision, not the complete generation
+identity. Another tab could therefore remove generation A, create generation
+B at the same revision, and have a later local edit overwrite B.
+
+### TDD RED Evidence
+
+The lifecycle, real localStorage UI, and apply-preview regressions were added
+before production changes:
+
+```text
+npx vitest run src/components/bills/manualBillDraftLifecycle.test.ts src/components/bills/ManualBillInput.test.tsx src/components/bills/BillUpload.test.tsx
+```
+
+RED result: 3 failed, 47 passed (50 total).
+
+The failures proved:
+
+- the lifecycle called `write(rows, 3)` after a `storage-error` removal;
+- a recreated generation with revision `0` and a different generation ID was
+  overwritten from usage `20` to local usage `30`;
+- recovery copy still invited a retry without disclosing that later edits
+  were no longer safe to persist.
+
+### Fix
+
+The lifecycle now enters a transient removal-recovery state after
+`storage-error` or `lock-error` removal failure.
+
+While in removal recovery:
+
+- the original revision and full generation identity remain unchanged;
+- queued and later row snapshots stay local and cannot reach `write`;
+- apply preparation can create only an exact-identity cleanup retry token;
+- direct removal retries also use the original full identity;
+- a stale retry escalates to the existing terminal conflict state;
+- a successful exact-identity removal clears recovery and resets revision and
+  identity before any genuinely later work is written create-only.
+
+If an edit arrives while a successful retry removal is in flight, generation
+tracking still blocks apply completion and the edit is persisted afterward as
+fresh create-only work. If no edit arrives, the snapshot already included in
+the successful apply is discarded rather than recreated as a draft.
+
+Manual input and apply preview now state that additional changes remain only
+on screen and instruct the user to retry cleanup or reload:
+
+```text
+초안을 삭제하지 못했습니다. 추가 변경은 화면에만 유지됩니다. 다시 시도하거나 화면을 새로고침해 주세요.
+```
+
+### Deterministic Coverage
+
+- A lifecycle fake models generation A and generation B with the same
+  revision and asserts that no revision-only write occurs.
+- The retry token and both removal calls are asserted against generation A's
+  complete identity.
+- The second removal returns stale, proving generation B is not deleted and
+  the lifecycle enters conflict.
+- A real storage integration removes the original draft, recreates a
+  same-revision/different-generation draft, edits the retained local row, and
+  confirms generation B remains unchanged.
+- The successful removal regression confirms later work writes with expected
+  revision `undefined` and adopts a fresh generation identity.
+- Existing BillUpload coverage confirms transient cleanup can still be
+  retried successfully after storage recovers.
+
+### Follow-Up Verification
+
+```text
+npx vitest run src/components/bills/manualBillDraftLifecycle.test.ts src/components/bills/ManualBillInput.test.tsx src/components/bills/BillUpload.test.tsx
+PASS: 3 files, 50 tests
+
+npm run typecheck
+PASS: tsc -b
+
+npm run lint
+PASS: oxlint
+
+npm test
+PASS: 39 files, 629 tests
+```
+
+`git diff --check` passed. No dev or test server was started. No push, merge,
+SSH, or deployment action was performed.
+
+### Follow-Up Self-Review
+
+- Removal recovery blocks all write entry points: queued persistence,
+  debounce arming, and timer execution.
+- Recovery can exit only through exact-identity removal success or stale
+  escalation to terminal conflict.
+- No storage read or identity adoption was reintroduced.
+- Normal successful removal still re-enables fresh create-only draft work.
+- Local rows remain component-owned and visible throughout failure recovery.
+- The follow-up changes only the lifecycle, its two existing status
+  consumers, their focused tests, and this appended report evidence.
+
+No additional scoped concern remains.

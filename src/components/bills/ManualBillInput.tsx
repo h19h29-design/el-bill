@@ -68,6 +68,8 @@ const numericFields = new Set<ManualBillDraftField>([
 const maximumManualPasteCharacters = 200_000
 export const manualBillDraftConflictMessage =
   '다른 탭에서 입력 초안이 변경되었습니다. 계속하려면 화면을 새로고침하거나 다시 열어 주세요.'
+const manualBillDraftRemovalRecoveryMessage =
+  '초안을 삭제하지 못했습니다. 추가 변경은 화면에만 유지됩니다. 다시 시도하거나 화면을 새로고침해 주세요.'
 
 const localYearMonth = () => {
   const now = new Date()
@@ -139,7 +141,7 @@ export function ManualBillInput({
         }
         setDraftMessage(
           status === 'remove-failed'
-            ? '초안을 삭제하지 못했습니다. 입력을 유지합니다.'
+            ? manualBillDraftRemovalRecoveryMessage
             : '초안을 저장하지 못했습니다. 입력은 화면에 유지됩니다.',
         )
       },

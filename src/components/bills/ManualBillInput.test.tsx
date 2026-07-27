@@ -8,6 +8,7 @@ import {
   billEntryDraftKeyFor,
   billEntryDraftPointerKey,
   readBillEntryDraft,
+  removeBillEntryDraft,
   writeBillEntryDraft,
 } from '../../lib/billDraftStorage'
 import type { BillImportContext } from '../../types'
@@ -426,6 +427,54 @@ describe('ManualBillInput', () => {
     expect(screen.getByLabelText('2026-07 사용량(kWh)')).not.toBeNull()
     expect(readBillEntryDraft()).not.toBeNull()
     removeItemSpy.mockRestore()
+  })
+
+  it('keeps later edits local after failed removal and same-revision generation replacement', async () => {
+    const user = userEvent.setup()
+    const initial = await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
+    ])
+    if (!initial.ok) throw new Error('draft setup failed')
+    const nativeRemoveItem = Storage.prototype.removeItem
+    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key) {
+      if (key.startsWith('el-bill:bill-entry-draft')) throw new Error('storage unavailable')
+      return nativeRemoveItem.call(this, key)
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderInput()
+
+    await user.click(screen.getByRole('button', { name: '전체 초기화' }))
+    await screen.findByText(/초안을 삭제하지 못했습니다/)
+    removeItemSpy.mockRestore()
+
+    const removed = await removeBillEntryDraft(initial.identity)
+    if (!removed.ok) throw new Error('original draft removal failed')
+    const recreated = await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '20', totalBillWon: '100' }),
+    ])
+    if (!recreated.ok) throw new Error('replacement draft setup failed')
+    expect(recreated.draft.revision).toBe(initial.draft.revision)
+    expect(recreated.identity.generationId).not.toBe(
+      initial.identity.generationId,
+    )
+
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByLabelText('2026-07 사용량(kWh)'), {
+      target: { value: '30' },
+    })
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
+
+    expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('20')
+    expect(
+      (screen.getByLabelText('2026-07 사용량(kWh)') as HTMLInputElement).value,
+    ).toBe('30')
+    expect(
+      screen.getByText(
+        /추가 변경은 화면에만 유지됩니다.*다시 시도하거나.*새로고침/,
+      ),
+    ).not.toBeNull()
   })
 
   it('cancels a pending write before a confirmed reset removes the draft', async () => {

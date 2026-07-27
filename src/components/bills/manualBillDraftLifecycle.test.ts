@@ -29,12 +29,18 @@ const makeRow = (
   ...patch,
 })
 
-const identityFor = (revision: number): BillEntryDraftIdentity => ({
+const identityForGeneration = (
+  revision: number,
+  generationId: string,
+): BillEntryDraftIdentity => ({
   sessionId: 'draft-session',
   revision,
-  generationId: `generation-${revision}`,
-  storageKey: `el-bill:bill-entry-draft:v1:draft-session:generation-${revision}`,
+  generationId,
+  storageKey: `el-bill:bill-entry-draft:v1:draft-session:${generationId}`,
 })
+
+const identityFor = (revision: number) =>
+  identityForGeneration(revision, `generation-${revision}`)
 
 const successfulWrite = (revision = 0) => ({
   ok: true as const,
@@ -148,6 +154,11 @@ describe('manual bill draft lifecycle', () => {
   it('preserves an edit made while CAS removal is in flight and blocks apply completion', async () => {
     vi.useFakeTimers()
     const persistence = createPersistence()
+    const freshIdentity = identityForGeneration(0, 'generation-fresh')
+    persistence.write = vi.fn(async () => ({
+      ...successfulWrite(),
+      identity: freshIdentity,
+    }))
     const removal = deferred<BillDraftRemovalResult>()
     persistence.remove = vi.fn(() => removal.promise)
     const lifecycle = createManualBillDraftLifecycle({
@@ -171,6 +182,12 @@ describe('manual bill draft lifecycle', () => {
       [expect.objectContaining({ usageKwh: '20' })],
       undefined,
     )
+    const nextPrepared = await lifecycle.prepareForApply()
+    expect(nextPrepared).toEqual({
+      ok: true,
+      token: { generation: 1, identity: freshIdentity },
+    })
+    if (nextPrepared.ok) lifecycle.cancelApply(nextPrepared.token)
   })
 
   it('reports a stale apply removal as a conflict without reading or adopting a newer identity', async () => {
@@ -269,6 +286,54 @@ describe('manual bill draft lifecycle', () => {
       [expect.objectContaining({ usageKwh: '20' })],
       3,
     )
+  })
+
+  it('blocks revision-only writes after a transient removal failure and retries the original full identity', async () => {
+    vi.useFakeTimers()
+    const originalIdentity = identityForGeneration(3, 'generation-original')
+    const recreatedIdentity = identityForGeneration(
+      3,
+      'generation-recreated',
+    )
+    const persistence = createPersistence()
+    persistence.write = vi.fn(async () => ({
+      ...successfulWrite(3),
+      identity: recreatedIdentity,
+    }))
+    persistence.remove = vi.fn()
+      .mockResolvedValueOnce({ ok: false, reason: 'storage-error' })
+      .mockResolvedValueOnce({ ok: false, reason: 'stale' })
+    const statuses: string[] = []
+    const lifecycle = createManualBillDraftLifecycle({
+      initialRevision: 3,
+      initialIdentity: originalIdentity,
+      persistence,
+      onStatus: (status) => statuses.push(status),
+    })
+
+    const firstPrepared = await lifecycle.prepareForApply()
+    if (!firstPrepared.ok) throw new Error('first draft preparation failed')
+    await expect(
+      lifecycle.completeApply(firstPrepared.token),
+    ).resolves.toEqual({ ok: false, reason: 'remove-failed' })
+
+    lifecycle.schedule([makeRow({ usageKwh: '30' })])
+    await vi.runAllTimersAsync()
+    expect(persistence.write).not.toHaveBeenCalled()
+
+    const retryPrepared = await lifecycle.prepareForApply()
+    expect(retryPrepared).toEqual({
+      ok: true,
+      token: { generation: 1, identity: originalIdentity },
+    })
+    if (!retryPrepared.ok) throw new Error('retry draft preparation failed')
+    await expect(
+      lifecycle.completeApply(retryPrepared.token),
+    ).resolves.toEqual({ ok: false, reason: 'conflict' })
+
+    expect(persistence.remove).toHaveBeenNthCalledWith(1, originalIdentity)
+    expect(persistence.remove).toHaveBeenNthCalledWith(2, originalIdentity)
+    expect(statuses).toEqual(['remove-failed', 'conflict'])
   })
 
   it('retries a transient removal failure only with the original identity', async () => {
