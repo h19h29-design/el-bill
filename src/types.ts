@@ -8,6 +8,7 @@ export type ViewKey =
   | 'peak'
   | 'docs'
   | 'settings'
+  | 'guide'
 
 export type Recommendation = '변경 추천' | '유지 추천' | '추가 검토 필요'
 

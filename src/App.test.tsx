@@ -62,6 +62,16 @@ afterEach(() => {
 })
 
 describe('data provenance persistence', () => {
+  it('opens the usage guide from the sidebar', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '사용 안내' }))
+
+    expect(
+      await screen.findByRole('heading', { name: '사용 방법 안내' }),
+    ).toBeTruthy()
+  })
+
   it('restores calculation mode and factors from the active snapshot', async () => {
     const calculationSettings = {
       ...defaultCalculationSettings,

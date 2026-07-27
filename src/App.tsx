@@ -124,6 +124,11 @@ const DocumentGenerator = lazy(() =>
     default: module.DocumentGenerator,
   })),
 )
+const UsageGuide = lazy(() =>
+  import('./components/guide/UsageGuide').then((module) => ({
+    default: module.UsageGuide,
+  })),
+)
 
 function ViewLoadingFallback() {
   return (
@@ -136,6 +141,7 @@ function ViewLoadingFallback() {
 function App() {
   const [initialStorage] = useState(initializeAppStorage)
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
+  const [guideSectionId, setGuideSectionId] = useState<string | null>(null)
   const [bills, setBills] = useState<MonthlyBill[]>(initialStorage.data.bills)
   const [profile, setProfile] = useState<SchoolProfile>(
     initialStorage.data.profile,
@@ -186,6 +192,11 @@ function App() {
     setActiveView('dashboard')
     setExpiryMessage(message)
   }, [])
+
+  const openGuide = (sectionId: string) => {
+    setGuideSectionId(sectionId)
+    setActiveView('guide')
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -722,7 +733,13 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar activeView={activeView} onChange={setActiveView} />
+      <Sidebar
+        activeView={activeView}
+        onChange={(view) => {
+          setGuideSectionId(null)
+          setActiveView(view)
+        }}
+      />
       <main className="main-area">
         <header className="app-header">
           <div>
@@ -786,7 +803,7 @@ function App() {
                   profile={profile}
                   ratePlans={ratePlans}
                   onBillsChange={applyBillsAndOpenDiagnosis}
-                  onOpenGuide={() => setActiveView('docs')}
+                  onOpenGuide={openGuide}
                 />
               )}
               {activeView === 'powerPlanner' && (
@@ -833,6 +850,12 @@ function App() {
                   scenario={scenario}
                   diagnosis={diagnosis}
                   peakOperationPlan={peakOperationPlan}
+                />
+              )}
+              {activeView === 'guide' && (
+                <UsageGuide
+                  requestedSectionId={guideSectionId}
+                  onOpenBills={() => setActiveView('bills')}
                 />
               )}
             </Suspense>
@@ -886,6 +909,11 @@ const viewMeta: Record<ViewKey, { step: string; title: string; description: stri
     step: '08',
     title: '변경신청 패키지 자동 생성',
     description: '계획안, 한전 공문, 변경신청서, 계산 근거, 검토 항목을 생성합니다.',
+  },
+  guide: {
+    step: '10',
+    title: '사용 방법 안내',
+    description: '파일, 붙여넣기, 직접 입력부터 진단과 문서 생성까지 순서대로 확인합니다.',
   },
   settings: {
     step: '09',

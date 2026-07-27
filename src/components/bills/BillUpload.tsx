@@ -178,6 +178,11 @@ export function BillUpload({
         aria-label="파일 업로드"
         hidden={activeMode !== 'file'}
       >
+        <div className="bill-input-panel-actions">
+          <button type="button" className="text-action" onClick={() => onOpenGuide('file-upload')}>
+            도움말
+          </button>
+        </div>
         <FileBillInput
           profile={profile}
           ratePlans={ratePlans}

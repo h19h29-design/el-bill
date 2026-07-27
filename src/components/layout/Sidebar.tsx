@@ -1,5 +1,6 @@
 import {
   Activity,
+  BookOpen,
   Building2,
   Calculator,
   ClipboardCheck,
@@ -28,6 +29,7 @@ const navItems: Array<{
   { key: 'rates', label: '요금제 비교', icon: Calculator },
   { key: 'peak', label: '피크관리', icon: Activity },
   { key: 'docs', label: '문서생성', icon: FileText },
+  { key: 'guide', label: '사용 안내', icon: BookOpen },
   { key: 'settings', label: '설정', icon: Settings },
 ]
 

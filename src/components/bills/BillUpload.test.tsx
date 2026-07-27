@@ -78,6 +78,9 @@ describe('bill upload tariff configuration', () => {
       />,
     )
 
+    await user.click(screen.getByRole('button', { name: '도움말' }))
+    expect(onOpenGuide).toHaveBeenLastCalledWith('file-upload')
+
     await user.click(screen.getByRole('tab', { name: '표 붙여넣기' }))
     await user.click(screen.getByRole('button', { name: '입력 안내' }))
     expect(onOpenGuide).toHaveBeenLastCalledWith('paste-input')

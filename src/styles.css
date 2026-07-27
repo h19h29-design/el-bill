@@ -296,6 +296,163 @@ button:disabled {
   gap: 14px;
 }
 
+.guide-layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.guide-index {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 10px;
+  padding-right: 18px;
+  border-right: 1px solid var(--line);
+}
+
+.guide-index strong {
+  color: #19375a;
+  font-size: 13px;
+}
+
+.guide-index nav {
+  display: grid;
+  gap: 3px;
+}
+
+.guide-index a {
+  padding: 6px 0;
+  color: #526b85;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.guide-index a:hover,
+.guide-index a:focus-visible {
+  color: var(--blue-700);
+  text-decoration: underline;
+}
+
+.guide-mobile-index {
+  display: none;
+}
+
+.guide-content {
+  min-width: 0;
+}
+
+.guide-header {
+  padding-bottom: 20px;
+  border-bottom: 2px solid var(--blue-700);
+}
+
+.guide-header h1 {
+  margin: 0;
+  color: #08264b;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.guide-header p,
+.guide-section p,
+.guide-section li {
+  color: #415d78;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.guide-header p {
+  margin: 8px 0 0;
+}
+
+.guide-section {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-top: 24px;
+}
+
+.guide-section h2 {
+  margin: 0 0 10px;
+  color: #19375a;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.guide-section h2:focus-visible {
+  outline: 3px solid rgba(11, 114, 231, 0.24);
+  outline-offset: 4px;
+}
+
+.guide-section p {
+  margin: 10px 0 0;
+}
+
+.guide-section ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.guide-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.guide-warning {
+  padding: 12px 14px;
+  color: #7a3c17 !important;
+  background: #fff8ec;
+  border-left: 3px solid #f09a38;
+}
+
+.guide-warning strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.guide-prompt {
+  max-height: 380px;
+  margin: 14px 0 0;
+  padding: 14px;
+  overflow: auto;
+  color: #183755;
+  background: #f6f9fc;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.guide-status {
+  grid-column: 2;
+  min-height: 20px;
+  margin: 0;
+  color: #0b7a47;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bill-input-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 6px;
+}
+
 .view-loading {
   display: grid;
   min-height: 520px;
@@ -2297,6 +2454,35 @@ textarea:focus {
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
+  }
+
+  .guide-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .guide-index {
+    display: none;
+  }
+
+  .guide-mobile-index {
+    display: block;
+  }
+
+  .guide-mobile-index label {
+    display: grid;
+    gap: 5px;
+    color: #415d78;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .guide-mobile-index select {
+    width: 100%;
+  }
+
+  .guide-status {
+    grid-column: 1;
   }
 
   .sidebar {
