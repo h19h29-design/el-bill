@@ -1,6 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
@@ -9,6 +10,56 @@ import { BillUpload } from './BillUpload'
 afterEach(cleanup)
 
 describe('bill upload tariff configuration', () => {
+  it('uses accessible tabs to switch bill input modes', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={async () => true}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    expect(screen.getByRole('tab', { name: '파일 업로드' }).getAttribute('aria-selected')).toBe('true')
+
+    await user.click(screen.getByRole('tab', { name: '표 붙여넣기' }))
+    expect(screen.getByRole('tabpanel').getAttribute('aria-label')).toBe('표 붙여넣기')
+
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '직접 입력' }))
+  })
+
+  it('saves uploaded file candidates with the uploaded origin', async () => {
+    const onBillsChange = vi.fn(async () => true)
+    const { container } = render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    fireEvent.change(container.querySelector('input[accept=".csv"]')!, {
+      target: {
+        files: [
+          new File(
+            ['연도,월,사용량,총 전기요금\n2026,7,42000,6420000'],
+            'billing.csv',
+            { type: 'text/csv' },
+          ),
+        ],
+      },
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: '이 매핑으로 분석 시작' }))
+    expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'uploaded')
+  })
+
   it('shows configuration guidance and blocks analysis without an exact plan', async () => {
     const { container } = render(
       <BillUpload
@@ -16,13 +67,14 @@ describe('bill upload tariff configuration', () => {
         profile={{ ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' }}
         ratePlans={defaultRatePlans}
         onBillsChange={async () => true}
+        onOpenGuide={() => undefined}
       />,
     )
 
     expect(screen.getByText(/현재 프로필과 정확히 일치하는 요금제가 없습니다/)).toBeTruthy()
     expect(screen.getByText(/계약종별, 수전전압, 현재 요금제를 일치시켜야/)).toBeTruthy()
 
-    fireEvent.change(container.querySelector('input[type="file"]')!, {
+    fireEvent.change(container.querySelector('input[accept=".csv"]')!, {
       target: {
         files: [
           new File(
@@ -46,10 +98,11 @@ describe('bill upload tariff configuration', () => {
         profile={{ ...defaultSchoolProfile, currentPlan: '설정에 없는 요금제' }}
         ratePlans={defaultRatePlans}
         onBillsChange={onBillsChange}
+        onOpenGuide={() => undefined}
       />,
     )
 
-    fireEvent.change(container.querySelector('input[type="file"]')!, {
+    fireEvent.change(container.querySelector('input[accept=".csv"]')!, {
       target: {
         files: [
           new File(
@@ -78,10 +131,11 @@ describe('bill upload tariff configuration', () => {
         profile={defaultSchoolProfile}
         ratePlans={defaultRatePlans}
         onBillsChange={onBillsChange}
+        onOpenGuide={() => undefined}
       />,
     )
 
-    fireEvent.change(container.querySelector('input[type="file"]')!, {
+    fireEvent.change(container.querySelector('input[accept=".csv"]')!, {
       target: {
         files: [
           new File(

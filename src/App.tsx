@@ -785,9 +785,8 @@ function App() {
                   bills={bills}
                   profile={profile}
                   ratePlans={ratePlans}
-                  onBillsChange={(nextBills) =>
-                    applyBillsAndOpenDiagnosis(nextBills, 'uploaded')
-                  }
+                  onBillsChange={applyBillsAndOpenDiagnosis}
+                  onOpenGuide={() => setActiveView('docs')}
                 />
               )}
               {activeView === 'powerPlanner' && (

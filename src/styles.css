@@ -570,6 +570,85 @@ textarea:focus {
   align-items: center;
 }
 
+.bill-input-tabs {
+  display: flex;
+  min-height: 46px;
+  padding: 4px;
+  background: #ecf4fd;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.bill-input-tabs button {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  color: #3f5c7e;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.bill-input-tabs button.active {
+  color: #ffffff;
+  background: var(--blue-700);
+}
+
+.bill-input-tabs button:focus-visible {
+  outline: 3px solid rgba(11, 114, 231, 0.35);
+  outline-offset: 1px;
+}
+
+.input-mode-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.input-mode-shell h2,
+.input-mode-shell p {
+  margin: 0;
+}
+
+.input-mode-shell p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bill-input-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.bill-input-summary article {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  background: #f7fbff;
+  border: 1px solid #dbe8f6;
+  border-radius: 7px;
+}
+
+.bill-input-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bill-input-summary strong {
+  overflow-wrap: anywhere;
+  color: #173858;
+  font-size: 13px;
+}
+
 .upload-panel h2,
 .upload-panel p {
   margin: 0;
@@ -2079,6 +2158,7 @@ textarea:focus {
   }
 
   .form-grid.four,
+  .bill-input-summary,
   .mapping-grid,
   .comparison-grid,
   .peak-summary-grid,
