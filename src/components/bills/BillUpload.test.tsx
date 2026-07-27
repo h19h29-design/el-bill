@@ -1,14 +1,36 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ExcelJS from 'exceljs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
+import { readBillEntryDraft, writeBillEntryDraft } from '../../lib/billDraftStorage'
 import { BillUpload } from './BillUpload'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  localStorage.clear()
+})
+
+const makeDraft = (patch: Record<string, string> = {}) => ({
+  id: 'saved-manual-row',
+  yearMonth: '2026-07',
+  usageKwh: '48,365 kWh',
+  totalBillWon: '7,138,790원',
+  maxDemandKw: '',
+  appliedPowerKw: '',
+  baseChargeWon: '',
+  energyChargeWon: '',
+  powerFactorChargeWon: '',
+  climateChargeWon: '',
+  fuelAdjustmentWon: '',
+  vatWon: '',
+  fundWon: '',
+  note: '',
+  ...patch,
+})
 
 const toArrayBuffer = (buffer: ArrayBuffer | Uint8Array) =>
   buffer instanceof ArrayBuffer
@@ -38,6 +60,39 @@ const createSyntheticWorkbook = async () => {
 }
 
 describe('bill upload tariff configuration', () => {
+  it('mounts personal-entry panels, opens their guide anchors, and removes an applied manual draft', async () => {
+    const user = userEvent.setup()
+    const onOpenGuide = vi.fn()
+    const onBillsChange = vi.fn(async () => true)
+    await writeBillEntryDraft([makeDraft()])
+
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onOpenGuide={onOpenGuide}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: '표 붙여넣기' }))
+    await user.click(screen.getByRole('button', { name: '입력 안내' }))
+    expect(onOpenGuide).toHaveBeenLastCalledWith('paste-input')
+    expect(screen.getByLabelText('붙여넣을 표')).not.toBeNull()
+
+    await user.click(screen.getByRole('tab', { name: '직접 입력' }))
+    await user.click(screen.getByRole('button', { name: '입력 안내' }))
+    expect(onOpenGuide).toHaveBeenLastCalledWith('manual-input')
+    await user.click(screen.getByRole('button', { name: '이 데이터로 분석 시작' }))
+
+    await waitFor(() => expect(onBillsChange).toHaveBeenCalledWith(
+      expect.any(Array),
+      'manual',
+    ))
+    await waitFor(() => expect(readBillEntryDraft()).toBeNull())
+  })
+
   it('uses accessible tabs to switch bill input modes', async () => {
     const user = userEvent.setup()
 

@@ -1,9 +1,12 @@
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ClipboardPaste, FileUp, PenLine } from 'lucide-react'
+import { removeBillEntryDraft } from '../../lib/billDraftStorage'
 import { findExactRatePlan } from '../../lib/diagnosis'
 import type { BillDataOrigin, MonthlyBill, RatePlan, SchoolProfile } from '../../types'
 import { BillInputPreview, type BillInputCandidate } from './BillInputPreview'
 import { FileBillInput } from './FileBillInput'
+import { ManualBillInput } from './ManualBillInput'
+import { PastedBillInput } from './PastedBillInput'
 
 export type BillInputMode = 'file' | 'paste' | 'manual'
 export type { BillInputCandidate } from './BillInputPreview'
@@ -45,6 +48,7 @@ export function BillUpload({
   profile,
   ratePlans,
   onBillsChange,
+  onOpenGuide,
 }: BillUploadProps) {
   const [activeMode, setActiveMode] = useState<BillInputMode>('file')
   const [candidates, setCandidates] = useState(emptyCandidates)
@@ -54,6 +58,12 @@ export function BillUpload({
     () => Boolean(findExactRatePlan(profile, ratePlans)),
     [profile, ratePlans],
   )
+  const importContext = useMemo(() => {
+    const currentPlan = findExactRatePlan(profile, ratePlans)
+    return currentPlan
+      ? { appliedPowerKw: profile.appliedPowerKw, currentPlan }
+      : undefined
+  }, [profile, ratePlans])
 
   const selectMode = (mode: BillInputMode, focus = false) => {
     setActiveMode(mode)
@@ -87,6 +97,18 @@ export function BillUpload({
     },
     [handleCandidateChange],
   )
+  const handlePasteCandidateChange = useCallback(
+    (nextCandidate: BillInputCandidate | null) => {
+      handleCandidateChange('paste', nextCandidate)
+    },
+    [handleCandidateChange],
+  )
+  const handleManualCandidateChange = useCallback(
+    (nextCandidate: BillInputCandidate | null) => {
+      handleCandidateChange('manual', nextCandidate)
+    },
+    [handleCandidateChange],
+  )
 
   const handleConfirm = async (
     mode: BillInputMode,
@@ -100,6 +122,10 @@ export function BillUpload({
     }
     if (!saved) {
       setMessages((current) => ({ ...current, [mode]: storageFailureMessage }))
+      return
+    }
+    if (mode === 'manual') {
+      await removeBillEntryDraft()
     }
   }
 
@@ -161,9 +187,11 @@ export function BillUpload({
         aria-label="표 붙여넣기"
         hidden={activeMode !== 'paste'}
       >
-        <section className="panel input-mode-shell">
-          <h2>표 붙여넣기</h2>
-        </section>
+        <PastedBillInput
+          importContext={importContext}
+          onCandidateChange={handlePasteCandidateChange}
+          onOpenGuide={onOpenGuide}
+        />
         <BillInputPreview
           candidate={candidates.paste}
           currentBills={bills}
@@ -179,9 +207,11 @@ export function BillUpload({
         aria-label="직접 입력"
         hidden={activeMode !== 'manual'}
       >
-        <section className="panel input-mode-shell">
-          <h2>직접 입력</h2>
-        </section>
+        <ManualBillInput
+          importContext={importContext}
+          onCandidateChange={handleManualCandidateChange}
+          onOpenGuide={onOpenGuide}
+        />
         <BillInputPreview
           candidate={candidates.manual}
           currentBills={bills}

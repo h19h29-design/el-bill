@@ -620,6 +620,142 @@ textarea:focus {
   font-size: 13px;
 }
 
+.pasted-bill-panel,
+.manual-bill-panel,
+.manual-grid-panel,
+.paste-recognition-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.text-action {
+  min-height: 32px;
+  padding: 0 4px;
+  color: var(--blue-700);
+  background: transparent;
+  border: 0;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: underline;
+}
+
+.field-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.manual-controls,
+.manual-grid-toolbar,
+.manual-grid-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 9px;
+}
+
+.manual-controls {
+  justify-content: space-between;
+}
+
+.manual-controls label {
+  display: grid;
+  min-width: 150px;
+  gap: 6px;
+  color: #315879;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.manual-grid-toolbar {
+  justify-content: space-between;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.first-error-action {
+  width: fit-content;
+}
+
+.manual-grid-scroll {
+  overflow-x: auto;
+  border: 1px solid #dce8f5;
+  border-radius: 7px;
+}
+
+.manual-bill-grid {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.manual-bill-grid th,
+.manual-bill-grid td {
+  padding: 8px;
+  border-bottom: 1px solid #e5eef7;
+  text-align: left;
+  vertical-align: top;
+}
+
+.manual-bill-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: #315879;
+  background: #f2f8ff;
+  white-space: nowrap;
+}
+
+.manual-bill-grid td > input {
+  width: 132px;
+  min-width: 132px;
+}
+
+.manual-bill-grid tr.has-input-issues td {
+  background: #fff8f3;
+}
+
+.cell-issue {
+  max-width: 150px;
+  margin: 5px 0 0;
+  color: #b45309;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.row-issue,
+.row-valid {
+  display: inline-block;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+.row-issue {
+  color: #b45309;
+}
+
+.row-valid {
+  color: #5a738b;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 32px;
+  padding: 0 7px;
+  color: #8b3b32;
+  background: #fff;
+  border: 1px solid #e8c9c4;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .bill-input-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
