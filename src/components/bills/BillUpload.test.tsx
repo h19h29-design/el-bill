@@ -159,6 +159,33 @@ describe('bill upload tariff configuration', () => {
     removeItemSpy.mockRestore()
   })
 
+  it('retains manual candidate, rows, and draft when the analysis save fails', async () => {
+    const user = userEvent.setup()
+    const onBillsChange = vi.fn(async () => false)
+    await writeBillEntryDraft([makeDraft()])
+
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={onBillsChange}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: '직접 입력' }))
+    await user.click(screen.getByRole('button', { name: '이 데이터로 분석 시작' }))
+
+    await waitFor(() => expect(onBillsChange).toHaveBeenCalledWith(expect.any(Array), 'manual'))
+    expect(screen.getByRole('tab', { name: '직접 입력' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('heading', { name: '새 입력 데이터' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '이 데이터로 분석 시작' })).toBeTruthy()
+    expect(screen.getByLabelText('2026-07 사용량(kWh)')).toBeTruthy()
+    expect(readBillEntryDraft()?.rows[0].usageKwh).toBe('48,365 kWh')
+    expect(screen.getByText(/브라우저 저장소에 자료를 저장하지 못했습니다/)).toBeTruthy()
+  })
+
   it('uses accessible tabs to switch bill input modes', async () => {
     const user = userEvent.setup()
 

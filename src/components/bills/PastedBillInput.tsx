@@ -34,6 +34,40 @@ const mappingFields = [
 ] as const
 
 const requiredMappingFields = ['year', 'month', 'usageKwh', 'totalBillWon'] as const
+type RequiredMappingField = typeof requiredMappingFields[number]
+
+const automaticRequiredSynonyms: Record<RequiredMappingField, readonly string[]> = {
+  year: ['연도', '년도', '청구연도', '청구년도'],
+  month: ['월', '월분', '청구월', '청구월분'],
+  usageKwh: ['사용량', '사용량kwh', '전력사용량', '전력사용량kwh'],
+  totalBillWon: [
+    '총전기요금',
+    '총전기요금원',
+    '전기요금',
+    '전기요금원',
+    '청구금액',
+    '청구금액원',
+    '납부금액',
+    '납부금액원',
+    '청구요금',
+    '청구요금원',
+    '납부요금',
+    '납부요금원',
+  ],
+}
+
+const normalizeRequiredHeader = (header: string) =>
+  header.toLocaleLowerCase('ko-KR').replace(/[\s()[\]{}_-]/g, '')
+
+const buildAutomaticRequiredMapping = (headers: string[]) =>
+  Object.fromEntries(
+    requiredMappingFields.map((field) => {
+      const matches = headers.filter((header) =>
+        automaticRequiredSynonyms[field].includes(normalizeRequiredHeader(header)),
+      )
+      return [field, matches.length === 1 ? matches[0] : '']
+    }),
+  ) as Record<RequiredMappingField, string>
 
 const getRequiredMappingCollisions = (mapping: Record<string, string>) => {
   const fieldsByHeader = new Map<string, string[]>()
@@ -60,9 +94,17 @@ export function PastedBillInput({
     () => getRequiredMappingCollisions(mapping),
     [mapping],
   )
+  const missingRequiredMapping = requiredMappingFields.some((field) => !mapping[field])
   const hasRequiredMapping =
-    requiredMappingFields.every((field) => mapping[field]) &&
+    !missingRequiredMapping &&
     requiredMappingCollisions.length === 0
+  const mappingMessage = sheet?.rows.length
+    ? requiredMappingCollisions.length > 0
+      ? '필수 항목은 서로 다른 컬럼으로 지정해 주세요.'
+      : missingRequiredMapping
+        ? '필수 컬럼을 지정해 주세요.'
+        : ''
+    : ''
   const pendingBills = useMemo(
     () => sheet && hasRequiredMapping
       ? mapRowsToBills(sheet.rows, mapping, importContext)
@@ -104,7 +146,10 @@ export function PastedBillInput({
 
     try {
       const parsed = parsePastedBillSheet(text)
-      const nextMapping = buildBillColumnMapping(parsed.headers)
+      const nextMapping = {
+        ...buildBillColumnMapping(parsed.headers),
+        ...buildAutomaticRequiredMapping(parsed.headers),
+      }
       const missingRequired = requiredMappingFields.some((field) => !nextMapping[field])
       const hasRequiredCollision = getRequiredMappingCollisions(nextMapping).length > 0
       setSheet(parsed)
@@ -112,11 +157,7 @@ export function PastedBillInput({
       setShowMapping(missingRequired || hasRequiredCollision)
       setMessage(
         parsed.rows.length
-          ? missingRequired || hasRequiredCollision
-            ? hasRequiredCollision
-              ? '필수 항목은 서로 다른 컬럼으로 지정해 주세요.'
-              : '필수 컬럼을 지정해 주세요.'
-            : ''
+          ? ''
           : '헤더 다음에 인식할 고지서 행을 입력해 주세요.',
       )
     } catch (error) {
@@ -179,12 +220,9 @@ export function PastedBillInput({
           </button>
         </div>
         {isValidCandidate && <p className="status-line">{pendingBills.length}개월을 인식했습니다.</p>}
-        {message && <p className="empty-state" role="status">{message}</p>}
+        {(message || mappingMessage) && <p className="empty-state" role="status">{message || mappingMessage}</p>}
         {sheet && !isValidCandidate && hasRequiredMapping && pendingBills.length !== sheet.rows.length && (
           <p className="empty-state" role="status">필수 값이 비어 있거나 올바르지 않은 행이 있습니다. 모든 행을 보완해 주세요.</p>
-        )}
-        {sheet && requiredMappingCollisions.length > 0 && (
-          <p className="empty-state" role="status">필수 항목은 서로 다른 컬럼으로 지정해 주세요.</p>
         )}
         {sheet && periodValidation.issues.length > 0 && (
           <ul className="diagnostics-list">

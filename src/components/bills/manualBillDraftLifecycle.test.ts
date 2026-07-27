@@ -40,6 +40,14 @@ const createPersistence = (): ManualBillDraftPersistence => ({
   remove: vi.fn(async () => true),
 })
 
+const deferred = <Value,>() => {
+  let resolve: (value: Value) => void = () => undefined
+  const promise = new Promise<Value>((nextResolve) => {
+    resolve = nextResolve
+  })
+  return { promise, resolve }
+}
+
 afterEach(() => vi.useRealTimers())
 
 describe('manual bill draft lifecycle', () => {
@@ -116,5 +124,53 @@ describe('manual bill draft lifecycle', () => {
 
     expect(statuses).toContain('write-failed')
     expect(statuses).toContain('remove-failed')
+  })
+
+  it('writes the latest edit scheduled during a successful removal without reviving the old snapshot', async () => {
+    vi.useFakeTimers()
+    const persistence = createPersistence()
+    const removal = deferred<boolean>()
+    persistence.remove = vi.fn(() => removal.promise)
+    const lifecycle = createManualBillDraftLifecycle({ persistence })
+
+    lifecycle.schedule([makeRow({ usageKwh: '10' })])
+    const remove = lifecycle.remove()
+    await Promise.resolve()
+    lifecycle.schedule([makeRow({ usageKwh: '20' })])
+    removal.resolve(true)
+    await expect(remove).resolves.toEqual({ ok: true })
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(persistence.write).toHaveBeenCalledTimes(1)
+    expect(persistence.write).toHaveBeenLastCalledWith(
+      [expect.objectContaining({ usageKwh: '20' })],
+      undefined,
+    )
+  })
+
+  it('writes the latest edit after a failed removal with the refreshed revision', async () => {
+    vi.useFakeTimers()
+    const persistence = createPersistence()
+    const removal = deferred<boolean>()
+    persistence.remove = vi.fn(() => removal.promise)
+    persistence.read = vi.fn(() => ({ ...successfulWrite(7).draft, revision: 7 }))
+    const lifecycle = createManualBillDraftLifecycle({
+      initialRevision: 3,
+      persistence,
+    })
+
+    lifecycle.schedule([makeRow({ usageKwh: '10' })])
+    const remove = lifecycle.remove()
+    await Promise.resolve()
+    lifecycle.schedule([makeRow({ usageKwh: '30' })])
+    removal.resolve(false)
+    await expect(remove).resolves.toEqual({ ok: false })
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(persistence.write).toHaveBeenCalledTimes(1)
+    expect(persistence.write).toHaveBeenLastCalledWith(
+      [expect.objectContaining({ usageKwh: '30' })],
+      7,
+    )
   })
 })

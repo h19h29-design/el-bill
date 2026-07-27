@@ -83,6 +83,54 @@ describe('PastedBillInput', () => {
     expect(screen.getByLabelText('총 전기요금')).not.toBeNull()
   })
 
+  it('does not infer a total bill from a distinct generic total-usage column', async () => {
+    const user = userEvent.setup()
+    const { onCandidateChange } = renderInput()
+
+    await user.click(screen.getByLabelText('붙여넣을 표'))
+    await user.paste(
+      '연도\t월\t사용량(kWh)\t총사용량\n2026\t7\t48365\t7138790',
+    )
+    await user.click(screen.getByRole('button', { name: '붙여넣은 표 확인' }))
+
+    expect(screen.getByRole('heading', { name: '컬럼 매핑' })).not.toBeNull()
+    expect((screen.getByLabelText('총 전기요금') as HTMLSelectElement).value).toBe('')
+    expect(onCandidateChange).toHaveBeenLastCalledWith(null)
+    expect(screen.queryByText('1개월을 인식했습니다.')).toBeNull()
+  })
+
+  it.each([
+    ['연도\t월\t사용량(kWh)\t총 전기요금(원)', '기본 표기'],
+    ['년도\t월분\t전력사용량(kWh)\t청구금액(원)', '인식된 동의어'],
+  ])('accepts %s as %s automatic required mappings', async (headers) => {
+    const user = userEvent.setup()
+    const { onCandidateChange } = renderInput()
+
+    await user.click(screen.getByLabelText('붙여넣을 표'))
+    await user.paste(`${headers}\n2026\t7\t48365\t7138790`)
+    await user.click(screen.getByRole('button', { name: '붙여넣은 표 확인' }))
+
+    expect(screen.getByText('1개월을 인식했습니다.')).not.toBeNull()
+    expect(onCandidateChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ origin: 'pasted' }),
+    )
+  })
+
+  it('accepts an explicit distinct user mapping for an uncertain required header', async () => {
+    const user = userEvent.setup()
+    const { onCandidateChange } = renderInput()
+
+    await user.click(screen.getByLabelText('붙여넣을 표'))
+    await user.paste('연도\t월\t사용량(kWh)\t합계\n2026\t7\t48365\t7138790')
+    await user.click(screen.getByRole('button', { name: '붙여넣은 표 확인' }))
+    await user.selectOptions(screen.getByLabelText('총 전기요금'), '합계')
+
+    expect(screen.getByText('1개월을 인식했습니다.')).not.toBeNull()
+    expect(onCandidateChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ origin: 'pasted' }),
+    )
+  })
+
   it('blocks ambiguous required-header inference until distinct columns are chosen', async () => {
     const user = userEvent.setup()
     const { onCandidateChange } = renderInput()
@@ -111,6 +159,7 @@ describe('PastedBillInput', () => {
     await user.selectOptions(screen.getByLabelText('총 전기요금'), '총 전기요금(원)')
 
     expect(screen.getByText('1개월을 인식했습니다.')).not.toBeNull()
+    expect(screen.queryByText('필수 항목은 서로 다른 컬럼으로 지정해 주세요.')).toBeNull()
     expect(onCandidateChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ origin: 'pasted' }),
     )

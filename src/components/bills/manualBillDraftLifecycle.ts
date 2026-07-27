@@ -51,30 +51,37 @@ export const createManualBillDraftLifecycle = ({
   let timer: ReturnType<typeof setTimeout> | null = null
   let writeChain = Promise.resolve()
   let removing = false
+  let deferredRows: ManualBillDraftRow[] | null = null
+  let disposed = false
 
   const clearTimer = () => {
     if (timer !== null) clearTimeout(timer)
     timer = null
   }
 
-  const schedule = (rows: ManualBillDraftRow[]) => {
-    if (removing) return
+  const takeDeferredRows = (): ManualBillDraftRow[] | null => {
+    const nextRows = deferredRows
+    deferredRows = null
+    return nextRows
+  }
+
+  const scheduleSnapshot = (snapshot: ManualBillDraftRow[]) => {
+    if (disposed) return
     generation += 1
     const writeGeneration = generation
     clearTimer()
-    const snapshot = rows.map((row) => ({ ...row }))
     timer = setTimeout(() => {
       timer = null
       writeChain = writeChain.then(async () => {
-        if (writeGeneration !== generation || removing) return
+        if (writeGeneration !== generation || removing || disposed) return
         let result: BillDraftWriteResult
         try {
           result = await persistence.write(snapshot, revision)
         } catch {
-          if (writeGeneration === generation && !removing) onStatus?.('write-failed')
+          if (writeGeneration === generation && !removing && !disposed) onStatus?.('write-failed')
           return
         }
-        if (writeGeneration !== generation || removing) return
+        if (writeGeneration !== generation || removing || disposed) return
         if (result.ok) {
           revision = result.draft.revision
           onStatus?.('saved')
@@ -85,9 +92,21 @@ export const createManualBillDraftLifecycle = ({
     }, debounceMs)
   }
 
+  const schedule = (rows: ManualBillDraftRow[]) => {
+    if (disposed) return
+    const snapshot = rows.map((row) => ({ ...row }))
+    if (removing) {
+      deferredRows = snapshot
+      return
+    }
+    scheduleSnapshot(snapshot)
+  }
+
   const remove = async () => {
+    if (disposed) return { ok: true }
     generation += 1
     clearTimer()
+    deferredRows = null
     removing = true
     await writeChain
     let removed = false
@@ -103,18 +122,23 @@ export const createManualBillDraftLifecycle = ({
     } catch {
       currentDraft = undefined
     }
+    const nextRows = takeDeferredRows()
     if (removed || currentDraft === null) {
       revision = undefined
+      if (nextRows?.length) scheduleSnapshot(nextRows)
       return { ok: true }
     }
     revision = currentDraft?.revision ?? revision
     onStatus?.('remove-failed')
+    if (nextRows?.length) scheduleSnapshot(nextRows)
     return { ok: false }
   }
 
   const dispose = () => {
+    disposed = true
     generation += 1
     clearTimer()
+    deferredRows = null
   }
 
   return { schedule, remove, dispose }
