@@ -263,7 +263,7 @@ describe('shared live storage expiry', () => {
 
     render(<App />)
     expect(document.querySelector('.notice-detail')?.textContent).toContain(
-      '고지서: 사용자 업로드',
+      '고지서: 파일 업로드',
     )
 
     act(() => {
