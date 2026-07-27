@@ -5,7 +5,9 @@ import {
 } from './storage'
 
 const dayMs = 24 * 60 * 60 * 1000
+const maxDateMs = 8_640_000_000_000_000
 const maxDraftRows = 36
+const maxCleanupKeys = 64
 const billEntryDraftPrefix = 'el-bill:bill-entry-draft:v1:'
 
 const draftRowFields = [
@@ -34,7 +36,8 @@ const draftFields = [
   'rows',
 ] as const
 
-const pointerFields = ['version', 'sessionId'] as const
+const legacyPointerFields = ['version', 'sessionId'] as const
+const pointerFields = ['version', 'sessionId', 'generationId'] as const
 
 export interface BillEntryDraft {
   version: 1
@@ -55,12 +58,45 @@ export type BillDraftWriteResult =
 interface BillEntryDraftPointer {
   version: 1
   sessionId: string
+  generationId?: string
+}
+
+type DraftReadState =
+  | { status: 'missing'; pointerRaw: null }
+  | { status: 'malformed-pointer'; pointerRaw: string }
+  | {
+      status: 'missing-draft' | 'malformed-draft'
+      pointerRaw: string
+      pointer: BillEntryDraftPointer
+      key: string
+      draftRaw: string | null
+    }
+  | {
+      status: 'expired' | 'valid'
+      pointerRaw: string
+      pointer: BillEntryDraftPointer
+      key: string
+      draftRaw: string
+      draft: BillEntryDraft
+    }
+
+interface CleanupResult {
+  removed: boolean
+  failed: boolean
 }
 
 export const billEntryDraftPointerKey = 'el-bill:bill-entry-draft-active'
 
 export const billEntryDraftKeyFor = (sessionId: string): string =>
   `${billEntryDraftPrefix}${encodeURIComponent(sessionId)}`
+
+const generationKeyFor = (sessionId: string, generationId: string) =>
+  `${billEntryDraftKeyFor(sessionId)}:${encodeURIComponent(generationId)}`
+
+const pointerKeyFor = (pointer: BillEntryDraftPointer) =>
+  pointer.generationId
+    ? generationKeyFor(pointer.sessionId, pointer.generationId)
+    : billEntryDraftKeyFor(pointer.sessionId)
 
 const hasExactKeys = (
   value: Record<string, unknown>,
@@ -73,23 +109,43 @@ const hasExactKeys = (
   )
 }
 
+const isValidTimestamp = (value: number) =>
+  Number.isSafeInteger(value) && value >= 0 && value <= maxDateMs
+
+const isValidNow = (value: number) => isValidTimestamp(value)
+
+const isValidRevision = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isSafeInteger(value) &&
+  value >= 0
+
 const parseDraftPointer = (
   raw: string | null,
 ): BillEntryDraftPointer | null => {
   if (!raw) return null
   try {
     const value = JSON.parse(raw) as unknown
-    if (!value || typeof value !== 'object') return null
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
     const pointer = value as Record<string, unknown>
+    const isLegacy = hasExactKeys(pointer, legacyPointerFields)
+    const isGenerationPointer = hasExactKeys(pointer, pointerFields)
     if (
-      !hasExactKeys(pointer, pointerFields) ||
+      (!isLegacy && !isGenerationPointer) ||
       pointer.version !== 1 ||
       typeof pointer.sessionId !== 'string' ||
-      !pointer.sessionId
+      !pointer.sessionId ||
+      (isGenerationPointer &&
+        (typeof pointer.generationId !== 'string' || !pointer.generationId))
     ) {
       return null
     }
-    return { version: 1, sessionId: pointer.sessionId }
+    return {
+      version: 1,
+      sessionId: pointer.sessionId,
+      ...(isGenerationPointer
+        ? { generationId: pointer.generationId as string }
+        : {}),
+    }
   } catch {
     return null
   }
@@ -141,10 +197,9 @@ const parseBillEntryDraft = (
       !hasExactKeys(draft, draftFields) ||
       draft.version !== 1 ||
       draft.sessionId !== expectedSessionId ||
-      !Number.isInteger(draft.revision) ||
-      Number(draft.revision) < 0 ||
-      !Number.isFinite(createdAt) ||
-      !Number.isFinite(expiresAt) ||
+      !isValidRevision(draft.revision) ||
+      !isValidTimestamp(createdAt) ||
+      !isValidTimestamp(expiresAt) ||
       duration <= 0 ||
       duration > dayMs ||
       !isValidDraftRows(draft.rows)
@@ -157,88 +212,106 @@ const parseBillEntryDraft = (
   }
 }
 
-const removePointerAndDraftBestEffort = (
-  sessionId: string,
-  pointerRaw: string | null,
-  draftRaw: string | null,
-) => {
-  let draftRemoved = false
-  try {
-    const key = billEntryDraftKeyFor(sessionId)
-    if (localStorage.getItem(key) !== draftRaw) return
-    localStorage.removeItem(key)
-    draftRemoved = localStorage.getItem(key) === null
-  } catch {
-    // A later read or cleanup pass retries physical deletion.
-  }
-  if (!draftRemoved) return
-  try {
-    if (localStorage.getItem(billEntryDraftPointerKey) === pointerRaw) {
-      localStorage.removeItem(billEntryDraftPointerKey)
-    }
-  } catch {
-    // A later read or cleanup pass retries physical deletion.
-  }
-}
-
-const removePointerIfUnchanged = (pointerRaw: string) => {
-  try {
-    if (localStorage.getItem(billEntryDraftPointerKey) === pointerRaw) {
-      localStorage.removeItem(billEntryDraftPointerKey)
-    }
-  } catch {
-    // A later read or cleanup pass retries physical deletion.
-  }
-}
-
-const readCurrentDraft = (
-  now: number,
-):
-  | { state: 'missing' }
-  | { state: 'valid'; draft: BillEntryDraft; pointerRaw: string }
-  | { state: 'expired'; sessionId: string } => {
+const readDraftState = (now: number): DraftReadState => {
   const pointerRaw = localStorage.getItem(billEntryDraftPointerKey)
-  if (!pointerRaw) return { state: 'missing' }
+  if (!pointerRaw) return { status: 'missing', pointerRaw: null }
   const pointer = parseDraftPointer(pointerRaw)
-  if (!pointer) {
-    removePointerIfUnchanged(pointerRaw)
-    return { state: 'missing' }
+  if (!pointer) return { status: 'malformed-pointer', pointerRaw }
+  const key = pointerKeyFor(pointer)
+  const draftRaw = localStorage.getItem(key)
+  if (draftRaw === null) {
+    return { status: 'missing-draft', pointerRaw, pointer, key, draftRaw }
   }
-  const key = billEntryDraftKeyFor(pointer.sessionId)
-  const raw = localStorage.getItem(key)
-  const draft = parseBillEntryDraft(raw, pointer.sessionId)
+  const draft = parseBillEntryDraft(draftRaw, pointer.sessionId)
   if (!draft) {
-    removePointerAndDraftBestEffort(pointer.sessionId, pointerRaw, raw)
-    return { state: 'missing' }
+    return { status: 'malformed-draft', pointerRaw, pointer, key, draftRaw }
   }
-  if (Date.parse(draft.expiresAt) <= now) {
-    removePointerAndDraftBestEffort(pointer.sessionId, pointerRaw, raw)
-    return { state: 'expired', sessionId: pointer.sessionId }
-  }
-  return { state: 'valid', draft, pointerRaw }
+  return Date.parse(draft.expiresAt) <= now
+    ? { status: 'expired', pointerRaw, pointer, key, draftRaw, draft }
+    : { status: 'valid', pointerRaw, pointer, key, draftRaw, draft }
 }
 
 export const readBillEntryDraft = (
   now = Date.now(),
 ): BillEntryDraft | null => {
+  if (!isValidNow(now)) return null
   try {
-    const current = readCurrentDraft(now)
-    return current.state === 'valid' ? current.draft : null
+    const state = readDraftState(now)
+    return state.status === 'valid' ? state.draft : null
   } catch {
     return null
   }
 }
 
-const restoreStorageValue = (key: string, raw: string | null) => {
+const listDraftKeysBounded = () => {
+  const keys: string[] = []
+  for (
+    let index = 0;
+    index < localStorage.length && keys.length < maxCleanupKeys;
+    index += 1
+  ) {
+    const key = localStorage.key(index)
+    if (key?.startsWith(billEntryDraftPrefix)) keys.push(key)
+  }
+  return keys
+}
+
+const removeStorageKey = (key: string) => {
   try {
-    if (raw === null) localStorage.removeItem(key)
-    else localStorage.setItem(key, raw)
+    localStorage.removeItem(key)
+    return localStorage.getItem(key) === null
   } catch {
-    // The original value remains recoverable when the storage backend permits.
+    return false
   }
 }
 
+const cleanupDraftStorageUnlocked = (now: number): CleanupResult => {
+  const state = readDraftState(now)
+  const listedKeys = listDraftKeysBounded()
+  let removed = false
+  let failed = false
+  let protectedKey: string | null =
+    state.status === 'valid' ? state.key : null
+
+  if (state.status !== 'missing' && state.status !== 'valid') {
+    if ('key' in state && localStorage.getItem(state.key) !== null) {
+      if (removeStorageKey(state.key)) {
+        removed = true
+      } else {
+        failed = true
+        protectedKey = state.key
+      }
+    }
+    if (!protectedKey) {
+      if (removeStorageKey(billEntryDraftPointerKey)) {
+        removed = true
+      } else {
+        failed = true
+      }
+    }
+  }
+
+  for (const key of listedKeys) {
+    if (key === protectedKey) continue
+    if (localStorage.getItem(key) === null) continue
+    if (removeStorageKey(key)) removed = true
+    else failed = true
+  }
+
+  return { removed, failed }
+}
+
 const createDraftSessionId = () => `draft-${globalThis.crypto.randomUUID()}`
+const createGenerationId = () => `generation-${globalThis.crypto.randomUUID()}`
+
+const discardCandidate = (key: string) => {
+  try {
+    localStorage.removeItem(key)
+    return localStorage.getItem(key) === null
+  } catch {
+    return false
+  }
+}
 
 export const writeBillEntryDraft = (
   rows: ManualBillDraftRow[],
@@ -247,55 +320,52 @@ export const writeBillEntryDraft = (
 ): Promise<BillDraftWriteResult> => {
   if (
     !isValidDraftRows(rows) ||
-    !Number.isFinite(now) ||
-    (expectedRevision !== undefined &&
-      (!Number.isInteger(expectedRevision) || expectedRevision < 0))
+    !isValidNow(now) ||
+    now > maxDateMs - dayMs ||
+    (expectedRevision !== undefined && !isValidRevision(expectedRevision))
   ) {
     return Promise.resolve({ ok: false, reason: 'invalid' })
   }
 
   return runWithStorageMutationLock((): BillDraftWriteResult => {
     try {
-      const current = readCurrentDraft(now)
-      if (current.state === 'expired') {
+      const state = readDraftState(now)
+      if (state.status === 'expired') {
+        cleanupDraftStorageUnlocked(now)
         return { ok: false, reason: 'expired' }
       }
+      const current = state.status === 'valid' ? state.draft : null
       if (
         expectedRevision !== undefined &&
-        (current.state !== 'valid' ||
-          current.draft.revision !== expectedRevision)
+        current?.revision !== expectedRevision
       ) {
+        if (state.status !== 'valid' && state.status !== 'missing') {
+          cleanupDraftStorageUnlocked(now)
+        }
         return { ok: false, reason: 'stale' }
+      }
+      if (current?.revision === Number.MAX_SAFE_INTEGER) {
+        return { ok: false, reason: 'invalid' }
+      }
+
+      const prewriteCleanup = cleanupDraftStorageUnlocked(now)
+      if (prewriteCleanup.failed) {
+        return { ok: false, reason: 'storage-error' }
       }
 
       const activeSessionId = readStorageActivePointer()?.sessionId
       const sessionId =
-        activeSessionId ??
-        (current.state === 'valid'
-          ? current.draft.sessionId
-          : createDraftSessionId())
-      const sameSession =
-        current.state === 'valid' && current.draft.sessionId === sessionId
-      if (
-        current.state === 'valid' &&
-        !sameSession &&
-        expectedRevision !== undefined
-      ) {
-        return { ok: false, reason: 'stale' }
-      }
-
-      const createdAt = sameSession
-        ? current.draft.createdAt
-        : new Date(now).toISOString()
-      const expiresAt = sameSession
-        ? current.draft.expiresAt
-        : new Date(now + dayMs).toISOString()
+        activeSessionId ?? current?.sessionId ?? createDraftSessionId()
       const next: BillEntryDraft = {
         version: 1,
         sessionId,
-        revision: sameSession ? current.draft.revision + 1 : 0,
-        createdAt,
-        expiresAt,
+        revision: current ? current.revision + 1 : 0,
+        createdAt: current
+          ? current.createdAt
+          : new Date(now).toISOString(),
+        expiresAt: current
+          ? current.expiresAt
+          : new Date(now + dayMs).toISOString(),
         rows,
       }
       const serialized = JSON.stringify(next)
@@ -303,58 +373,75 @@ export const writeBillEntryDraft = (
         return { ok: false, reason: 'invalid' }
       }
 
-      const key = billEntryDraftKeyFor(sessionId)
-      const previousDraftRaw = localStorage.getItem(key)
-      const previousPointerRaw = localStorage.getItem(billEntryDraftPointerKey)
-      const nextPointerRaw = JSON.stringify({ version: 1, sessionId })
-      let written: BillEntryDraft
+      const generationId = createGenerationId()
+      const candidateKey = generationKeyFor(sessionId, generationId)
+      if (localStorage.getItem(candidateKey) !== null) {
+        return { ok: false, reason: 'storage-error' }
+      }
       try {
-        localStorage.setItem(key, serialized)
-        const readbackRaw = localStorage.getItem(key)
+        localStorage.setItem(candidateKey, serialized)
+        const readbackRaw = localStorage.getItem(candidateKey)
         const readback = parseBillEntryDraft(readbackRaw, sessionId)
         if (!readback || readbackRaw !== serialized) {
-          throw new Error('draft readback failed')
-        }
-        written = readback
-        localStorage.setItem(billEntryDraftPointerKey, nextPointerRaw)
-        if (localStorage.getItem(billEntryDraftPointerKey) !== nextPointerRaw) {
-          throw new Error('draft pointer readback failed')
+          discardCandidate(candidateKey)
+          return { ok: false, reason: 'storage-error' }
         }
       } catch {
-        restoreStorageValue(key, previousDraftRaw)
-        restoreStorageValue(billEntryDraftPointerKey, previousPointerRaw)
+        discardCandidate(candidateKey)
         return { ok: false, reason: 'storage-error' }
       }
 
-      if (current.state === 'valid' && !sameSession) {
-        try {
-          localStorage.removeItem(
-            billEntryDraftKeyFor(current.draft.sessionId),
-          )
-        } catch {
-          // The active pointer is valid; orphan cleanup can retry later.
-        }
+      const pointerRaw = JSON.stringify({
+        version: 1,
+        sessionId,
+        generationId,
+      })
+      try {
+        localStorage.setItem(billEntryDraftPointerKey, pointerRaw)
+      } catch {
+        discardCandidate(candidateKey)
+        return { ok: false, reason: 'storage-error' }
       }
-      return { ok: true, draft: written }
+      return { ok: true, draft: next }
     } catch {
       return { ok: false, reason: 'storage-error' }
     }
   }).catch(() => ({ ok: false, reason: 'lock-error' }))
 }
 
+const hasDraftKeys = () => {
+  for (let index = 0; index < localStorage.length; index += 1) {
+    if (localStorage.key(index)?.startsWith(billEntryDraftPrefix)) return true
+  }
+  return false
+}
+
 const removeCurrentDraftUnlocked = () => {
   const pointerRaw = localStorage.getItem(billEntryDraftPointerKey)
-  if (!pointerRaw) return false
   const pointer = parseDraftPointer(pointerRaw)
-  if (!pointer) {
-    localStorage.removeItem(billEntryDraftPointerKey)
-    return localStorage.getItem(billEntryDraftPointerKey) === null
+  const activeKey = pointer ? pointerKeyFor(pointer) : null
+  const listedKeys = listDraftKeysBounded()
+  const hadData = pointerRaw !== null || listedKeys.length > 0
+  let failed = false
+
+  if (activeKey && localStorage.getItem(activeKey) !== null) {
+    if (!removeStorageKey(activeKey)) failed = true
   }
-  const key = billEntryDraftKeyFor(pointer.sessionId)
-  localStorage.removeItem(key)
-  if (localStorage.getItem(key) !== null) return false
-  localStorage.removeItem(billEntryDraftPointerKey)
-  return localStorage.getItem(billEntryDraftPointerKey) === null
+  if (!failed && pointerRaw !== null) {
+    if (!removeStorageKey(billEntryDraftPointerKey)) failed = true
+  }
+  for (const key of listedKeys) {
+    if (localStorage.getItem(key) === null) continue
+    if (!removeStorageKey(key)) failed = true
+  }
+  if (failed) return false
+  if (
+    localStorage.getItem(billEntryDraftPointerKey) !== null ||
+    hasDraftKeys()
+  ) {
+    return false
+  }
+  return hadData
 }
 
 export const removeBillEntryDraft = (): Promise<boolean> =>
@@ -368,18 +455,14 @@ export const removeBillEntryDraft = (): Promise<boolean> =>
 
 export const cleanupExpiredBillEntryDraft = (
   now = Date.now(),
-): Promise<boolean> =>
-  runWithStorageMutationLock(() => {
+): Promise<boolean> => {
+  if (!isValidNow(now)) return Promise.resolve(false)
+  return runWithStorageMutationLock(() => {
     try {
-      const pointerRaw = localStorage.getItem(billEntryDraftPointerKey)
-      if (!pointerRaw) return false
-      const pointer = parseDraftPointer(pointerRaw)
-      if (!pointer) return removeCurrentDraftUnlocked()
-      const raw = localStorage.getItem(billEntryDraftKeyFor(pointer.sessionId))
-      const draft = parseBillEntryDraft(raw, pointer.sessionId)
-      if (draft && Date.parse(draft.expiresAt) > now) return false
-      return removeCurrentDraftUnlocked()
+      const result = cleanupDraftStorageUnlocked(now)
+      return !result.failed && result.removed
     } catch {
       return false
     }
   }).catch(() => false)
+}
