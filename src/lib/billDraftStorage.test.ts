@@ -48,17 +48,6 @@ const draftStorageKeys = () =>
     Boolean(key?.startsWith('el-bill:bill-entry-draft:v1:')),
   )
 
-const activeDraftStorageKey = () => {
-  const pointer = JSON.parse(
-    localStorage.getItem(billEntryDraftPointerKey) ?? 'null',
-  ) as { sessionId?: unknown; generationId?: unknown } | null
-  if (!pointer || typeof pointer.sessionId !== 'string') return null
-  const baseKey = billEntryDraftKeyFor(pointer.sessionId)
-  return typeof pointer.generationId === 'string'
-    ? `${baseKey}:${encodeURIComponent(pointer.generationId)}`
-    : baseKey
-}
-
 describe('expiring manual bill draft storage', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -130,8 +119,49 @@ describe('expiring manual bill draft storage', () => {
       sessionId: 'active/session',
       generationId: expect.any(String),
     })
-    expect(localStorage.getItem(activeDraftStorageKey() ?? '')).not.toBeNull()
+    expect(
+      localStorage.getItem(billEntryDraftKeyFor('active/session')),
+    ).not.toBeNull()
     expect(billEntryDraftKeyFor('active/session')).toContain('active%2Fsession')
+  })
+
+  it('keeps key derivation total and removes an unpaired-surrogate session pointer through locked cleanup', async () => {
+    const malformedSessionId = '\uD800'
+    expect(() => billEntryDraftKeyFor(malformedSessionId)).not.toThrow()
+    const fallbackKey = billEntryDraftKeyFor(malformedSessionId)
+    expect(fallbackKey).toContain('%EF%BF%BD')
+    const orphanKey = `${fallbackKey}:orphan`
+    const pointerRaw = JSON.stringify({
+      version: 1,
+      sessionId: malformedSessionId,
+      generationId: 'generation-orphan',
+    })
+    localStorage.setItem(billEntryDraftPointerKey, pointerRaw)
+    localStorage.setItem(orphanKey, '{malformed')
+
+    expect(readBillEntryDraft(2_000)).toBeNull()
+    expect(localStorage.getItem(billEntryDraftPointerKey)).toBe(pointerRaw)
+    expect(await cleanupExpiredBillEntryDraft(2_000)).toBe(true)
+    expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()
+    expect(localStorage.getItem(orphanKey)).toBeNull()
+  })
+
+  it('removes an unpaired-surrogate generation pointer and its orphaned data', async () => {
+    const orphanKey = `${billEntryDraftKeyFor('surrogate-removal')}:orphan`
+    localStorage.setItem(
+      billEntryDraftPointerKey,
+      JSON.stringify({
+        version: 1,
+        sessionId: 'surrogate-removal',
+        generationId: '\uDFFF',
+      }),
+    )
+    localStorage.setItem(orphanKey, '{malformed')
+
+    expect(readBillEntryDraft(2_000)).toBeNull()
+    expect(await removeBillEntryDraft()).toBe(true)
+    expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()
+    expect(localStorage.getItem(orphanKey)).toBeNull()
   })
 
   it('creates and retains a draft-only session when data has no active session', async () => {
@@ -182,7 +212,7 @@ describe('expiring manual bill draft storage', () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    const key = activeDraftStorageKey() ?? ''
+    const key = billEntryDraftKeyFor(first.draft.sessionId)
     const previousRaw = localStorage.getItem(key)
     const invalidCases = [
       Array.from({ length: 37 }, (_, index) =>
@@ -211,15 +241,14 @@ describe('expiring manual bill draft storage', () => {
     const written = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(written.ok).toBe(true)
     if (!written.ok) return
-    const key = activeDraftStorageKey()
-    expect(key).not.toBeNull()
-    localStorage.setItem(key ?? '', '{malformed')
+    const key = billEntryDraftKeyFor(written.draft.sessionId)
+    localStorage.setItem(key, '{malformed')
 
     expect(readBillEntryDraft(2_000)).toBeNull()
-    expect(localStorage.getItem(key ?? '')).toBe('{malformed')
+    expect(localStorage.getItem(key)).toBe('{malformed')
     expect(localStorage.getItem(billEntryDraftPointerKey)).not.toBeNull()
     expect(await cleanupExpiredBillEntryDraft(2_000)).toBe(true)
-    expect(localStorage.getItem(key ?? '')).toBeNull()
+    expect(localStorage.getItem(key)).toBeNull()
     expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()
   })
 
@@ -228,14 +257,14 @@ describe('expiring manual bill draft storage', () => {
     expect(written.ok).toBe(true)
     if (!written.ok) return
     const pointerRaw = localStorage.getItem(billEntryDraftPointerKey)
-    const key = activeDraftStorageKey()
-    const draftRaw = localStorage.getItem(key ?? '')
+    const key = billEntryDraftKeyFor(written.draft.sessionId)
+    const draftRaw = localStorage.getItem(key)
     const removeItem = vi.spyOn(Storage.prototype, 'removeItem')
 
     expect(readBillEntryDraft(1_000 + dayMs)).toBeNull()
     expect(removeItem).not.toHaveBeenCalled()
     expect(localStorage.getItem(billEntryDraftPointerKey)).toBe(pointerRaw)
-    expect(localStorage.getItem(key ?? '')).toBe(draftRaw)
+    expect(localStorage.getItem(key)).toBe(draftRaw)
   })
 
   it('does not remove a valid pointer that replaces a malformed pointer during read', async () => {
@@ -243,7 +272,7 @@ describe('expiring manual bill draft storage', () => {
     expect(written.ok).toBe(true)
     if (!written.ok) return
     const validPointer = localStorage.getItem(billEntryDraftPointerKey)
-    const validKey = activeDraftStorageKey() ?? ''
+    const validKey = billEntryDraftKeyFor(written.draft.sessionId)
     const validRaw = localStorage.getItem(validKey)
     localStorage.clear()
     localStorage.setItem(billEntryDraftPointerKey, '{malformed')
@@ -275,7 +304,7 @@ describe('expiring manual bill draft storage', () => {
     expect(written.ok).toBe(true)
     if (!written.ok) return
     const validPointer = localStorage.getItem(billEntryDraftPointerKey)
-    const validKey = activeDraftStorageKey() ?? ''
+    const validKey = billEntryDraftKeyFor(written.draft.sessionId)
     const validRaw = localStorage.getItem(validKey)
     localStorage.setItem(validKey, '{malformed')
     const nativeGetItem = Storage.prototype.getItem
@@ -304,7 +333,7 @@ describe('expiring manual bill draft storage', () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    const expiredKey = activeDraftStorageKey() ?? ''
+    const expiredKey = billEntryDraftKeyFor(first.draft.sessionId)
 
     await expect(
       writeBillEntryDraft(
@@ -317,13 +346,67 @@ describe('expiring manual bill draft storage', () => {
     expect(localStorage.getItem(expiredKey)).toBeNull()
   })
 
+  it('reports storage-error when expired-write cleanup cannot remove the active generation', async () => {
+    const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    const key = billEntryDraftKeyFor(first.draft.sessionId)
+    const pointerRaw = localStorage.getItem(billEntryDraftPointerKey)
+    const draftRaw = localStorage.getItem(key)
+    const nativeRemoveItem = Storage.prototype.removeItem
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      storageKey,
+    ) {
+      if (storageKey === key) {
+        throw new DOMException('remove failed', 'UnknownError')
+      }
+      nativeRemoveItem.call(this, storageKey)
+    })
+
+    await expect(
+      writeBillEntryDraft(
+        [makeDraft({ usageKwh: 'expired' })],
+        first.draft.revision,
+        1_000 + dayMs,
+      ),
+    ).resolves.toEqual({ ok: false, reason: 'storage-error' })
+    expect(localStorage.getItem(billEntryDraftPointerKey)).toBe(pointerRaw)
+    expect(localStorage.getItem(key)).toBe(draftRaw)
+  })
+
+  it('reports storage-error when stale-malformed cleanup cannot remove retryable data', async () => {
+    const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    const key = billEntryDraftKeyFor(first.draft.sessionId)
+    const pointerRaw = localStorage.getItem(billEntryDraftPointerKey)
+    localStorage.setItem(key, '{malformed')
+    const nativeRemoveItem = Storage.prototype.removeItem
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      storageKey,
+    ) {
+      if (storageKey === key) {
+        throw new DOMException('remove failed', 'UnknownError')
+      }
+      nativeRemoveItem.call(this, storageKey)
+    })
+
+    await expect(
+      writeBillEntryDraft([makeDraft()], 99, 2_000),
+    ).resolves.toEqual({ ok: false, reason: 'storage-error' })
+    expect(localStorage.getItem(billEntryDraftPointerKey)).toBe(pointerRaw)
+    expect(localStorage.getItem(key)).toBe('{malformed')
+  })
+
   it('keeps the prior immutable generation readable when candidate readback and rollback fail', async () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
     const previousPointer = localStorage.getItem(billEntryDraftPointerKey)
-    const previousKey = activeDraftStorageKey()
-    const previousRaw = localStorage.getItem(previousKey ?? '')
+    const previousKey = billEntryDraftKeyFor(first.draft.sessionId)
+    const previousRaw = localStorage.getItem(previousKey)
     const nativeSetItem = Storage.prototype.setItem
     const nativeGetItem = Storage.prototype.getItem
     let candidateKey: string | null = null
@@ -368,7 +451,7 @@ describe('expiring manual bill draft storage', () => {
     expect(nativeGetItem.call(localStorage, billEntryDraftPointerKey)).toBe(
       previousPointer,
     )
-    expect(nativeGetItem.call(localStorage, previousKey ?? '')).toBe(previousRaw)
+    expect(nativeGetItem.call(localStorage, previousKey)).toBe(previousRaw)
     expect(readBillEntryDraft(2_000)).toEqual(first.draft)
   })
 
@@ -377,8 +460,8 @@ describe('expiring manual bill draft storage', () => {
     expect(first.ok).toBe(true)
     if (!first.ok) return
     const previousPointer = localStorage.getItem(billEntryDraftPointerKey)
-    const previousKey = activeDraftStorageKey()
-    const previousRaw = localStorage.getItem(previousKey ?? '')
+    const previousKey = billEntryDraftKeyFor(first.draft.sessionId)
+    const previousRaw = localStorage.getItem(previousKey)
     const nativeSetItem = Storage.prototype.setItem
     const nativeGetItem = Storage.prototype.getItem
     const nativeRemoveItem = Storage.prototype.removeItem
@@ -428,7 +511,7 @@ describe('expiring manual bill draft storage', () => {
     expect(nativeGetItem.call(localStorage, billEntryDraftPointerKey)).toBe(
       previousPointer,
     )
-    expect(nativeGetItem.call(localStorage, previousKey ?? '')).toBe(previousRaw)
+    expect(nativeGetItem.call(localStorage, previousKey)).toBe(previousRaw)
     expect(readBillEntryDraft(2_000)).toEqual(first.draft)
   })
 
@@ -436,7 +519,7 @@ describe('expiring manual bill draft storage', () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    const key = activeDraftStorageKey() ?? ''
+    const key = billEntryDraftKeyFor(first.draft.sessionId)
     const previousRaw = localStorage.getItem(key)
     const previousPointer = localStorage.getItem(billEntryDraftPointerKey)
     const nativeSetItem = Storage.prototype.setItem
@@ -469,7 +552,7 @@ describe('expiring manual bill draft storage', () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    const activeKey = activeDraftStorageKey() ?? ''
+    const activeKey = billEntryDraftKeyFor(first.draft.sessionId)
     const activeRaw = localStorage.getItem(activeKey)
     const baseKey = billEntryDraftKeyFor(first.draft.sessionId)
     for (let index = 0; index < 70; index += 1) {
@@ -510,7 +593,7 @@ describe('expiring manual bill draft storage', () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    const activeKey = activeDraftStorageKey() ?? ''
+    const activeKey = billEntryDraftKeyFor(first.draft.sessionId)
     const orphanKey = `${billEntryDraftKeyFor(first.draft.sessionId)}:orphan`
     localStorage.setItem(orphanKey, JSON.stringify(first.draft))
     const nativeRemoveItem = Storage.prototype.removeItem
@@ -536,7 +619,7 @@ describe('expiring manual bill draft storage', () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    const key = activeDraftStorageKey() ?? ''
+    const key = billEntryDraftKeyFor(first.draft.sessionId)
     const stored = JSON.parse(localStorage.getItem(key) ?? 'null')
     stored.revision = Number.MAX_SAFE_INTEGER
     const maxRevisionRaw = JSON.stringify(stored)
@@ -571,7 +654,7 @@ describe('expiring manual bill draft storage', () => {
       expect(first.ok).toBe(true)
       if (!first.ok) return
       const pointerRaw = localStorage.getItem(billEntryDraftPointerKey)
-      const key = activeDraftStorageKey() ?? ''
+      const key = billEntryDraftKeyFor(first.draft.sessionId)
       const draftRaw = localStorage.getItem(key)
 
       expect(readBillEntryDraft(invalidNow)).toBeNull()
@@ -592,7 +675,7 @@ describe('expiring manual bill draft storage', () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    const key = activeDraftStorageKey() ?? ''
+    const key = billEntryDraftKeyFor(first.draft.sessionId)
     const previousRaw = localStorage.getItem(key)
     setLocks({
       request: (() => {
@@ -614,7 +697,7 @@ describe('expiring manual bill draft storage', () => {
     const first = await writeBillEntryDraft([makeDraft()], undefined, 1_000)
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    const key = activeDraftStorageKey() ?? ''
+    const key = billEntryDraftKeyFor(first.draft.sessionId)
 
     expect(await removeBillEntryDraft()).toBe(true)
     expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()

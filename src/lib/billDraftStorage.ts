@@ -87,16 +87,55 @@ interface CleanupResult {
 
 export const billEntryDraftPointerKey = 'el-bill:bill-entry-draft-active'
 
-export const billEntryDraftKeyFor = (sessionId: string): string =>
-  `${billEntryDraftPrefix}${encodeURIComponent(sessionId)}`
+const toWellFormedIdentifier = (value: string) => {
+  let result = ''
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1)
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        result += value[index] + value[index + 1]
+        index += 1
+      } else {
+        result += '\ufffd'
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      result += '\ufffd'
+    } else {
+      result += value[index]
+    }
+  }
+  return result
+}
+
+const isValidStorageIdentifier = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !value) return false
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1)
+      if (next < 0xdc00 || next > 0xdfff) return false
+      index += 1
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false
+    }
+  }
+  return true
+}
+
+const encodeStorageIdentifier = (value: string) =>
+  encodeURIComponent(toWellFormedIdentifier(value))
+
+const legacyDraftKeyFor = (sessionId: string) =>
+  `${billEntryDraftPrefix}${encodeStorageIdentifier(sessionId)}`
 
 const generationKeyFor = (sessionId: string, generationId: string) =>
-  `${billEntryDraftKeyFor(sessionId)}:${encodeURIComponent(generationId)}`
+  `${legacyDraftKeyFor(sessionId)}:${encodeStorageIdentifier(generationId)}`
 
 const pointerKeyFor = (pointer: BillEntryDraftPointer) =>
   pointer.generationId
     ? generationKeyFor(pointer.sessionId, pointer.generationId)
-    : billEntryDraftKeyFor(pointer.sessionId)
+    : legacyDraftKeyFor(pointer.sessionId)
 
 const hasExactKeys = (
   value: Record<string, unknown>,
@@ -132,10 +171,9 @@ const parseDraftPointer = (
     if (
       (!isLegacy && !isGenerationPointer) ||
       pointer.version !== 1 ||
-      typeof pointer.sessionId !== 'string' ||
-      !pointer.sessionId ||
+      !isValidStorageIdentifier(pointer.sessionId) ||
       (isGenerationPointer &&
-        (typeof pointer.generationId !== 'string' || !pointer.generationId))
+        !isValidStorageIdentifier(pointer.generationId))
     ) {
       return null
     }
@@ -148,6 +186,20 @@ const parseDraftPointer = (
     }
   } catch {
     return null
+  }
+}
+
+export const billEntryDraftKeyFor = (sessionId: string): string => {
+  const legacyKey = legacyDraftKeyFor(sessionId)
+  try {
+    const pointer = parseDraftPointer(
+      localStorage.getItem(billEntryDraftPointerKey),
+    )
+    return pointer?.sessionId === sessionId && pointer.generationId
+      ? generationKeyFor(pointer.sessionId, pointer.generationId)
+      : legacyKey
+  } catch {
+    return legacyKey
   }
 }
 
@@ -331,8 +383,10 @@ export const writeBillEntryDraft = (
     try {
       const state = readDraftState(now)
       if (state.status === 'expired') {
-        cleanupDraftStorageUnlocked(now)
-        return { ok: false, reason: 'expired' }
+        const cleanup = cleanupDraftStorageUnlocked(now)
+        return cleanup.failed
+          ? { ok: false, reason: 'storage-error' }
+          : { ok: false, reason: 'expired' }
       }
       const current = state.status === 'valid' ? state.draft : null
       if (
@@ -340,7 +394,10 @@ export const writeBillEntryDraft = (
         current?.revision !== expectedRevision
       ) {
         if (state.status !== 'valid' && state.status !== 'missing') {
-          cleanupDraftStorageUnlocked(now)
+          const cleanup = cleanupDraftStorageUnlocked(now)
+          if (cleanup.failed) {
+            return { ok: false, reason: 'storage-error' }
+          }
         }
         return { ok: false, reason: 'stale' }
       }
@@ -356,6 +413,9 @@ export const writeBillEntryDraft = (
       const activeSessionId = readStorageActivePointer()?.sessionId
       const sessionId =
         activeSessionId ?? current?.sessionId ?? createDraftSessionId()
+      if (!isValidStorageIdentifier(sessionId)) {
+        return { ok: false, reason: 'invalid' }
+      }
       const next: BillEntryDraft = {
         version: 1,
         sessionId,
@@ -374,6 +434,9 @@ export const writeBillEntryDraft = (
       }
 
       const generationId = createGenerationId()
+      if (!isValidStorageIdentifier(generationId)) {
+        return { ok: false, reason: 'invalid' }
+      }
       const candidateKey = generationKeyFor(sessionId, generationId)
       if (localStorage.getItem(candidateKey) !== null) {
         return { ok: false, reason: 'storage-error' }
