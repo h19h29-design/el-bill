@@ -786,9 +786,66 @@ test('manual bill multi-cell draft restores before apply', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
   await expect
     .poll(() =>
-      page.evaluate((pointerKey) => localStorage.getItem(pointerKey), billDraftPointerKey),
+      page.evaluate((pointerKey) => {
+        const pointerRaw = localStorage.getItem(pointerKey)
+        if (!pointerRaw) return null
+        const pointer = JSON.parse(pointerRaw) as {
+          sessionId: string
+          generationId?: string
+        }
+        const baseKey =
+          `el-bill:bill-entry-draft:v1:${encodeURIComponent(pointer.sessionId)}`
+        const activeKey = pointer.generationId
+          ? `${baseKey}:${encodeURIComponent(pointer.generationId)}`
+          : baseKey
+        const draftRaw = localStorage.getItem(activeKey)
+        if (!draftRaw) return null
+        const draft = JSON.parse(draftRaw) as {
+          rows?: Array<{
+            yearMonth: string
+            usageKwh: string
+            totalBillWon: string
+          }>
+        }
+        if (!draft.rows) return null
+        const july = draft.rows.find((row) => row.yearMonth === '2026-07')
+        const august = draft.rows.find((row) => row.yearMonth === '2025-08')
+        const persistedValues = (
+          row:
+            | {
+                yearMonth: string
+                usageKwh: string
+                totalBillWon: string
+              }
+            | undefined,
+        ) =>
+          row
+            ? {
+                yearMonth: row.yearMonth,
+                usageKwh: row.usageKwh,
+                totalBillWon: row.totalBillWon,
+              }
+            : null
+        return {
+          rowCount: draft.rows.length,
+          july: persistedValues(july),
+          august: persistedValues(august),
+        }
+      }, billDraftPointerKey),
     )
-    .not.toBeNull()
+    .toEqual({
+      rowCount: 12,
+      july: {
+        yearMonth: '2026-07',
+        usageKwh: '56250',
+        totalBillWon: '8337500',
+      },
+      august: {
+        yearMonth: '2025-08',
+        usageKwh: '48000',
+        totalBillWon: '7100000',
+      },
+    })
 
   await page.reload()
   await openDesktopView(page, '고지서 입력')

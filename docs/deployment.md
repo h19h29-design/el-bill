@@ -29,9 +29,31 @@ NAS 또는 Cloudflare를 변경하기 전에는 대상 경로, 현재 백업, �
 
 ## 운영 스모크: 부모 배포 대기
 
-이 저장소 상태에서는 운영 배포와 공개 URL 스모크를 실행하지 않았다. 부모 배포가 NAS+Cloudflare에 완료된 뒤 [https://el-bill.h19h19.com/](https://el-bill.h19h19.com/)에서 체크인된 합성 XLSX와 파워플래너 CSV를 사용해 다음을 확인한다. `PLAYWRIGHT_BASE_URL`을 지정하면 Playwright는 로컬 빌드·미리보기 서버를 시작하지 않고 지정한 URL만 검사한다.
+이 저장소 상태에서는 운영 배포와 공개 URL 스모크를 실행하지 않았다. 부모 배포가 NAS+Cloudflare에 완료된 뒤 [https://el-bill.h19h19.com/](https://el-bill.h19h19.com/)에서 체크인된 합성 XLSX와 파워플래너 CSV를 사용해 다음을 확인한다. 먼저 검증한 로컬 `dist`의 해시 엔트리와 공개 HTML의 엔트리가 같은지 확인하고, 공개 HTML 및 엔트리 응답과 캐시 헤더를 검사한 다음 Playwright 스모크를 실행한다. `PLAYWRIGHT_BASE_URL`을 지정하면 Playwright는 로컬 빌드·미리보기 서버를 시작하지 않고 지정한 URL만 검사한다.
 
 ```bash
+set -euo pipefail
+
+PUBLIC_URL=https://el-bill.h19h19.com/
+PUBLIC_HTML=/tmp/el-bill-index.html
+HTML_HEADERS=/tmp/el-bill-index.headers
+ENTRY_HEADERS=/tmp/el-bill-entry.headers
+
+HTML_STATUS=$(curl -sS -D "$HTML_HEADERS" -o "$PUBLIC_HTML" -w '%{http_code}' "$PUBLIC_URL")
+test "$HTML_STATUS" = 200
+
+BUILT_ENTRY="/assets/$(basename "$(find dist/assets -maxdepth 1 -type f -name 'index-*.js' -print -quit)")"
+PUBLIC_ENTRY=$(sed -nE 's/.*src="([^"]*\/assets\/index-[^"]+\.js)".*/\1/p' "$PUBLIC_HTML" | head -n 1)
+test -n "$PUBLIC_ENTRY"
+test "$PUBLIC_ENTRY" = "$BUILT_ENTRY"
+
+ENTRY_STATUS=$(curl -sS -D "$ENTRY_HEADERS" -o /dev/null -w '%{http_code}' "${PUBLIC_URL%/}${PUBLIC_ENTRY}")
+test "$ENTRY_STATUS" = 200
+
+tr -d '\r' < "$HTML_HEADERS" | grep -Eiq '^cache-control:.*no-store'
+tr -d '\r' < "$HTML_HEADERS" | grep -Eiq '^cf-cache-status:[[:space:]]*DYNAMIC[[:space:]]*$'
+
+printf 'HTML %s, entry %s: %s\n' "$HTML_STATUS" "$ENTRY_STATUS" "$PUBLIC_ENTRY"
 PLAYWRIGHT_BASE_URL=https://el-bill.h19h19.com/ npx playwright test --project=chromium -g "pasted bill|manual bill|usage guide|mobile personal input"
 ```
 
