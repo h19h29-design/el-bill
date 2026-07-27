@@ -4,7 +4,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
-import { readBillEntryDraft, writeBillEntryDraft } from '../../lib/billDraftStorage'
+import {
+  billEntryDraftKeyFor,
+  billEntryDraftPointerKey,
+  readBillEntryDraft,
+  writeBillEntryDraft,
+} from '../../lib/billDraftStorage'
 import type { BillImportContext } from '../../types'
 import { ManualBillInput } from './ManualBillInput'
 
@@ -292,16 +297,26 @@ describe('ManualBillInput', () => {
     expect(screen.getByText(/이전 입력 초안을 복원했습니다/)).not.toBeNull()
   })
 
-  it('does not restore a draft at its fixed 24-hour expiry', async () => {
+  it('does not restore and physically removes a draft at its fixed 24-hour expiry', async () => {
     vi.useFakeTimers()
     const createdAt = Date.parse('2026-07-27T00:00:00.000Z')
     vi.setSystemTime(createdAt)
-    await writeBillEntryDraft([makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' })])
+    const written = await writeBillEntryDraft([
+      makeDraft({ yearMonth: '2026-07', usageKwh: '10', totalBillWon: '100' }),
+    ])
+    if (!written.ok) throw new Error('draft setup failed')
+    const draftKey = billEntryDraftKeyFor(written.draft.sessionId)
     vi.setSystemTime(createdAt + 24 * 60 * 60 * 1000)
 
     renderInput()
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
 
     expect(screen.queryByLabelText('2026-07 사용량(kWh)')).toBeNull()
+    expect(localStorage.getItem(draftKey)).toBeNull()
+    expect(localStorage.getItem(billEntryDraftPointerKey)).toBeNull()
   })
 
   it('writes only after the full 300ms debounce interval', async () => {

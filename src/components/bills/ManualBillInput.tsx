@@ -10,6 +10,7 @@ import {
 } from '../../lib/billInput'
 import { parseDelimitedMatrix } from '../../lib/excel'
 import {
+  cleanupExpiredBillEntryDraft,
   readBillEntryDraft,
 } from '../../lib/billDraftStorage'
 import type { PersonalBillInputProps } from './PastedBillInput'
@@ -178,6 +179,10 @@ export function ManualBillInput({
   )
 
   useEffect(() => () => draftLifecycle.dispose(), [draftLifecycle])
+
+  useEffect(() => {
+    void cleanupExpiredBillEntryDraft()
+  }, [])
 
   useEffect(() => {
     onDraftLifecycleChange?.(draftLifecycle)
