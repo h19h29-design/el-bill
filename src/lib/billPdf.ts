@@ -157,6 +157,19 @@ const findLabeledNumber = (
   return undefined
 }
 
+const findFirstWholeNumberKwh = (lines: string[]) => {
+  for (const rawLine of lines) {
+    const line = normalizeLine(rawLine)
+    for (const match of line.matchAll(
+      /(?:^|[^\d.])(\d[\d,]*)\s*kwh\b/gi,
+    )) {
+      const value = parseNumber(match[1])
+      if (value !== undefined && value > 0) return value
+    }
+  }
+  return undefined
+}
+
 const findBillingPeriod = (lines: string[]) => {
   const normalized = lines.map(normalizeLine)
   const compact = normalized.map(compactForRecognition)
@@ -189,12 +202,15 @@ const findBillingPeriod = (lines: string[]) => {
 const recognizePage = (page: BillPdfTextPage) => {
   const lines = page.lines.map(normalizeLine).filter(Boolean)
   const period = findBillingPeriod(lines)
-  const usageKwh = findLabeledNumber(lines, [
-    /당월\s*사용량/,
-    /사용전력량/,
-    /(?:^|\s)사용량/,
-    /(?:^|\s)usage/,
-  ])
+  const usageKwh =
+    findLabeledNumber(lines, [
+      /당월\s*사용량/,
+      /사용전력량/,
+      /(?:^|\s)사용량/,
+      /당월(?=\s)/,
+      /(?:^|\s)usage/,
+    ]) ??
+    findFirstWholeNumberKwh(lines)
   const totalBillWon = findLabeledNumber(lines, [
     /청구금액/,
     /납부금액/,
@@ -208,15 +224,28 @@ const recognizePage = (page: BillPdfTextPage) => {
   ].filter(Boolean)
 
   if (missing.length || !period || !usageKwh || !totalBillWon) {
-    return { row: null, missing }
+    return { row: null, missing, period }
   }
 
+  const laggingPowerFactor = findLabeledNumber(lines, [
+    /지상\s*역률(?:요금|료)/,
+  ])
+  const leadingPowerFactor = findLabeledNumber(lines, [
+    /진상\s*역률(?:요금|료)/,
+  ])
+  const powerFactorCharge =
+    laggingPowerFactor !== undefined || leadingPowerFactor !== undefined
+      ? (laggingPowerFactor ?? 0) + (leadingPowerFactor ?? 0)
+      : findLabeledNumber(lines, [/역률요금/])
   const optionalValues = {
     요금적용전력: findLabeledNumber(lines, [/요금적용전력/]),
-    최대수요전력: findLabeledNumber(lines, [/최대수요전력/]),
+    최대수요전력: findLabeledNumber(lines, [
+      /최대전력수요/,
+      /최대수요전력/,
+    ]),
     기본요금: findLabeledNumber(lines, [/기본요금/]),
     전력량요금: findLabeledNumber(lines, [/전력량요금/]),
-    역률요금: findLabeledNumber(lines, [/역률요금/]),
+    역률요금: powerFactorCharge,
     기후환경요금: findLabeledNumber(lines, [/기후환경요금/]),
     연료비조정액: findLabeledNumber(lines, [/연료비조정액/]),
     부가세: findLabeledNumber(lines, [/부가가치세/, /부가세/]),
@@ -228,6 +257,7 @@ const recognizePage = (page: BillPdfTextPage) => {
 
   return {
     missing: [],
+    period,
     row: {
       연도: period.year,
       월: period.month,
@@ -259,7 +289,26 @@ export const parseBillPdfTextPages = (
     page,
     ...recognizePage(page),
   }))
-  const rows = recognized.flatMap(({ row }) => row ? [row] : [])
+  const pageRows = recognized.flatMap(({ row }) => row ? [row] : [])
+  const aggregate = recognizePage({
+    pageNumber: 0,
+    lines: pages.flatMap((page) => page.lines),
+  })
+  const recognizedPeriods = new Set(
+    recognized.flatMap(({ period }) =>
+      period ? [`${period.year}-${period.month}`] : [],
+    ),
+  )
+  const canUseAggregate = recognizedPeriods.size <= 1
+  const usesAggregate =
+    pages.length > 1 &&
+    pageRows.length <= 1 &&
+    aggregate.row !== null &&
+    canUseAggregate
+  const rows =
+    pageRows.length <= 1 && aggregate.row && canUseAggregate
+      ? [aggregate.row]
+      : pageRows
   if (!rows.length) {
     throw new Error(
       'PDF에서 청구년월, 사용량과 청구금액을 모두 찾지 못했습니다. 아래 무료 AI 변환 도우미를 사용하거나 표준 CSV로 변환해 주세요.',
@@ -282,11 +331,13 @@ export const parseBillPdfTextPages = (
     autoRows,
     diagnostics: [
       `${sourceLabel}: PDF 텍스트를 브라우저에서 읽었습니다.`,
-      ...recognized.flatMap(({ page, missing }) =>
-        missing.length
-          ? [`${page.pageNumber}쪽: ${missing.join(', ')} 항목을 찾지 못해 제외했습니다.`]
-          : [],
-      ),
+      ...(usesAggregate
+        ? [`${sourceLabel}: ${pages.length}쪽 전체의 청구 항목을 결합했습니다.`]
+        : recognized.flatMap(({ page, missing }) =>
+          missing.length
+            ? [`${page.pageNumber}쪽: ${missing.join(', ')} 항목을 찾지 못해 제외했습니다.`]
+            : [],
+        )),
     ],
   }
 }

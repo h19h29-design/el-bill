@@ -73,10 +73,14 @@ export function BillInputPreview({
     const last = normalizedBills[normalizedBills.length - 1]
     return first === last ? formatPeriod(first) : `${formatPeriod(first)} ~ ${formatPeriod(last)}`
   }, [validation])
+  const blockingPeriodIssues =
+    validation?.issues.filter((issue) => issue.code !== 'missing-period') ?? []
+  const hasMissingPeriods =
+    validation?.issues.some((issue) => issue.code === 'missing-period') ?? false
   const cannotConfirm =
     !candidate ||
     candidate.bills.length === 0 ||
-    (validation?.issues.length ?? 0) > 0 ||
+    blockingPeriodIssues.length > 0 ||
     !hasExactRatePlan
 
   return (
@@ -118,6 +122,11 @@ export function BillInputPreview({
                 <li key={`${issue.code}-${issue.period}`}>{issue.message}</li>
               ))}
             </ul>
+          )}
+          {hasMissingPeriods && (
+            <p className="empty-state">
+              누락 월이 있어 입력 자료는 저장할 수 있지만, 연속 12개월을 채울 때까지 요금제 추천과 문서 생성은 보류됩니다.
+            </p>
           )}
           {!hasExactRatePlan && (
             <p className="empty-state">

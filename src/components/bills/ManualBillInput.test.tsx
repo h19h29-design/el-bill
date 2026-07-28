@@ -283,7 +283,7 @@ describe('ManualBillInput', () => {
     await user.type(usageInputs.at(-1)!, '20')
     await user.type(totalInputs.at(-1)!, '200')
 
-    expect(screen.getAllByText(/duplicated/)).toHaveLength(2)
+    expect(screen.getAllByText(/청구월이 중복되었습니다/)).toHaveLength(2)
     await user.click(screen.getByRole('button', { name: '첫 오류로 이동' }))
     expect(document.activeElement).toBe(screen.getAllByLabelText('2026-07 연월')[0])
   })
@@ -301,7 +301,7 @@ describe('ManualBillInput', () => {
     await user.type(screen.getByLabelText('2026-05 총 전기요금(원)'), '200')
 
     const globalIssue = screen.getByRole('status', { name: '기간 확인 필요' })
-    expect(globalIssue.textContent).toMatch(/missing/)
+    expect(globalIssue.textContent).toMatch(/청구월이 누락되었습니다/)
     const firstIssueAction = screen.getByRole('button', { name: '첫 오류로 이동' })
     expect(firstIssueAction.getAttribute('aria-controls')).toBe('manual-global-issues')
     await user.click(firstIssueAction)

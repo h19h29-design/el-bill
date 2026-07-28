@@ -181,7 +181,7 @@ describe('manual bill input normalization', () => {
     expect(result.issues).toContainEqual({
       rowId: '',
       field: 'period',
-      message: '2026-7 through 2026-8 billing period is missing.',
+      message: '2026-7 ~ 2026-8 청구월이 누락되었습니다.',
     })
   })
 

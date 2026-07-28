@@ -27,7 +27,7 @@ export const validateBillPeriods = (
       issues.push({
         code: 'invalid-period',
         period: formatPeriod(bill.year, bill.month),
-        message: `${formatPeriod(bill.year, bill.month)} billing period is invalid.`,
+        message: `${formatPeriod(bill.year, bill.month)} 청구월이 올바르지 않습니다.`,
       })
       continue
     }
@@ -44,7 +44,7 @@ export const validateBillPeriods = (
       issues.push({
         code: 'duplicate-period',
         period,
-        message: `${period} billing period is duplicated.`,
+        message: `${period} 청구월이 중복되었습니다.`,
       })
       continue
     }
@@ -72,11 +72,11 @@ export const validateBillPeriods = (
       (missingEnd % 12) + 1,
     )
     const period =
-      startPeriod === endPeriod ? startPeriod : `${startPeriod} through ${endPeriod}`
+      startPeriod === endPeriod ? startPeriod : `${startPeriod} ~ ${endPeriod}`
     issues.push({
       code: 'missing-period',
       period,
-      message: `${period} billing period is missing.`,
+      message: `${period} 청구월이 누락되었습니다.`,
     })
   }
 

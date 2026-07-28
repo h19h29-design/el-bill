@@ -85,6 +85,9 @@ const billPdfPayloads = personalBillMonths.map(
     }
   },
 )
+const gappedBillPdfPayloads = billPdfPayloads.filter(
+  ({ name }) => !name.includes('2026-01'),
+)
 
 const clearBrowserStorage = async (page: Page) => {
   await page.goto('/')
@@ -226,6 +229,34 @@ test('official bill PDFs and the free AI fallback are usable from the first inpu
   await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
   await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
   await expect(page.getByText('파일 업로드 고지서 분석', { exact: false })).toBeVisible()
+})
+
+test('gapped bill PDFs remain reviewable while recommendation and documents stay blocked', async ({
+  page,
+}) => {
+  await clearBrowserStorage(page)
+  await openDesktopView(page, '고지서 입력')
+
+  await page
+    .locator('input[type="file"][accept=".pdf"]')
+    .setInputFiles(gappedBillPdfPayloads)
+
+  await expect(page.getByText(/PDF 11개에서 11개월/)).toBeVisible()
+  await expect(page.getByText(/청구월이 누락되었습니다/)).toBeVisible()
+  await expect(
+    page.getByText(/연속 12개월을 채울 때까지 요금제 추천과 문서 생성은 보류됩니다/),
+  ).toBeVisible()
+
+  const analyzeButton = page.getByRole('button', { name: '이 데이터로 분석 시작' })
+  await expect(analyzeButton).toBeEnabled()
+  await analyzeButton.click()
+
+  await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
+  await expect(page.getByRole('heading', { name: '추가 검토 필요' })).toBeVisible()
+  await expect(page.getByText('요금제 추천 및 변경신청 문서 생성 보류')).toBeVisible()
+  await expect(
+    page.getByText(/2026-1 고지서 기간이 누락되었습니다/).first(),
+  ).toBeVisible()
 })
 
 test('tariff-full calculation mode persists into diagnosis and documents after reload', async ({

@@ -288,6 +288,80 @@ describe('bill PDF text recognition', () => {
     })
   })
 
+  it('combines a multi-page internet bill and prefers the billed maximum demand', () => {
+    const result = parseBillPdfTextPages(
+      [
+        {
+          pageNumber: 1,
+          lines: [
+            '2026년 07월분 전기요금 청구서 및 영수증',
+            '기본요금 789,880',
+            '전력량요금 1,218,412',
+            '지상역률요금 -7,898(97.0)',
+            '진상역률요금 30,015(76.0)',
+            '당월요금계 2,450,080',
+            '청구금액 2,450,080 원',
+            '당월지침 470.43 kWh',
+            '당월 10,256 kWh',
+          ],
+        },
+        {
+          pageNumber: 2,
+          lines: [
+            '요금적용전력 124',
+            '2026년 07월 최대전력수요 : 44 kw',
+          ],
+        },
+        {
+          pageNumber: 3,
+          lines: [
+            '최대수요전력(주간) 2.574',
+            '사용량 10,256',
+            '지상역률요금 -7,898 기본요금 X (0.0%)',
+            '진상역률요금 30,015 기본요금 X (3.8%)',
+          ],
+        },
+      ],
+      importContext,
+      'internet-bill.pdf',
+    )
+
+    expect(result.autoRows[0]).toMatchObject({
+      year: 2026,
+      month: 7,
+      usageKwh: 10_256,
+      totalBillWon: 2_450_080,
+      appliedPowerKw: 124,
+      maxDemandKw: 44,
+      powerFactorChargeWon: 22_117,
+    })
+    expect(result.diagnostics.join(' ')).toContain('3쪽 전체')
+  })
+
+  it('recognizes the first whole-number kWh value in a legacy email bill', () => {
+    const result = parseBillPdfTextPages(
+      [{
+        pageNumber: 1,
+        lines: [
+          '고객님의 2026년 02월',
+          '계약종별 교육용(갑)고압A 339.77 25,020 kWh',
+          '정기검침일 매월 15 일 270.27 24,192 kWh',
+          '전기요금계 3,765,416',
+          '당월요금계 4,243,610',
+        ],
+      }],
+      importContext,
+      'legacy-email-bill.pdf',
+    )
+
+    expect(result.autoRows[0]).toMatchObject({
+      year: 2026,
+      month: 2,
+      usageKwh: 25_020,
+      totalBillWon: 4_243_610,
+    })
+  })
+
   it('rejects image-only or incomplete PDFs with a conversion-path message', () => {
     expect(() =>
       parseBillPdfTextPages(

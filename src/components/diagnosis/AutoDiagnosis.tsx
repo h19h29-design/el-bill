@@ -79,7 +79,7 @@ export function AutoDiagnosis({
         <section className="diagnosis-hero">
           <div>
             <span className="flow-label">고지서 기간 확인 필요</span>
-            <h2>자동진단 결과를 확정할 수 없습니다</h2>
+            <h2>추가 검토 필요</h2>
             <p>{diagnosis.judgementBasis}</p>
           </div>
           <button
