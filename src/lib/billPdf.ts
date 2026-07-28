@@ -393,17 +393,21 @@ export const extractBillPdfTextPages = async (
   }
 
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  let browserWorker: Worker | null = null
+  let pdfWorker: InstanceType<typeof pdfjs.PDFWorker> | undefined
   if (typeof window !== 'undefined') {
-    const worker = await import(
-      'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
+    const workerModule = await import(
+      'pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker'
     )
-    pdfjs.GlobalWorkerOptions.workerSrc = worker.default
+    browserWorker = new workerModule.default()
+    pdfWorker = pdfjs.PDFWorker.create({ port: browserWorker })
   }
 
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(buffer),
     stopAtErrors: true,
     useSystemFonts: true,
+    ...(pdfWorker ? { worker: pdfWorker } : {}),
   })
 
   try {
@@ -461,6 +465,7 @@ export const extractBillPdfTextPages = async (
     } catch {
       // Parsing has already finished or reported its reader-facing error.
     }
+    browserWorker?.terminate()
   }
 }
 
