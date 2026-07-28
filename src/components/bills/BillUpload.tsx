@@ -248,6 +248,7 @@ export function BillUpload({
           profile={profile}
           ratePlans={ratePlans}
           onCandidateChange={handleFileCandidateChange}
+          onOpenPaste={() => selectMode('paste', true)}
         />
         <BillInputPreview
           candidate={candidates.file}

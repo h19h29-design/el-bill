@@ -5,7 +5,12 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from 'react'
-import { FileDown, FileSpreadsheet, UploadCloud } from 'lucide-react'
+import {
+  FileDown,
+  FileSpreadsheet,
+  FileText,
+  UploadCloud,
+} from 'lucide-react'
 import type { BillImportContext, RatePlan, SchoolProfile } from '../../types'
 import {
   mapRowsToBills,
@@ -22,13 +27,16 @@ import {
   assignBillColumnMapping,
   buildBillColumnMapping,
 } from '../../lib/billInput'
+import { parseBillPdfFiles } from '../../lib/billPdf'
 import { findExactRatePlan, summarizeWorkbookRecognition } from '../../lib/diagnosis'
+import { AiBillConversionHelper } from './AiBillConversionHelper'
 import type { BillInputCandidate } from './BillInputPreview'
 
 interface FileBillInputProps {
   profile: SchoolProfile
   ratePlans: RatePlan[]
   onCandidateChange: (candidate: BillInputCandidate | null) => void
+  onOpenPaste?: () => void
 }
 
 const mappingFields = [
@@ -52,6 +60,7 @@ export function FileBillInput({
   profile,
   ratePlans,
   onCandidateChange,
+  onOpenPaste = () => undefined,
 }: FileBillInputProps) {
   const [parseResult, setParseResult] = useState<WorkbookParseResult | null>(null)
   const [selectedSheetName, setSelectedSheetName] = useState('')
@@ -128,13 +137,59 @@ export function FileBillInput({
     }
   }
 
+  const handlePdfFiles = async (files: File[]) => {
+    if (!files.length) return
+    setMessage(
+      `한전 고지서 PDF ${files.length.toLocaleString('ko-KR')}개를 브라우저에서 읽는 중입니다.`,
+    )
+    try {
+      const result = await parseBillPdfFiles(files, importContext)
+      const nextSourceLabel =
+        files.length === 1
+          ? files[0].name
+          : `한전 고지서 PDF ${files.length.toLocaleString('ko-KR')}개`
+      setParseResult(result)
+      setSourceLabel(nextSourceLabel)
+      setSelectedSheetName(result.sheets[0]?.name ?? '')
+      setShowManualMapping(false)
+      setMapping(buildBillColumnMapping(result.sheets[0]?.headers ?? []))
+      setMessage(
+        `PDF ${files.length.toLocaleString('ko-KR')}개에서 ${result.autoRows.length.toLocaleString('ko-KR')}개월을 자동 인식했습니다. 미리보기의 청구년월·사용량·청구금액을 원본과 대조해 주세요.`,
+      )
+    } catch (error) {
+      setParseResult(null)
+      setSourceLabel('')
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'PDF 고지서를 분석하지 못했습니다. 아래 무료 AI 변환 도우미를 사용해 주세요.',
+      )
+    }
+  }
+
+  const handleSelectedFiles = async (files: File[]) => {
+    if (!files.length) return
+    const pdfFiles = files.filter((file) => /\.pdf$/i.test(file.name))
+    if (pdfFiles.length === files.length) {
+      await handlePdfFiles(pdfFiles)
+      return
+    }
+    if (files.length > 1) {
+      setMessage(
+        '여러 파일을 한 번에 선택할 때는 한전 고지서 PDF만 선택해 주세요. 엑셀과 CSV는 한 개씩 읽습니다.',
+      )
+      return
+    }
+    await handleFile(files[0])
+  }
+
   const handleDrop = (
     event: DragEvent<HTMLLabelElement>,
-    handler: (file: File) => void,
+    handler: (files: File[]) => void,
   ) => {
     event.preventDefault()
-    const file = event.dataTransfer.files[0]
-    if (file) handler(file)
+    const files = Array.from(event.dataTransfer.files)
+    if (files.length) handler(files)
   }
 
   const openNestedFileInput = (event: KeyboardEvent<HTMLLabelElement>) => {
@@ -146,13 +201,13 @@ export function FileBillInput({
   const handleNewestDirectoryFile = async () => {
     const result = await chooseNewestSupportedFile()
     if (result.ok) {
-      await handleFile(result.file)
+      await handleSelectedFiles([result.file])
       return
     }
     if (result.reason === 'cancelled' || result.reason === 'unsupported') return
     setMessage(
       result.reason === 'no-supported-file'
-        ? '다운로드 폴더에서 분석할 수 있는 XLSX, CSV, 또는 파워플래너 HTML XLS 파일을 찾지 못했습니다.'
+        ? '다운로드 폴더에서 분석할 수 있는 PDF, XLSX, CSV, 또는 파워플래너 HTML XLS 파일을 찾지 못했습니다.'
         : '다운로드 폴더의 파일을 읽지 못했습니다. 브라우저의 폴더 접근 권한을 확인한 뒤 일반 파일 선택으로 다시 시도해 주세요.',
     )
   }
@@ -180,7 +235,7 @@ export function FileBillInput({
       <section className="panel upload-panel">
         <div>
           <h2>고지서 업로드</h2>
-          <p>최근 3년 자료 업로드 가능. 첨부 엑셀처럼 연도별 시트가 나뉜 경우 자동 병합을 시도합니다.</p>
+          <p>한전 PDF는 여러 달을 한 번에 선택할 수 있습니다. PDF·엑셀·CSV 모두 브라우저에서만 읽습니다.</p>
         </div>
         <div className="upload-actions">
           <label
@@ -189,17 +244,38 @@ export function FileBillInput({
             tabIndex={0}
             aria-label="엑셀 파일 선택 또는 드롭"
             onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => handleDrop(event, (file) => void handleFile(file))}
+            onDrop={(event) =>
+              handleDrop(event, (files) => void handleSelectedFiles(files))}
             onKeyDown={openNestedFileInput}
           >
             <UploadCloud size={24} />
             <span>파일을 선택하거나 드롭</span>
             <input
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.csv,.pdf"
+              multiple
               onChange={(event) => {
-                const file = event.currentTarget.files?.[0]
-                if (file) void handleFile(file)
+                const files = Array.from(event.currentTarget.files ?? [])
+                if (files.length) void handleSelectedFiles(files)
+              }}
+            />
+          </label>
+          <label
+            className="outline-action"
+            role="button"
+            tabIndex={0}
+            aria-label="한전 고지서 PDF 업로드"
+            onKeyDown={openNestedFileInput}
+          >
+            <FileText size={18} />
+            PDF 고지서
+            <input
+              type="file"
+              accept=".pdf"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.currentTarget.files ?? [])
+                if (files.length) void handlePdfFiles(files)
               }}
             />
           </label>
@@ -246,6 +322,8 @@ export function FileBillInput({
           </p>
         )}
       </section>
+
+      <AiBillConversionHelper onOpenPaste={onOpenPaste} />
 
       {recognition && (
         <section className="panel recognition-panel">

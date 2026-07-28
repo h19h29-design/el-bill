@@ -67,6 +67,39 @@ const createSyntheticWorkbook = async () => {
 }
 
 describe('bill upload tariff configuration', () => {
+  it('opens the paste workflow from the free AI helper on the first input screen', async () => {
+    const user = userEvent.setup()
+    render(
+      <BillUpload
+        bills={sampleBills}
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onBillsChange={async () => true}
+        onOpenGuide={() => undefined}
+      />,
+    )
+
+    expect(
+      screen.getByRole('tab', { name: '파일 업로드' }).getAttribute(
+        'aria-selected',
+      ),
+    ).toBe('true')
+    await user.click(
+      screen.getByRole('button', { name: 'AI 변환 결과 붙여넣기' }),
+    )
+
+    expect(
+      screen.getByRole('tab', { name: '표 붙여넣기' }).getAttribute(
+        'aria-selected',
+      ),
+    ).toBe('true')
+    expect(
+      screen.getByRole('tabpanel', { name: '표 붙여넣기' }).hasAttribute(
+        'hidden',
+      ),
+    ).toBe(false)
+  })
+
   it('mounts personal-entry panels, opens their guide anchors, and removes an applied manual draft', async () => {
     const user = userEvent.setup()
     const onOpenGuide = vi.fn()

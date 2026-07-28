@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import ExcelJS from 'exceljs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultRatePlans } from '../../data/ratePlans'
-import { defaultSchoolProfile } from '../../data/sampleBills'
+import { defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
+import * as billPdf from '../../lib/billPdf'
 import { FileBillInput } from './FileBillInput'
 
 const toArrayBuffer = (buffer: ArrayBuffer | Uint8Array) =>
@@ -72,6 +73,77 @@ describe('FileBillInput', () => {
 
     expect(screen.getByRole('button', { name: '엑셀 파일 선택 또는 드롭' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'CSV 불러오기' })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: '한전 고지서 PDF 업로드' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('heading', { name: '무료 AI로 고지서 변환' }),
+    ).toBeTruthy()
+  })
+
+  it('combines several selected bill PDFs into one uploaded candidate', async () => {
+    const onCandidateChange = vi.fn()
+    const june = new File(['%PDF-1.7'], '2026-06.pdf', {
+      type: 'application/pdf',
+    })
+    const july = new File(['%PDF-1.7'], '2026-07.pdf', {
+      type: 'application/pdf',
+    })
+    const parsedBills = sampleBills.slice(0, 2)
+    const parsePdfFiles = vi
+      .spyOn(billPdf, 'parseBillPdfFiles')
+      .mockResolvedValue({
+        sheets: [
+          {
+            name: '2026-06.pdf',
+            headers: ['연도', '월', '사용량', '총 전기요금'],
+            rows: [{
+              연도: parsedBills[0].year,
+              월: parsedBills[0].month,
+              사용량: parsedBills[0].usageKwh,
+              '총 전기요금': parsedBills[0].totalBillWon,
+            }],
+          },
+          {
+            name: '2026-07.pdf',
+            headers: ['연도', '월', '사용량', '총 전기요금'],
+            rows: [{
+              연도: parsedBills[1].year,
+              월: parsedBills[1].month,
+              사용량: parsedBills[1].usageKwh,
+              '총 전기요금': parsedBills[1].totalBillWon,
+            }],
+          },
+        ],
+        autoRows: parsedBills,
+        diagnostics: ['PDF 2개를 읽었습니다.'],
+      })
+    const { container } = render(
+      <FileBillInput
+        profile={defaultSchoolProfile}
+        ratePlans={defaultRatePlans}
+        onCandidateChange={onCandidateChange}
+      />,
+    )
+
+    fireEvent.change(container.querySelector('input[accept=".pdf"]')!, {
+      target: { files: [june, july] },
+    })
+
+    await waitFor(() => {
+      expect(parsePdfFiles).toHaveBeenCalledWith(
+        [june, july],
+        expect.objectContaining({
+          appliedPowerKw: defaultSchoolProfile.appliedPowerKw,
+        }),
+      )
+      expect(onCandidateChange).toHaveBeenCalledWith({
+        origin: 'uploaded',
+        bills: parsedBills,
+        sourceLabel: '한전 고지서 PDF 2개',
+      })
+    })
+    expect(screen.getByText(/PDF 2개에서 2개월/)).toBeTruthy()
   })
 
   it('shows browser guidance when directory picking is unavailable', () => {
@@ -153,7 +225,7 @@ describe('FileBillInput', () => {
           getFile: async () => new File(['notes'], 'notes.txt'),
         },
       ])),
-      '다운로드 폴더에서 분석할 수 있는 XLSX, CSV, 또는 파워플래너 HTML XLS 파일을 찾지 못했습니다.',
+      '다운로드 폴더에서 분석할 수 있는 PDF, XLSX, CSV, 또는 파워플래너 HTML XLS 파일을 찾지 못했습니다.',
     ],
     [
       'directory read error',

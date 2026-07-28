@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import JSZip from 'jszip'
+import { jsPDF } from 'jspdf'
 
 const billMonths = Array.from({ length: 36 }, (_, index) => {
   const monthIndex = 2023 * 12 + 7 + index
@@ -66,6 +67,24 @@ const manualBillMatrix = [...personalBillMonths]
   .reverse()
   .map(({ usageKwh, totalBillWon }) => `${usageKwh}\t${totalBillWon}`)
   .join('\n')
+
+const billPdfPayloads = personalBillMonths.map(
+  ({ year, month, usageKwh, totalBillWon }) => {
+    const pdf = new jsPDF()
+    pdf.text(
+      `BILLING MONTH ${year}-${String(month).padStart(2, '0')}`,
+      20,
+      20,
+    )
+    pdf.text(`USAGE ${usageKwh} kWh`, 20, 30)
+    pdf.text(`TOTAL AMOUNT ${totalBillWon} KRW`, 20, 40)
+    return {
+      name: `kepco-bill-${year}-${String(month).padStart(2, '0')}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: Buffer.from(pdf.output('arraybuffer')),
+    }
+  },
+)
 
 const clearBrowserStorage = async (page: Page) => {
   await page.goto('/')
@@ -173,6 +192,35 @@ test('checked-in synthetic XLSX reaches recognized mapping and analysis state', 
   await expect(
     page.locator('.recognition-grid article').filter({ hasText: '필수 컬럼' }),
   ).toContainText('연도, 월, 사용량, 총 전기요금')
+  await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
+
+  await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
+  await expect(page.locator('.view-heading h2')).toHaveText('자동진단')
+  await expect(page.getByText('파일 업로드 고지서 분석', { exact: false })).toBeVisible()
+})
+
+test('official bill PDFs and the free AI fallback are usable from the first input screen', async ({
+  page,
+}) => {
+  await clearBrowserStorage(page)
+  await openDesktopView(page, '고지서 입력')
+
+  await expect(
+    page.getByRole('heading', { name: '무료 AI로 고지서 변환' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'AI 변환 결과 붙여넣기' }).click()
+  await expect(
+    page.getByRole('tab', { name: '표 붙여넣기' }),
+  ).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByLabel('붙여넣을 표')).toBeVisible()
+
+  await page.getByRole('tab', { name: '파일 업로드' }).click()
+  await page
+    .locator('input[type="file"][accept=".pdf"]')
+    .setInputFiles(billPdfPayloads)
+
+  await expect(page.getByText(/PDF 12개에서 12개월/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: '자동 인식 결과' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
 
   await page.getByRole('button', { name: '이 데이터로 분석 시작' }).click()
@@ -1018,6 +1066,9 @@ test('mobile personal input tabs and guide navigation do not overlap', async ({
   await expect(page.getByRole('tabpanel', { name: '직접 입력' })).toBeVisible()
   await fileTab.click()
   await expect(page.getByRole('tabpanel', { name: '파일 업로드' })).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    .toBe(true)
   await manualTab.click()
   await page.getByRole('button', { name: '입력 안내' }).click()
 

@@ -130,9 +130,10 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
           {sectionHeading('file-upload', '파일을 그대로 올리기')}
           <ol>
             <li><strong>고지서 입력</strong>에서 <strong>파일 업로드</strong> 탭을 엽니다.</li>
-            <li>한전 고지서 XLSX/CSV 또는 파워플래너 HTML 내보내기 <code>.xls</code>를 선택합니다.</li>
+            <li>한전 고지서 PDF, XLSX/CSV 또는 파워플래너 HTML 내보내기 <code>.xls</code>를 선택합니다.</li>
             <li>자동 인식 결과와 누락·중복 월을 확인한 뒤 <strong>이 데이터로 분석 시작</strong>을 선택합니다.</li>
           </ol>
+          <p>PDF는 글자를 선택할 수 있는 고지서를 브라우저에서 읽습니다. 스캔 이미지형 PDF, 암호화된 PDF 또는 필수값을 찾지 못한 파일은 고지서 입력 화면의 무료 AI 변환 도우미를 사용하세요.</p>
           <p>다운로드 폴더 찾기는 Chrome 또는 Edge에서 사용자가 직접 폴더를 선택할 때만 동작합니다. 앱은 폴더를 자동으로 감시하거나 하위 폴더를 탐색하지 않습니다.</p>
         </section>
 
@@ -158,7 +159,7 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
 
         <section className="guide-section">
           {sectionHeading('gpt-csv', 'GPT로 CSV 변환')}
-          <p>자료 형식이 복잡해 파일 인식과 붙여넣기가 어려울 때만 아래 프롬프트로 표준 CSV를 만듭니다. 변환 결과도 한전 원본으로 취급하지 않으므로 앱의 미리보기와 누락·중복 검사를 확인한 뒤 적용합니다.</p>
+          <p>스캔 PDF나 복잡한 자료는 아래 프롬프트를 ChatGPT 또는 Gemini 무료 화면에 넣어 표준 CSV로 만듭니다. 같은 도구를 <strong>고지서 입력</strong>의 첫 파일 업로드 화면에서도 바로 사용할 수 있습니다. 변환 결과는 한전 원본으로 취급하지 않으므로 앱의 미리보기와 누락·중복 검사를 확인한 뒤 적용합니다.</p>
           <div className="guide-action-feedback">
             <div className="guide-actions" role="group" aria-label="GPT 변환 도구">
               <button type="button" className="outline-action" aria-describedby="guide-action-status" onClick={() => void handleCopyPrompt()}>

@@ -293,7 +293,14 @@ button:disabled {
 
 .view-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  min-width: 0;
+}
+
+.view-stack > *,
+.view-stack > [role="tabpanel"] {
+  min-width: 0;
 }
 
 .guide-layout {
@@ -766,7 +773,9 @@ textarea:focus {
 
 .input-mode-shell {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  min-width: 0;
 }
 
 .input-mode-shell h2,
@@ -1022,6 +1031,83 @@ textarea:focus {
   flex-wrap: wrap;
   gap: 9px;
   justify-content: flex-end;
+}
+
+.ai-conversion-panel {
+  display: grid;
+  gap: 12px;
+  background: #f7fbff;
+  border-color: #cfe1f3;
+}
+
+.ai-conversion-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ai-conversion-heading > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #087f75;
+}
+
+.ai-conversion-heading h2,
+.ai-conversion-heading p,
+.ai-conversion-status,
+.ai-conversion-warning {
+  margin: 0;
+}
+
+.ai-conversion-heading h2 {
+  color: #173858;
+  font-size: 16px;
+}
+
+.ai-conversion-heading p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.ai-conversion-steps {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 24px;
+  color: #315879;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ai-conversion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-conversion-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.ai-conversion-status {
+  min-height: 20px;
+  color: #087f5b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ai-conversion-warning {
+  padding: 9px 11px;
+  color: #7f4b17;
+  background: #fff9ed;
+  border-left: 3px solid #e8a33d;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .upload-drop {
@@ -2540,6 +2626,14 @@ textarea:focus {
     align-items: stretch;
   }
 
+  .ai-conversion-actions {
+    flex-direction: column;
+  }
+
+  .ai-conversion-actions button {
+    width: 100%;
+  }
+
   .top-notice {
     justify-content: flex-start;
     min-width: 0;
@@ -2592,6 +2686,28 @@ textarea:focus {
 }
 
 @media (max-width: 640px) {
+  .bill-input-tabs button {
+    gap: 5px;
+    padding: 0 5px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .upload-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  .upload-drop,
+  .upload-actions > [aria-label="CSV 불러오기"],
+  .upload-actions > button,
+  .upload-actions > p {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+  }
+
   .kpi-grid,
   .dashboard-grid,
   .document-grid,

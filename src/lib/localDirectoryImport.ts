@@ -1,3 +1,4 @@
+import { validateBillPdfFile } from './billPdf'
 import { validateUploadFile } from './excel'
 
 export const supportsDirectoryPicker = () =>
@@ -7,7 +8,7 @@ export type DirectoryImportResult =
   | { ok: true; file: File }
   | { ok: false; reason: 'unsupported' | 'cancelled' | 'no-supported-file' | 'read-error' }
 
-const hasSupportedExtension = (name: string) => /\.(xlsx|xls|csv)$/i.test(name)
+const hasSupportedExtension = (name: string) => /\.(xlsx|xls|csv|pdf)$/i.test(name)
 
 const hasXlsxSignature = (buffer: ArrayBuffer) => {
   if (buffer.byteLength < 4) return false
@@ -16,6 +17,12 @@ const hasXlsxSignature = (buffer: ArrayBuffer) => {
     bytes[1] === 0x4b &&
     bytes[2] === 0x03 &&
     bytes[3] === 0x04
+}
+
+const hasPdfSignature = (buffer: ArrayBuffer) => {
+  if (buffer.byteLength < 5) return false
+  const header = new TextDecoder('ascii').decode(buffer.slice(0, Math.min(buffer.byteLength, 1024)))
+  return header.includes('%PDF-')
 }
 
 const isPowerPlannerHtml = (buffer: ArrayBuffer) => {
@@ -29,6 +36,7 @@ const hasSupportedContents = async (file: File) => {
   if (name.endsWith('.csv')) return true
 
   const buffer = await file.arrayBuffer()
+  if (name.endsWith('.pdf')) return hasPdfSignature(buffer)
   if (name.endsWith('.xlsx')) return hasXlsxSignature(buffer)
   return isPowerPlannerHtml(buffer)
 }
@@ -46,7 +54,10 @@ export const selectNewestSupportedFile = async (
     for await (const handle of directory.values()) {
       if (handle.kind !== 'file' || !hasSupportedExtension(handle.name)) continue
       const file = await handle.getFile()
-      if (validateUploadFile(file) || !await hasSupportedContents(file)) continue
+      const validationMessage = /\.pdf$/i.test(file.name)
+        ? validateBillPdfFile(file)
+        : validateUploadFile(file)
+      if (validationMessage || !await hasSupportedContents(file)) continue
       candidates.push(file)
     }
   } catch {

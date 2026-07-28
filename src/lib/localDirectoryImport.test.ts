@@ -58,6 +58,17 @@ describe('local directory import', () => {
     expect(result).toEqual({ ok: true, file: newest })
   })
 
+  it('selects an official bill PDF from the chosen local directory', async () => {
+    const billPdf = file('한전-전기요금-2026-07.pdf', 1_750_000_000_000, '%PDF-1.7\n')
+    const result = await selectNewestSupportedFile(directory([
+      fileEntry(file('older.csv', 1_740_000_000_000, 'year,month\n2026,6')),
+      fileEntry(billPdf),
+    ]) as never)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.file.name).toBe(billPdf.name)
+  })
+
   it('ignores nested directories when selecting a bill export', async () => {
     const topLevel = file('top-level.csv', 1_740_000_000_000, 'year,month\n2026,7')
     const result = await selectNewestSupportedFile(directory([
