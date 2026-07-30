@@ -185,7 +185,7 @@ test('checked-in synthetic XLSX reaches recognized mapping and analysis state', 
   await page.reload()
 
   await page.getByRole('button', { name: '전기요금 자동진단 시작' }).click()
-  await page.getByRole('button', { name: '자료 업로드부터 시작' }).click()
+  await page.getByRole('button', { name: '자료 다시 불러오기' }).click()
   await page
     .locator('input[type="file"][accept=".xlsx,.xls"]')
     .first()
@@ -701,7 +701,7 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await page.getByRole('button', { name: '전기요금 자동진단 시작' }).click()
   await expectViewHeading('자동진단')
 
-  await page.getByRole('button', { name: '자료 업로드부터 시작' }).click()
+  await page.getByRole('button', { name: '자료 다시 불러오기' }).click()
   await expectViewHeading('월별 한전고지서 입력')
   await page.locator('input[type="file"][accept=".xlsx,.xls"]').first().setInputFiles(billXls)
   await expect(page.getByRole('heading', { name: '자동 인식 결과' })).toBeVisible()

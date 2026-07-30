@@ -1,6 +1,5 @@
 import {
   ArrowRight,
-  ClipboardCheck,
   FileText,
   Gauge,
   PlayCircle,
@@ -13,6 +12,10 @@ import { formatWon } from '../../lib/calculations'
 import { getCalculationModeLabel } from '../../lib/calculationSettings'
 import { rateChangeCaution } from '../../lib/documentTemplates'
 import { getBillOriginLabel } from '../../lib/dataProvenance'
+import {
+  formatCostImpact,
+  getDiagnosisDecisionPresentation,
+} from '../../lib/diagnosisPresentation'
 import { PlanCandidateTable } from './PlanCandidateTable'
 
 interface AutoDiagnosisProps {
@@ -37,6 +40,7 @@ export function AutoDiagnosis({
   const comparison = diagnosis.comparison
   const currentPlan = diagnosis.currentPlan
   const recommendedPlan = diagnosis.recommendedPlan
+  const decision = getDiagnosisDecisionPresentation(diagnosis)
   const judgementClass =
     diagnosis.finalJudgement === '변경 추천'
       ? 'good'
@@ -113,9 +117,9 @@ export function AutoDiagnosis({
               ? '파워플래너 미사용'
               : `파워플래너 ${dataProvenance.powerPlanner === 'sample' ? '시연 샘플' : '사용자 업로드'}`}
           </span>
-          <h2>전기요금 자동진단 시작</h2>
+          <h2>전기요금 자동진단 결과</h2>
           <p>
-            자료 업로드부터 추천 요금제, 피크관리 운영안, 변경신청 패키지까지 한 흐름으로 점검합니다.
+            업로드한 고지서를 기준으로 현재 요금제 유지와 변경 중 어느 쪽이 유리한지 비교했습니다.
           </p>
         </div>
         <button
@@ -124,13 +128,22 @@ export function AutoDiagnosis({
           onClick={() => onNavigate('bills')}
         >
           <PlayCircle size={20} />
-          자료 업로드부터 시작
+          자료 다시 불러오기
         </button>
       </section>
 
       <section className="diagnosis-stepper" aria-label="자동진단 단계">
         {steps.map(([title, description], index) => (
-          <article key={title} className={index < 3 || diagnosis.completed ? 'complete' : ''}>
+          <article
+            key={title}
+            className={
+              index < 3 ||
+              (index === 3 && diagnosis.completed) ||
+              (index === 4 && diagnosis.canGenerateChangeDocuments)
+                ? 'complete'
+                : ''
+            }
+          >
             <strong>{index + 1}</strong>
             <span>{title}</span>
             <p>{description}</p>
@@ -138,47 +151,79 @@ export function AutoDiagnosis({
         ))}
       </section>
 
-      <section className="diagnosis-result-grid">
-        <article className="diagnosis-result-card wide">
-          <div className="result-heading">
-            <ClipboardCheck size={28} />
-            <div>
-              <span>자동 분석 완료</span>
-              <strong>{diagnosis.completed ? '진단 가능' : '추가 자료 필요'}</strong>
-            </div>
-          </div>
-          <p>{diagnosis.judgementBasis}</p>
+      <section
+        className={`diagnosis-decision ${judgementClass}`}
+        aria-labelledby="diagnosis-decision-title"
+      >
+        <div className="diagnosis-decision-main">
+          <span>{decision.badge}</span>
+          <h2 id="diagnosis-decision-title">{decision.title}</h2>
+          <p>{decision.summary}</p>
           <div className="diagnosis-actions">
-            <button type="button" className="outline-action" onClick={() => onNavigate('peak')}>
+            <button
+              type="button"
+              className="outline-action"
+              onClick={() => onNavigate('peak')}
+            >
               <Gauge size={17} />
-              피크관리 방안 보기
+              피크 가정 확인
             </button>
-            <button type="button" className="outline-action" onClick={() => onNavigate('docs')}>
-              <FileText size={17} />
-              변경신청 패키지 생성
-            </button>
+            {diagnosis.canGenerateChangeDocuments ? (
+              <button
+                type="button"
+                className="outline-action"
+                onClick={() => onNavigate('docs')}
+              >
+                <FileText size={17} />
+                변경신청 패키지 생성
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="outline-action"
+                onClick={() => onNavigate('bills')}
+              >
+                <UploadCloud size={17} />
+                고지서 자료 보완
+              </button>
+            )}
           </div>
-        </article>
+        </div>
+        <div className="diagnosis-decision-reasons">
+          <strong>왜 이 결론인가요?</strong>
+          <ol>
+            {decision.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ol>
+          <p>
+            판단 신뢰도 {diagnosis.dataConfidence} · 데이터 인식률{' '}
+            {diagnosis.dataRecognitionRate}%
+          </p>
+        </div>
+      </section>
+
+      <section className="diagnosis-result-grid">
         <article className="diagnosis-result-card">
           <span>현재 요금제</span>
           <strong>{currentPlan.planName}</strong>
           <p>{currentPlan.contractType} {currentPlan.voltageType}</p>
         </article>
         <article className="diagnosis-result-card">
-          <span>추천 요금제</span>
+          <span>{decision.candidateLabel}</span>
           <strong>{recommendedPlan.planName}</strong>
           <p>{diagnosis.comparison.reviewReason}</p>
         </article>
         <article className="diagnosis-result-card">
-          <span>최근 12개월 절감액</span>
+          <span>변경 시 최근 12개월 영향</span>
           <strong>
             {comparison.annualDataAvailable
-              ? formatWon(comparison.savingWon)
+              ? formatCostImpact(comparison.savingWon, { annual: true })
               : '12개월 연속 자료 부족'}
           </strong>
           {comparison.annualDataAvailable ? (
             <p>
-              현재 {formatWon(comparison.currentAnnualWon)} → 추천{' '}
+              현재 {formatWon(comparison.currentAnnualWon)} → 비교{' '}
               {formatWon(comparison.candidateAnnualWon)}
             </p>
           ) : (
@@ -186,39 +231,34 @@ export function AutoDiagnosis({
           )}
         </article>
         <article className="diagnosis-result-card">
-          <span>최근 연속 36개월 절감액</span>
+          <span>변경 시 최근 36개월 영향</span>
           <strong>
             {comparison.threeYearDataAvailable
-              ? formatWon(comparison.threeYearSavingWon)
+              ? formatCostImpact(comparison.threeYearSavingWon)
               : '36개월 연속 자료 부족'}
           </strong>
           {comparison.threeYearDataAvailable && (
             <p>
-              현재 {formatWon(comparison.currentThreeYearWon)} → 추천{' '}
+              현재 {formatWon(comparison.currentThreeYearWon)} → 비교{' '}
               {formatWon(comparison.candidateThreeYearWon)}
             </p>
           )}
         </article>
         <article className="diagnosis-result-card">
-          <span>피크 시나리오 절감액</span>
+          <span>피크 가정 시 12개월 영향</span>
           <strong>
             {comparison.peakScenarioDataAvailable
-              ? formatWon(comparison.peakScenarioSavingWon)
+              ? formatCostImpact(comparison.peakScenarioSavingWon)
               : '피크 시나리오 자료 부족'}
           </strong>
           {comparison.peakScenarioDataAvailable ? (
             <p>
-              현재 {formatWon(comparison.peakScenarioCurrentAnnualWon)} → 추천{' '}
+              현재 {formatWon(comparison.peakScenarioCurrentAnnualWon)} → 비교{' '}
               {formatWon(comparison.peakScenarioCandidateAnnualWon)}
             </p>
           ) : (
             <p>최근 12개월 자료와 유효한 피크 시나리오가 필요합니다.</p>
           )}
-        </article>
-        <article className={`diagnosis-result-card judgement ${judgementClass}`}>
-          <span>최종 판단</span>
-          <strong>{diagnosis.finalJudgement}</strong>
-          <p>{diagnosis.dataConfidence} · 인식률 {diagnosis.dataRecognitionRate}%</p>
         </article>
       </section>
 
@@ -255,7 +295,7 @@ export function AutoDiagnosis({
               <article key={row.label}>
                 <span>{row.label}</span>
                 <strong className={row.differenceWon >= 0 ? 'positive' : 'danger-text'}>
-                  {formatWon(row.differenceWon)}
+                  {formatCostImpact(row.differenceWon)}
                 </strong>
                 <dl>
                   <div>
@@ -263,7 +303,7 @@ export function AutoDiagnosis({
                     <dd>{formatWon(row.currentWon)}</dd>
                   </div>
                   <div>
-                    <dt>추천</dt>
+                    <dt>비교</dt>
                     <dd>{formatWon(row.candidateWon)}</dd>
                   </div>
                 </dl>

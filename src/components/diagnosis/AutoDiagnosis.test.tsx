@@ -34,16 +34,16 @@ describe('automatic diagnosis period integrity', () => {
       />,
     )
 
-    expect(screen.getAllByText('최근 연속 36개월 절감액')).toHaveLength(2)
+    expect(screen.getByText('변경 시 최근 36개월 영향')).toBeTruthy()
     expect(
       screen.getByText(
-        `현재 ${formatWon(diagnosis.comparison.currentThreeYearWon)} → 추천 ${formatWon(diagnosis.comparison.candidateThreeYearWon)}`,
+        `현재 ${formatWon(diagnosis.comparison.currentThreeYearWon)} → 비교 ${formatWon(diagnosis.comparison.candidateThreeYearWon)}`,
       ),
     ).toBeTruthy()
-    expect(screen.getAllByText('피크 시나리오 절감액')).toHaveLength(2)
+    expect(screen.getByText('피크 가정 시 12개월 영향')).toBeTruthy()
     expect(
       screen.getByText(
-        `현재 ${formatWon(diagnosis.comparison.peakScenarioCurrentAnnualWon)} → 추천 ${formatWon(diagnosis.comparison.peakScenarioCandidateAnnualWon)}`,
+        `현재 ${formatWon(diagnosis.comparison.peakScenarioCurrentAnnualWon)} → 비교 ${formatWon(diagnosis.comparison.peakScenarioCandidateAnnualWon)}`,
       ),
     ).toBeTruthy()
     expect(screen.getByText(/기후환경 12원\/kWh/)).toBeTruthy()
@@ -72,6 +72,104 @@ describe('automatic diagnosis period integrity', () => {
     )
   })
 
+  it('states a maintain decision as an action and explains the conflicting peak assumption', () => {
+    const baseDiagnosis = buildAutoDiagnosis({
+      bills: sampleBills.slice(-12),
+      profile: defaultSchoolProfile,
+      ratePlans: defaultRatePlans,
+      scenario: defaultScenario,
+      calculationSettings: defaultCalculationSettings,
+      billsAreUserUploaded: true,
+    })
+    const comparison = {
+      ...baseDiagnosis.comparison,
+      currentAnnualWon: 29_255_630,
+      candidateAnnualWon: 33_628_957,
+      savingWon: -4_373_327,
+      savingRate: -0.1495,
+      threeYearDataAvailable: false,
+      peakScenarioDataAvailable: true,
+      peakScenarioCurrentAnnualWon: 64_974_359,
+      peakScenarioCandidateAnnualWon: 59_961_841,
+      peakScenarioSavingWon: 5_012_518,
+      recommendation: '유지 추천' as const,
+      basis: '변경 시 최근 12개월 기준 비용 증가가 추정됩니다.',
+      calculationBreakdown: [
+        {
+          label: '기본요금 차액',
+          currentWon: 14_141_400,
+          candidateWon: 12_321_000,
+          differenceWon: 1_820_400,
+          note: '요금적용전력을 기준으로 비교합니다.',
+        },
+        {
+          label: '전력량요금 차액',
+          currentWon: 14_453_710,
+          candidateWon: 15_097_907,
+          differenceWon: -644_197,
+          note: '월별 사용량을 반영합니다.',
+        },
+        {
+          label: '부가요금/보정',
+          currentWon: 660_520,
+          candidateWon: 6_210_050,
+          differenceWon: -5_549_530,
+          note: '기존 고지서 비율로 보정합니다.',
+        },
+        {
+          label: '최근 12개월 합계',
+          currentWon: 29_255_630,
+          candidateWon: 33_628_957,
+          differenceWon: -4_373_327,
+          note: '학교 내부 진단용 추정 합계입니다.',
+        },
+      ],
+    }
+    const diagnosis = {
+      ...baseDiagnosis,
+      comparison,
+      finalJudgement: '유지 추천' as const,
+      judgementBasis: comparison.basis,
+      canGenerateChangeDocuments: false,
+      availableDocumentCount: 0,
+    }
+
+    render(
+      <AutoDiagnosis
+        diagnosis={diagnosis}
+        dataProvenance={{ bills: 'uploaded', powerPlanner: 'none' }}
+        onNavigate={() => undefined}
+      />,
+    )
+
+    expect(
+      screen.getByRole('heading', { name: '현재 선택요금Ⅱ를 유지하세요' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('heading', { name: '전기요금 자동진단 결과' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: '자료 다시 불러오기' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        /선택요금Ⅰ로 변경하면.*연간 비용이.*4,373,327원.*늘어날/,
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText('비교 대상 요금제')).toBeTruthy()
+    expect(screen.getByText('연 4,373,327원 증가')).toBeTruthy()
+    expect(
+      screen.getByText(/피크 시나리오에서는.*5,012,518원.*가정/),
+    ).toBeTruthy()
+    expect(screen.queryByText('-4,373,327원')).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: '변경신청 패키지 생성' }),
+    ).toBeNull()
+    expect(
+      screen.getByRole('button', { name: '고지서 자료 보완' }),
+    ).toBeTruthy()
+  })
+
   it('does not present a zero three-year value when 36 months are unavailable', () => {
     const diagnosis = buildAutoDiagnosis({
       bills: sampleBills.slice(-12),
@@ -89,7 +187,7 @@ describe('automatic diagnosis period integrity', () => {
       />,
     )
 
-    expect(screen.getAllByText('최근 연속 36개월 절감액')).toHaveLength(2)
+    expect(screen.getByText('변경 시 최근 36개월 영향')).toBeTruthy()
     expect(screen.getByText('36개월 연속 자료 부족')).toBeTruthy()
     expect(screen.getAllByText('36개월 자료 부족').length).toBeGreaterThan(0)
   })

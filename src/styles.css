@@ -2266,6 +2266,99 @@ textarea:focus {
   gap: 12px;
 }
 
+.diagnosis-decision {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.35fr);
+  gap: 24px;
+  padding: 22px;
+  border: 1px solid #b8d4f0;
+  border-radius: 8px;
+  background: #f6fbff;
+}
+
+.diagnosis-decision.good {
+  border-color: #87c9a7;
+  background: #f2fcf7;
+}
+
+.diagnosis-decision.hold {
+  border-color: #f1b98e;
+  background: #fff8f1;
+}
+
+.diagnosis-decision.review {
+  border-color: #e7c66b;
+  background: #fffaf0;
+}
+
+.diagnosis-decision-main {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.diagnosis-decision-main > span {
+  width: fit-content;
+  padding: 4px 8px;
+  color: #7b3a14;
+  background: #ffead8;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.diagnosis-decision.good .diagnosis-decision-main > span {
+  color: #08613b;
+  background: #dff7e9;
+}
+
+.diagnosis-decision.review .diagnosis-decision-main > span {
+  color: #735100;
+  background: #fff0bd;
+}
+
+.diagnosis-decision h2 {
+  margin: 0;
+  color: #08264b;
+  font-size: 25px;
+  line-height: 1.25;
+}
+
+.diagnosis-decision-main > p {
+  margin: 0 0 4px;
+  color: #334f6c;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.6;
+}
+
+.diagnosis-decision-reasons {
+  padding-left: 24px;
+  border-left: 1px solid #cbdced;
+}
+
+.diagnosis-decision-reasons > strong {
+  color: #173b61;
+  font-size: 15px;
+}
+
+.diagnosis-decision-reasons ol {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0;
+  padding-left: 21px;
+  color: #3e5a76;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.diagnosis-decision-reasons > p {
+  margin: 0;
+  color: #687f96;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .diagnosis-result-card {
   display: grid;
   gap: 7px;
@@ -2542,6 +2635,17 @@ textarea:focus {
   .recognition-grid,
   .breakdown-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .diagnosis-decision {
+    grid-template-columns: 1fr;
+  }
+
+  .diagnosis-decision-reasons {
+    padding-top: 18px;
+    padding-left: 0;
+    border-top: 1px solid #cbdced;
+    border-left: 0;
   }
 
   .peak-grid,

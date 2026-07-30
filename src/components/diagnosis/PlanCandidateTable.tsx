@@ -1,8 +1,29 @@
 import type { PlanCandidateComparison } from '../../types'
 import { formatWon } from '../../lib/calculations'
+import { formatCostImpact } from '../../lib/diagnosisPresentation'
 
 interface PlanCandidateTableProps {
   candidates: PlanCandidateComparison[]
+}
+
+const getJudgementLabel = (
+  recommendation: PlanCandidateComparison['recommendation'],
+) =>
+  recommendation === '변경 추천'
+    ? '변경이 유리'
+    : recommendation === '유지 추천'
+      ? '현재 요금제 유지'
+      : '자료 보완 필요'
+
+const getCandidateBasis = (candidate: PlanCandidateComparison) => {
+  if (!candidate.annualDataAvailable) return candidate.basis
+  if (candidate.savingWon > 0) {
+    return `${candidate.candidatePlanName}로 바꾸면 최근 12개월 기준 비용이 ${formatWon(candidate.savingWon)} 절감됩니다.`
+  }
+  if (candidate.savingWon < 0) {
+    return `${candidate.candidatePlanName}로 바꾸면 최근 12개월 기준 비용이 ${formatWon(Math.abs(candidate.savingWon))} 증가합니다.`
+  }
+  return `${candidate.candidatePlanName}로 바꿔도 최근 12개월 기준 비용 차이가 없습니다.`
 }
 
 export function PlanCandidateTable({ candidates }: PlanCandidateTableProps) {
@@ -23,11 +44,11 @@ export function PlanCandidateTable({ candidates }: PlanCandidateTableProps) {
             <tr>
               <th>후보 요금제</th>
               <th>최근 12개월 예상액</th>
-              <th>최근 12개월 절감액</th>
-              <th>최근 연속 36개월 절감액</th>
-              <th>피크 시나리오 절감액</th>
+              <th>변경 시 12개월 영향</th>
+              <th>변경 시 36개월 영향</th>
+              <th>피크 가정 시 영향</th>
               <th>판단</th>
-              <th>검토 사유</th>
+              <th>판단 근거</th>
             </tr>
           </thead>
           <tbody>
@@ -44,25 +65,28 @@ export function PlanCandidateTable({ candidates }: PlanCandidateTableProps) {
                 </td>
                 <td className={candidate.savingWon >= 0 ? 'positive' : 'danger-text'}>
                   {candidate.annualDataAvailable
-                    ? formatWon(candidate.savingWon)
+                    ? formatCostImpact(candidate.savingWon)
                     : '자료 부족'}
                 </td>
                 <td>
                   {candidate.threeYearDataAvailable
-                    ? formatWon(candidate.threeYearSavingWon)
+                    ? formatCostImpact(candidate.threeYearSavingWon)
                     : '36개월 자료 부족'}
                 </td>
                 <td>
                   {candidate.peakScenarioDataAvailable
-                    ? formatWon(candidate.peakScenarioSavingWon)
+                    ? formatCostImpact(candidate.peakScenarioSavingWon)
                     : '자료 부족'}
                 </td>
                 <td>
                   <span className={`judgement-pill ${candidate.recommendation === '변경 추천' ? 'good' : candidate.recommendation === '유지 추천' ? 'hold' : 'review'}`}>
-                    {candidate.recommendation}
+                    {getJudgementLabel(candidate.recommendation)}
                   </span>
                 </td>
-                <td>{candidate.reviewReason}</td>
+                <td className="candidate-basis-cell">
+                  <strong>{getCandidateBasis(candidate)}</strong>
+                  <span>{candidate.reviewReason}</span>
+                </td>
               </tr>
             ))}
           </tbody>
