@@ -96,15 +96,15 @@ export function Dashboard({
     <div className="view-stack">
       <section className="auto-cta-panel">
         <div>
-          <span>자동진단형 절감 플랫폼</span>
-          <h2>전기요금 자동진단 시작</h2>
+          <span>처음 사용하는 담당자를 위한 단계별 진단</span>
+          <h2>12개월 고지서만 준비하면 됩니다</h2>
           <p>
-            한전고지서와 파워플래너 자료를 기반으로 추천 요금제, 피크관리 방안, 변경신청 문서까지 자동 생성합니다.
+            PDF, 학교 요금 정리표, 붙여넣기, 직접 입력 중 편한 방법을 선택하면 변경 또는 유지 결론까지 안내합니다.
           </p>
         </div>
         <button type="button" className="primary-button auto-cta-button" onClick={onStartDiagnosis}>
           <PlayCircle size={22} />
-          전기요금 자동진단 시작
+          쉬운 진단 시작
         </button>
       </section>
 

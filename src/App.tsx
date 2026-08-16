@@ -44,6 +44,7 @@ import {
   removeBillEntryDraft,
 } from './lib/billDraftStorage'
 import type { ManualBillDraftLifecycle } from './components/bills/manualBillDraftLifecycle'
+import type { EasyDiagnosisApplyInput } from './components/easyDiagnosis/EasyDiagnosisWizard'
 import {
   applyPowerPlannerStorageIntent,
   type PowerPlannerSaveResult,
@@ -125,6 +126,11 @@ const RateSimulator = lazy(() =>
 const BillUpload = lazy(() =>
   import('./components/bills/BillUpload').then((module) => ({
     default: module.BillUpload,
+  })),
+)
+const EasyDiagnosisWizard = lazy(() =>
+  import('./components/easyDiagnosis/EasyDiagnosisWizard').then((module) => ({
+    default: module.EasyDiagnosisWizard,
   })),
 )
 const PowerPlannerUpload = lazy(() =>
@@ -785,6 +791,19 @@ function App() {
     return true
   }
 
+  const applyEasyDiagnosisInput = async ({
+    candidate,
+    profile: nextProfile,
+  }: EasyDiagnosisApplyInput): Promise<boolean> =>
+    startUploadSession((latest) => ({
+      bills: candidate.bills,
+      profile: nextProfile,
+      provenance: {
+        ...latest.provenance,
+        bills: candidate.origin,
+      },
+    }))
+
   const applyPowerPlannerAndOpenDiagnosis = async (
     intent: PowerPlannerStorageIntent,
   ): Promise<PowerPlannerSaveResult> => {
@@ -946,7 +965,17 @@ function App() {
                   scenario={scenario}
                   diagnosis={diagnosis}
                   dataProvenance={dataProvenance}
-                  onStartDiagnosis={() => setActiveView('diagnosis')}
+                  onStartDiagnosis={() => setActiveView('easyDiagnosis')}
+                />
+              )}
+              {activeView === 'easyDiagnosis' && (
+                <EasyDiagnosisWizard
+                  profile={profile}
+                  ratePlans={ratePlans}
+                  diagnosis={diagnosis}
+                  dataProvenance={dataProvenance}
+                  onApply={applyEasyDiagnosisInput}
+                  onNavigate={setActiveView}
                 />
               )}
               {activeView === 'diagnosis' && (
@@ -1048,18 +1077,23 @@ const viewMeta: Record<ViewKey, { step: string; title: string; description: stri
     title: '통합 대시보드',
     description: '전기요금, 사용량, 피크, 추천 요금제를 한 화면에서 점검합니다.',
   },
-  diagnosis: {
+  easyDiagnosis: {
     step: '02',
+    title: '쉬운 전기요금 진단',
+    description: '연속 12개월 자료를 넣고 화면 안내만 따라가면 변경 또는 유지 결론을 확인할 수 있습니다.',
+  },
+  diagnosis: {
+    step: '03',
     title: '자동진단',
     description: '자료 업로드부터 추천, 피크관리, 변경신청 패키지까지 한 흐름으로 안내합니다.',
   },
   school: {
-    step: '03',
+    step: '04',
     title: '학교정보',
     description: '문서와 계산에 들어가는 학교 프로필을 익명 샘플 기준으로 관리합니다.',
   },
   bills: {
-    step: '04',
+    step: '05',
     title: '월별 한전고지서 입력',
     description: '엑셀·CSV 업로드와 컬럼 매핑으로 월별 고지서 데이터를 반영합니다.',
   },
