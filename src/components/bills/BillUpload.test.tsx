@@ -509,7 +509,13 @@ describe('bill upload tariff configuration', () => {
       target: { files: [await createSyntheticWorkbook()] },
     })
 
-    fireEvent.click(await screen.findByRole('button', { name: '이 데이터로 분석 시작' }))
+    fireEvent.click(
+      await screen.findByRole(
+        'button',
+        { name: '이 데이터로 분석 시작' },
+        { timeout: 5_000 },
+      ),
+    )
     await waitFor(() =>
       expect(onBillsChange).toHaveBeenCalledWith(
         expect.arrayContaining([

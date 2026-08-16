@@ -9,9 +9,13 @@ import {
   sampleBills,
 } from '../../data/sampleBills'
 import { defaultCalculationSettings } from '../../lib/calculationSettings'
+import { findBestBillSheet } from '../../lib/billInput'
 import { buildAutoDiagnosis } from '../../lib/diagnosis'
 import { buildEasyDiagnosisDecision } from '../../lib/easyDiagnosis'
-import { EasyDiagnosisWizard } from './EasyDiagnosisWizard'
+import {
+  EasyDiagnosisWizard,
+  type EasyDiagnosisApplyInput,
+} from './EasyDiagnosisWizard'
 
 afterEach(cleanup)
 
@@ -43,12 +47,15 @@ const toPasteTable = (count: number) =>
     ),
   ].join('\n')
 
-const renderWizard = (onApply = vi.fn(async () => true)) => {
+const renderWizard = (
+  onApply = vi.fn<(input: EasyDiagnosisApplyInput) => Promise<boolean>>(async () => true),
+  diagnosisOverride = diagnosis,
+) => {
   render(
     <EasyDiagnosisWizard
       profile={defaultSchoolProfile}
       ratePlans={defaultRatePlans}
-      diagnosis={diagnosis}
+      diagnosis={diagnosisOverride}
       dataProvenance={uploadedProvenance}
       onApply={onApply}
       onNavigate={() => undefined}
@@ -114,10 +121,97 @@ describe('EasyDiagnosisWizard', () => {
       }),
     ).toBeTruthy()
     expect(screen.getByText(/1년에 한 번만 가능/)).toBeTruthy()
+    expect(screen.getByText('추천 12개월 추정액')).toBeTruthy()
+    expect(screen.getByText('가장 큰 비용 요인')).toBeTruthy()
     expect(screen.queryByText('요금제 자동 비교 TOP 3')).toBeNull()
 
     fireEvent.click(screen.getByText('상세 결과 보기'))
     expect(screen.getByText('요금제 자동 비교 TOP 3')).toBeTruthy()
+  })
+
+  it('applies the confirmed power to all twelve bills and blocks controls while saving', async () => {
+    let releaseApply: ((value: boolean) => void) | undefined
+    const onApply = renderWizard(
+      vi.fn(
+        (_input: EasyDiagnosisApplyInput) =>
+          new Promise<boolean>((resolve) => {
+            releaseApply = resolve
+          }),
+      ),
+    )
+    openPastedReview(12)
+    fireEvent.click(screen.getByRole('button', { name: '계약정보 확인으로 이동' }))
+    fireEvent.change(screen.getByLabelText('요금적용전력(kW)'), {
+      target: { value: '620' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '자동 분석 시작' }))
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1))
+    const applyInput = onApply.mock.calls[0]?.[0]
+    expect(applyInput.candidate.bills.every((bill) => bill.appliedPowerKw === 620)).toBe(true)
+    expect((screen.getByLabelText('요금적용전력(kW)') as HTMLInputElement).disabled).toBe(true)
+    expect(
+      (screen.getByRole('button', { name: '월별 자료 다시 확인' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+
+    releaseApply?.(true)
+    await screen.findByRole('heading', {
+      name: buildEasyDiagnosisDecision(diagnosis, uploadedProvenance).command,
+    })
+  })
+
+  it('stays on the profile step and explains a failed atomic save', async () => {
+    renderWizard(vi.fn(async () => false))
+    openPastedReview(12)
+    fireEvent.click(screen.getByRole('button', { name: '계약정보 확인으로 이동' }))
+    fireEvent.click(screen.getByRole('button', { name: '자동 분석 시작' }))
+
+    expect(
+      await screen.findByText('자료를 적용하지 못했습니다. 입력값을 확인한 뒤 다시 시도해 주세요.'),
+    ).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '계약정보를 확인해 주세요' })).toBeTruthy()
+  })
+
+  it('returns review-only results to the beginner input step for data correction', async () => {
+    const reviewDiagnosis = {
+      ...diagnosis,
+      finalJudgement: '추가 검토 필요' as const,
+      comparison: {
+        ...diagnosis.comparison,
+        recommendation: '추가 검토 필요' as const,
+      },
+    }
+    renderWizard(undefined, reviewDiagnosis)
+    openPastedReview(12)
+    fireEvent.click(screen.getByRole('button', { name: '계약정보 확인으로 이동' }))
+    fireEvent.click(screen.getByRole('button', { name: '자동 분석 시작' }))
+
+    const reviseButton = await screen.findByRole('button', { name: '자료 보완하기' })
+    fireEvent.click(reviseButton)
+
+    expect(screen.getByRole('heading', { name: '12개월 표를 붙여넣으세요' })).toBeTruthy()
+  })
+
+  it('announces completed progress and moves focus to the next step heading', () => {
+    renderWizard()
+    fireEvent.click(screen.getByRole('button', { name: /표 붙여넣기/ }))
+
+    expect(screen.getByLabelText('자료 선택 완료')).toBeTruthy()
+    expect(screen.getByLabelText('자료 넣기 진행 중')).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: '12개월 표를 붙여넣으세요' }))
+  })
+
+  it('selects the later worksheet that contains all required billing columns', () => {
+    const selected = findBestBillSheet([
+      { name: '안내', headers: ['설명'], rows: [{ 설명: '사용 안내' }] },
+      {
+        name: '월별요금',
+        headers: ['연도', '월', '사용량(kWh)', '총 전기요금(원)'],
+        rows: [{ 연도: 2026, 월: 1, '사용량(kWh)': 40_000, '총 전기요금(원)': 6_000_000 }],
+      },
+    ])
+
+    expect(selected?.name).toBe('월별요금')
   })
 
   it('provides exactly twelve simple rows for direct entry', () => {

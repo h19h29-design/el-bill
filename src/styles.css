@@ -2650,6 +2650,13 @@ textarea:focus {
   font-weight: 800;
 }
 
+.easy-diagnosis-progress small {
+  margin-left: auto;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .easy-diagnosis-progress > div:last-child {
   border-right: 0;
 }
@@ -2697,6 +2704,33 @@ textarea:focus {
 .easy-diagnosis-page-heading {
   max-width: 760px;
   margin-bottom: 28px;
+}
+
+.easy-table-mapping {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.easy-table-mapping h3,
+.easy-table-mapping p {
+  margin: 0;
+}
+
+.easy-table-mapping > label {
+  display: grid;
+  gap: 6px;
+  max-width: 420px;
+  color: #37516c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.easy-table-mapping > button {
+  width: fit-content;
 }
 
 .easy-diagnosis-page-heading > span,
@@ -3074,7 +3108,7 @@ textarea:focus {
 
 .easy-result-facts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1px;
   margin-top: 26px;
   overflow: hidden;
@@ -3177,21 +3211,21 @@ textarea:focus {
 }
 
 @media (max-width: 900px) {
-  .easy-diagnosis-progress > div {
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
-    padding: 8px 3px;
-    font-size: 10px;
-    text-align: center;
+  .easy-diagnosis-progress {
+    grid-template-columns: 1fr;
   }
 
-  .easy-diagnosis-progress > div:not(.current) span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
+  .easy-diagnosis-progress > div {
+    min-height: 46px;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
+    text-align: left;
+  }
+
+  .easy-diagnosis-progress > div:last-child {
+    border-bottom: 0;
   }
 
   .easy-review-summary,

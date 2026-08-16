@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultScenario, defaultSchoolProfile, sampleBills } from '../../data/sampleBills'
 import { defaultRatePlans } from '../../data/ratePlans'
 import { defaultCalculationSettings } from '../../lib/calculationSettings'
@@ -106,6 +106,7 @@ describe('dashboard diagnosis consistency', () => {
       calculationSettings: defaultCalculationSettings,
     })
 
+    const onStartDiagnosis = vi.fn()
     render(
       <Dashboard
         bills={bills}
@@ -114,13 +115,15 @@ describe('dashboard diagnosis consistency', () => {
         scenario={defaultScenario}
         diagnosis={diagnosis}
         dataProvenance={{ bills: 'sample', powerPlanner: 'none' }}
-        onStartDiagnosis={() => undefined}
+        onStartDiagnosis={onStartDiagnosis}
       />,
     )
 
     expect(screen.queryByText('예상 연간 절감액')).toBeNull()
     expect(screen.getByText('요금제 추천 보류')).toBeTruthy()
-    expect(screen.getByText(/12개월/)).toBeTruthy()
+    expect(screen.getAllByText(/12개월/).length).toBeGreaterThan(0)
     expect(screen.queryByText(defaultRatePlans[0].planName)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '쉬운 진단 시작' }))
+    expect(onStartDiagnosis).toHaveBeenCalledTimes(1)
   })
 })

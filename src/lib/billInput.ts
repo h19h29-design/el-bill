@@ -279,6 +279,17 @@ export const buildBillColumnMapping = (headers: string[]): Record<string, string
   )
 }
 
+const requiredBillMappingFields = ['year', 'month', 'usageKwh', 'totalBillWon'] as const
+
+export const findBestBillSheet = (sheets: ParsedSheet[]) =>
+  [...sheets].sort((left, right) => {
+    const leftMapping = buildBillColumnMapping(left.headers)
+    const rightMapping = buildBillColumnMapping(right.headers)
+    const leftScore = requiredBillMappingFields.filter((key) => leftMapping[key]).length
+    const rightScore = requiredBillMappingFields.filter((key) => rightMapping[key]).length
+    return rightScore - leftScore || right.rows.length - left.rows.length
+  })[0]
+
 export const assignBillColumnMapping = (
   mapping: Record<string, string>,
   field: string,

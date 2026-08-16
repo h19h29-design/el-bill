@@ -11,6 +11,7 @@ import { buildAutoDiagnosis } from './diagnosis'
 import {
   buildEasyDiagnosisDecision,
   buildEasyDiagnosisReview,
+  prepareEasyDiagnosisCandidate,
   getEasyDiagnosisProfileIssue,
 } from './easyDiagnosis'
 
@@ -78,6 +79,26 @@ describe('easy diagnosis readiness', () => {
         defaultRatePlans,
       ),
     ).toContain('일치하는 학교용 요금제')
+  })
+
+  it('revalidates twelve months and applies the confirmed power to every stored bill', () => {
+    expect(
+      prepareEasyDiagnosisCandidate(
+        candidate(sampleBills.slice(-11)),
+        { ...defaultSchoolProfile, appliedPowerKw: 620 },
+      ),
+    ).toBeNull()
+
+    const prepared = prepareEasyDiagnosisCandidate(
+      candidate(sampleBills),
+      { ...defaultSchoolProfile, appliedPowerKw: 620 },
+    )
+
+    expect(prepared?.bills).toHaveLength(36)
+    expect(prepared?.bills.every((bill) => bill.appliedPowerKw === 620)).toBe(true)
+    expect(
+      prepared?.bills.every((bill) => bill.observedFields?.includes('appliedPowerKw')),
+    ).toBe(true)
   })
 })
 

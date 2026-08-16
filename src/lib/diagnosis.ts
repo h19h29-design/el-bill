@@ -416,6 +416,7 @@ export const comparePlansForDiagnosis = (
   const threeYearBills = validation.hasRequiredConsecutiveMonths
     ? validation.recentConsecutiveBills.slice(-36)
     : []
+  const threeYearDataAvailable = threeYearBills.length === 36
   const hasValidScenario =
     Boolean(scenario) &&
     [
@@ -511,13 +512,18 @@ export const comparePlansForDiagnosis = (
   let recommendation: Recommendation = '추가 검토 필요'
   if (!hasTwelveConsecutiveMonths) recommendation = '추가 검토 필요'
   else if (savingWon < 0) recommendation = '유지 추천'
-  else if (savingWon > 0 && threeYearSavingWon > 0) recommendation = '변경 추천'
+  else if (
+    savingWon > 0 &&
+    (!threeYearDataAvailable || threeYearSavingWon > 0)
+  ) recommendation = '변경 추천'
 
   const basis =
     !hasTwelveConsecutiveMonths
       ? '12개월 이상 월별 고지서 자료가 부족하여 추가 검토가 필요합니다.'
       : recommendation === '변경 추천'
-        ? '최근 12개월과 최근 3년 기준이 모두 절감으로 추정됩니다.'
+        ? threeYearDataAvailable
+          ? '최근 12개월과 최근 3년 기준이 모두 절감으로 추정됩니다.'
+          : '최근 12개월 기준 절감으로 추정됩니다. 36개월 자료가 없어 장기 추세는 추가 확인이 필요합니다.'
         : recommendation === '유지 추천'
           ? '변경 시 최근 12개월 기준 비용 증가가 추정됩니다.'
           : '절감액, 피크 민감도 또는 데이터 품질을 추가 확인해야 합니다.'
@@ -531,7 +537,7 @@ export const comparePlansForDiagnosis = (
     currentThreeYearWon,
     candidateThreeYearWon,
     threeYearSavingWon,
-    threeYearDataAvailable: threeYearBills.length === 36,
+    threeYearDataAvailable,
     fiveYearSavingWon: savingWon * 5,
     peakScenarioCurrentAnnualWon,
     peakScenarioCandidateAnnualWon,

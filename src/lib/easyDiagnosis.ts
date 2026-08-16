@@ -102,6 +102,25 @@ export const buildEasyDiagnosisReview = (
   }
 }
 
+export const prepareEasyDiagnosisCandidate = (
+  candidate: BillInputCandidate | null,
+  profile: SchoolProfile,
+): BillInputCandidate | null => {
+  const review = buildEasyDiagnosisReview(candidate)
+  if (!candidate || !review.canContinue) return null
+
+  return {
+    ...candidate,
+    bills: validateBillPeriods(candidate.bills).normalizedBills.map((bill) => ({
+      ...bill,
+      appliedPowerKw: profile.appliedPowerKw,
+      observedFields: Array.from(
+        new Set([...getObservedBillFields(bill), 'appliedPowerKw' as const]),
+      ),
+    })),
+  }
+}
+
 export const getEasyDiagnosisProfileIssue = (
   profile: SchoolProfile,
   ratePlans: RatePlan[],

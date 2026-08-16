@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, UploadCloud } from 'lucide-react'
 import type { BillInputCandidate } from '../bills/BillInputPreview'
 import { AiBillConversionHelper } from '../bills/AiBillConversionHelper'
@@ -11,12 +11,19 @@ import type { EasyDiagnosisSource } from '../../lib/easyDiagnosis'
 import { findExactRatePlan } from '../../lib/diagnosis'
 import {
   buildBillColumnMapping,
+  assignBillColumnMapping,
   createManualBillRows,
+  findBestBillSheet,
   parsePastedBillSheet,
   type ManualBillDraftRow,
   validateManualBillRows,
 } from '../../lib/billInput'
-import { mapRowsToBills, parseWorkbook, validateUploadFile } from '../../lib/excel'
+import {
+  mapRowsToBills,
+  parseWorkbook,
+  validateUploadFile,
+  type WorkbookParseResult,
+} from '../../lib/excel'
 import { parseBillPdfFiles } from '../../lib/billPdf'
 
 interface EasyDiagnosisImportStepProps {
@@ -49,6 +56,13 @@ const updateManualRow = (
   value: string,
 ) => rows.map((row) => (row.id === rowId ? { ...row, [field]: value } : row))
 
+const requiredMappingFields = [
+  ['year', '연도'],
+  ['month', '월'],
+  ['usageKwh', '사용량'],
+  ['totalBillWon', '총 전기요금'],
+] as const
+
 export function EasyDiagnosisImportStep({
   source,
   profile,
@@ -65,6 +79,11 @@ export function EasyDiagnosisImportStep({
   const [manualRows, setManualRows] = useState(() =>
     createManualBillRows(latestYearMonth(), 12),
   )
+  const [parseResult, setParseResult] = useState<WorkbookParseResult | null>(null)
+  const [selectedSheetName, setSelectedSheetName] = useState('')
+  const [mapping, setMapping] = useState<Record<string, string>>({})
+  const [showManualMapping, setShowManualMapping] = useState(false)
+  const operationId = useRef(0)
   const exactPlan = useMemo(
     () => findExactRatePlan(profile, ratePlans),
     [profile, ratePlans],
@@ -72,6 +91,21 @@ export function EasyDiagnosisImportStep({
   const context: BillImportContext | undefined = exactPlan
     ? { appliedPowerKw: profile.appliedPowerKw, currentPlan: exactPlan }
     : undefined
+  const selectedSheet = useMemo(
+    () =>
+      parseResult?.sheets.find((sheet) => sheet.name === selectedSheetName) ??
+      parseResult?.sheets[0],
+    [parseResult, selectedSheetName],
+  )
+
+  useEffect(() => {
+    operationId.current += 1
+    setBusy(false)
+    setParseResult(null)
+    setSelectedSheetName('')
+    setMapping({})
+    setShowManualMapping(false)
+  }, [source])
 
   const setRecognizedCandidate = (
     nextCandidate: BillInputCandidate | null,
@@ -83,10 +117,12 @@ export function EasyDiagnosisImportStep({
 
   const readPdfFiles = async (files: File[]) => {
     if (!files.length) return
+    const currentOperation = ++operationId.current
     setBusy(true)
     setMessage('PDF를 브라우저에서 읽고 있습니다.')
     try {
       const result = await parseBillPdfFiles(files, context)
+      if (currentOperation !== operationId.current) return
       setRecognizedCandidate(
         result.autoRows.length
           ? {
@@ -98,10 +134,11 @@ export function EasyDiagnosisImportStep({
         `${result.autoRows.length}개월을 인식했습니다. 다음 화면에서 월별 값을 확인하세요.`,
       )
     } catch (error) {
+      if (currentOperation !== operationId.current) return
       onCandidateChange(null)
       setMessage(error instanceof Error ? error.message : 'PDF를 읽지 못했습니다.')
     } finally {
-      setBusy(false)
+      if (currentOperation === operationId.current) setBusy(false)
     }
   }
 
@@ -113,20 +150,27 @@ export function EasyDiagnosisImportStep({
       setMessage(validationMessage)
       return
     }
+    const currentOperation = ++operationId.current
     setBusy(true)
     setMessage('요금 정리표를 브라우저에서 읽고 있습니다.')
     try {
       const result = await parseWorkbook(file, context)
-      const firstSheet = result.sheets[0]
+      if (currentOperation !== operationId.current) return
+      const bestSheet = findBestBillSheet(result.sheets)
+      const initialMapping = buildBillColumnMapping(bestSheet?.headers ?? [])
+      setParseResult(result)
+      setSelectedSheetName(bestSheet?.name ?? '')
+      setMapping(initialMapping)
       const bills = result.autoRows.length
         ? result.autoRows
-        : firstSheet
+        : bestSheet
           ? mapRowsToBills(
-              firstSheet.rows,
-              buildBillColumnMapping(firstSheet.headers),
+              bestSheet.rows,
+              initialMapping,
               context,
             )
           : []
+      setShowManualMapping(!bills.length)
       setRecognizedCandidate(
         bills.length
           ? { origin: 'uploaded', bills, sourceLabel: file.name }
@@ -134,11 +178,31 @@ export function EasyDiagnosisImportStep({
         `${bills.length}개월을 인식했습니다. 다음 화면에서 월별 값을 확인하세요.`,
       )
     } catch (error) {
+      if (currentOperation !== operationId.current) return
       onCandidateChange(null)
       setMessage(error instanceof Error ? error.message : '요금 정리표를 읽지 못했습니다.')
     } finally {
-      setBusy(false)
+      if (currentOperation === operationId.current) setBusy(false)
     }
+  }
+
+  const changeSelectedSheet = (sheetName: string) => {
+    const sheet = parseResult?.sheets.find((item) => item.name === sheetName)
+    setSelectedSheetName(sheetName)
+    setMapping(buildBillColumnMapping(sheet?.headers ?? []))
+    onCandidateChange(null)
+    setMessage('선택한 시트의 필수 컬럼을 확인한 뒤 적용해 주세요.')
+  }
+
+  const applyTableMapping = () => {
+    if (!selectedSheet) return
+    const bills = mapRowsToBills(selectedSheet.rows, mapping, context)
+    setRecognizedCandidate(
+      bills.length
+        ? { origin: 'uploaded', bills, sourceLabel: `${selectedSheet.name} 시트` }
+        : null,
+      `${bills.length}개월을 인식했습니다. 다음 화면에서 월별 값을 확인하세요.`,
+    )
   }
 
   const inspectPaste = () => {
@@ -176,7 +240,7 @@ export function EasyDiagnosisImportStep({
       <section className="easy-diagnosis-page" aria-labelledby="easy-import-title">
         <div className="easy-diagnosis-page-heading">
           <span>2단계</span>
-          <h2 id="easy-import-title">{sourceTitles[source]}</h2>
+          <h2 id="easy-import-title" tabIndex={-1}>{sourceTitles[source]}</h2>
           <p>사용량과 총 전기요금이 있는 연속 12개월 자료면 됩니다.</p>
         </div>
 
@@ -189,6 +253,7 @@ export function EasyDiagnosisImportStep({
               type="file"
               accept=".pdf,application/pdf"
               multiple
+              disabled={busy}
               aria-label="12개월 고지서 PDF 선택"
               onChange={(event) => void readPdfFiles(Array.from(event.currentTarget.files ?? []))}
             />
@@ -204,9 +269,61 @@ export function EasyDiagnosisImportStep({
               type="file"
               accept=".xlsx,.xls,.csv"
               aria-label="12개월 요금 정리표 선택"
+              disabled={busy}
               onChange={(event) => void readTableFile(event.currentTarget.files?.[0])}
             />
           </label>
+        )}
+
+        {source === 'table' && parseResult && selectedSheet && (
+          <div className="easy-table-mapping">
+            <div>
+              <h3>시트와 컬럼 확인</h3>
+              <p>자동 인식이 맞지 않으면 실제 12개월 표가 있는 시트와 네 개 필수 컬럼을 직접 지정하세요.</p>
+            </div>
+            <label>
+              분석 대상 시트
+              <select
+                value={selectedSheet.name}
+                onChange={(event) => changeSelectedSheet(event.target.value)}
+              >
+                {parseResult.sheets.map((sheet) => (
+                  <option key={sheet.name} value={sheet.name}>{sheet.name}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="outline-action"
+              onClick={() => setShowManualMapping((current) => !current)}
+            >
+              {showManualMapping ? '컬럼 지정 닫기' : '필수 컬럼 직접 지정'}
+            </button>
+            {showManualMapping && (
+              <div className="mapping-grid">
+                {requiredMappingFields.map(([key, label]) => (
+                  <label key={key}>
+                    {label}<span className="required-dot">필수</span>
+                    <select
+                      value={mapping[key] ?? ''}
+                      onChange={(event) =>
+                        setMapping((current) =>
+                          assignBillColumnMapping(current, key, event.target.value),
+                        )}
+                    >
+                      <option value="">선택 필요</option>
+                      {selectedSheet.headers.map((header) => (
+                        <option key={header} value={header}>{header}</option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )}
+            <button type="button" className="primary-button" onClick={applyTableMapping}>
+              선택한 시트로 다시 인식
+            </button>
+          </div>
         )}
 
         {source === 'paste' && (

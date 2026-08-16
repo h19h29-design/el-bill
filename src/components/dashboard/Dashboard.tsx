@@ -58,21 +58,40 @@ export function Dashboard({
   dataProvenance,
   onStartDiagnosis,
 }: DashboardProps) {
+  const diagnosisCta = (
+    <section className="auto-cta-panel">
+      <div>
+        <span>처음 사용하는 담당자를 위한 단계별 진단</span>
+        <h2>12개월 고지서만 준비하면 됩니다</h2>
+        <p>
+          PDF, 학교 요금 정리표, 붙여넣기, 직접 입력 중 편한 방법을 선택하면 변경 또는 유지 결론까지 안내합니다.
+        </p>
+      </div>
+      <button type="button" className="primary-button auto-cta-button" onClick={onStartDiagnosis}>
+        <PlayCircle size={22} />
+        쉬운 진단 시작
+      </button>
+    </section>
+  )
+
   if (!currentPlan || !candidatePlan) {
     const periodReview = diagnosis.judgementBasis.includes('고지서 기간 문제')
     const insufficientData = !diagnosis.comparison.annualDataAvailable
     return (
-      <section className="document-block-notice" role="status">
-        <AlertTriangle size={22} />
-        <div>
-          <strong>
-            {periodReview || insufficientData
-              ? '요금제 추천 보류'
-              : '요금제 설정 확인 필요'}
-          </strong>
-          <p>{diagnosis.judgementBasis}</p>
-        </div>
-      </section>
+      <div className="view-stack">
+        {diagnosisCta}
+        <section className="document-block-notice" role="status">
+          <AlertTriangle size={22} />
+          <div>
+            <strong>
+              {periodReview || insufficientData
+                ? '요금제 추천 보류'
+                : '요금제 설정 확인 필요'}
+            </strong>
+            <p>{diagnosis.judgementBasis}</p>
+          </div>
+        </section>
+      </div>
     )
   }
 
@@ -94,19 +113,7 @@ export function Dashboard({
 
   return (
     <div className="view-stack">
-      <section className="auto-cta-panel">
-        <div>
-          <span>처음 사용하는 담당자를 위한 단계별 진단</span>
-          <h2>12개월 고지서만 준비하면 됩니다</h2>
-          <p>
-            PDF, 학교 요금 정리표, 붙여넣기, 직접 입력 중 편한 방법을 선택하면 변경 또는 유지 결론까지 안내합니다.
-          </p>
-        </div>
-        <button type="button" className="primary-button auto-cta-button" onClick={onStartDiagnosis}>
-          <PlayCircle size={22} />
-          쉬운 진단 시작
-        </button>
-      </section>
+      {diagnosisCta}
 
       <section className="kpi-grid">
         <article className="kpi-card diagnosis-status-card">

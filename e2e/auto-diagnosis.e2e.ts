@@ -63,6 +63,13 @@ const pastedBillText = [
       `${year}\t${month}\t${usageKwh}\t${totalBillWon}`,
   ),
 ].join('\n')
+const pastedElevenMonthText = [
+  '연도\t월\t사용량(kWh)\t총 전기요금(원)',
+  ...personalBillMonths.slice(0, 11).map(
+    ({ year, month, usageKwh, totalBillWon }) =>
+      `${year}\t${month}\t${usageKwh}\t${totalBillWon}`,
+  ),
+].join('\n')
 const manualBillMatrix = [...personalBillMonths]
   .reverse()
   .map(({ usageKwh, totalBillWon }) => `${usageKwh}\t${totalBillWon}`)
@@ -199,8 +206,10 @@ test('beginner diagnosis accepts twelve pasted months and shows a clear decision
   await page.getByRole('button', { name: '자동 분석 시작' }).click()
 
   await expect(page.locator('.easy-result-command h2')).toHaveText(
-    /변경하지 마세요|변경하세요|유지하세요/,
+    /변경하세요|유지하세요|변경하지 마세요/,
   )
+  await expect(page.getByText('추천 12개월 추정액')).toBeVisible()
+  await expect(page.getByText('가장 큰 비용 요인')).toBeVisible()
   await expect(page.getByText(/1년에 한 번만 가능/)).toBeVisible()
   await page.getByText('상세 결과 보기').click()
   await expect(page.getByRole('heading', { name: '요금제 자동 비교 TOP 3' })).toBeVisible()
@@ -224,6 +233,56 @@ test('beginner diagnosis accepts twelve pasted months and shows a clear decision
       }),
     )
     .toEqual({ months: 12, origin: 'pasted' })
+})
+
+test('beginner diagnosis reads twelve official bill PDFs end to end', async ({ page }) => {
+  await clearBrowserStorage(page)
+
+  await page.getByRole('button', { name: '쉬운 진단 시작' }).click()
+  await page.getByRole('button', { name: /고지서 PDF/ }).click()
+  await page.getByLabel('12개월 고지서 PDF 선택').setInputFiles(billPdfPayloads)
+  await expect(page.getByText(/12개월을 인식했습니다/)).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: '자료 확인으로 이동' }).click()
+  await expect(page.getByText('12/12개월')).toBeVisible()
+  await page.getByRole('button', { name: '계약정보 확인으로 이동' }).click()
+  await page.getByRole('button', { name: '자동 분석 시작' }).click()
+
+  await expect(page.locator('.easy-result-command h2')).toContainText(/변경하세요|유지하세요/)
+})
+
+test('beginner diagnosis reads a checked-in workbook and keeps expert diagnosis available', async ({ page }) => {
+  await clearBrowserStorage(page)
+
+  await page.getByRole('button', { name: '쉬운 진단 시작' }).click()
+  await page.getByRole('button', { name: /요금 정리표/ }).click()
+  await page.getByLabel('12개월 요금 정리표 선택').setInputFiles(
+    resolve('e2e/fixtures/monthly-bills.xlsx'),
+  )
+  await expect(page.getByRole('heading', { name: '시트와 컬럼 확인' })).toBeVisible()
+  await page.getByRole('button', { name: '자료 확인으로 이동' }).click()
+  await expect(page.getByText('12/12개월')).toBeVisible()
+
+  await openDesktopView(page, '자동진단')
+  await expect(page.getByRole('heading', { name: '전기요금 자동진단 결과' })).toBeVisible()
+})
+
+test('beginner diagnosis blocks eleven months and presents readable mobile progress', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await clearBrowserStorage(page)
+
+  await page.getByRole('button', { name: '쉬운 진단 시작' }).click()
+  await page.getByRole('button', { name: /표 붙여넣기/ }).click()
+  await expect(page.getByLabel('자료 선택 완료')).toBeVisible()
+  await expect(page.getByLabel('자료 넣기 진행 중')).toBeVisible()
+  await page.getByLabel('12개월 표 붙여넣기').fill(pastedElevenMonthText)
+  await page.getByRole('button', { name: '붙여넣은 표 확인' }).click()
+  await page.getByRole('button', { name: '자료 확인으로 이동' }).click()
+
+  await expect(page.getByText('11/12개월')).toBeVisible()
+  await expect(page.getByRole('button', { name: '계약정보 확인으로 이동' })).toBeDisabled()
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true)
 })
 
 test('checked-in synthetic XLSX reaches recognized mapping and analysis state', async ({ page }) => {

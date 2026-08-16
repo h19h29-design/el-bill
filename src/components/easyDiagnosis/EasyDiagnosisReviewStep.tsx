@@ -16,7 +16,7 @@ export function EasyDiagnosisReviewStep({
     <section className="easy-diagnosis-page" aria-labelledby="easy-review-title">
       <div className="easy-diagnosis-page-heading">
         <span>3단계</span>
-        <h2 id="easy-review-title">월별 자료를 확인해 주세요</h2>
+        <h2 id="easy-review-title" tabIndex={-1}>월별 자료를 확인해 주세요</h2>
         <p>원본 고지서와 연월, 사용량, 총 전기요금이 맞는지만 확인하면 됩니다.</p>
       </div>
       <div className={`easy-review-status ${review.canContinue ? 'complete' : 'blocked'}`}>

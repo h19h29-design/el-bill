@@ -45,6 +45,7 @@ import {
 } from './lib/billDraftStorage'
 import type { ManualBillDraftLifecycle } from './components/bills/manualBillDraftLifecycle'
 import type { EasyDiagnosisApplyInput } from './components/easyDiagnosis/EasyDiagnosisWizard'
+import { prepareEasyDiagnosisCandidate } from './lib/easyDiagnosis'
 import {
   applyPowerPlannerStorageIntent,
   type PowerPlannerSaveResult,
@@ -794,15 +795,18 @@ function App() {
   const applyEasyDiagnosisInput = async ({
     candidate,
     profile: nextProfile,
-  }: EasyDiagnosisApplyInput): Promise<boolean> =>
-    startUploadSession((latest) => ({
-      bills: candidate.bills,
+  }: EasyDiagnosisApplyInput): Promise<boolean> => {
+    const preparedCandidate = prepareEasyDiagnosisCandidate(candidate, nextProfile)
+    if (!preparedCandidate) return false
+    return startUploadSession((latest) => ({
+      bills: preparedCandidate.bills,
       profile: nextProfile,
       provenance: {
         ...latest.provenance,
-        bills: candidate.origin,
+        bills: preparedCandidate.origin,
       },
     }))
+  }
 
   const applyPowerPlannerAndOpenDiagnosis = async (
     intent: PowerPlannerStorageIntent,

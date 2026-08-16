@@ -773,7 +773,7 @@ describe('automatic diagnosis harness', () => {
     expect(diagnosis.canGenerateChangeDocuments).toBe(false)
   })
 
-  it('does not calculate a three-year estimate from gapped calendar periods', () => {
+  it('recommends a beneficial change from twelve consecutive months while leaving the three-year estimate unavailable', () => {
     const comparison = comparePlansForDiagnosis(
       [...consecutiveBills(2022, 1, 24), ...consecutiveBills(2026, 1, 12)],
       currentPlan,
@@ -787,7 +787,9 @@ describe('automatic diagnosis harness', () => {
     expect(comparison.candidateThreeYearWon).toBe(0)
     expect(comparison.threeYearSavingWon).toBe(0)
     expect(comparison.threeYearDataAvailable).toBe(false)
-    expect(comparison.recommendation).toBe('추가 검토 필요')
+    expect(comparison.recommendation).toBe('변경 추천')
+    expect(comparison.basis).toContain('최근 12개월')
+    expect(comparison.basis).toContain('36개월')
   })
 
   it('does not build a partial annual breakdown from fewer than 12 recent months', () => {

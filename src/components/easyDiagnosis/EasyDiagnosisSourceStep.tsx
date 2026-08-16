@@ -44,7 +44,7 @@ export function EasyDiagnosisSourceStep({
     <section className="easy-diagnosis-page" aria-labelledby="easy-source-title">
       <div className="easy-diagnosis-page-heading">
         <span>1단계</span>
-        <h2 id="easy-source-title">어떤 자료를 가지고 계신가요?</h2>
+        <h2 id="easy-source-title" tabIndex={-1}>어떤 자료를 가지고 계신가요?</h2>
         <p>가장 편한 방법 하나만 선택하세요. 원본은 서버로 전송하지 않고 이 브라우저에서 읽습니다.</p>
       </div>
       <div className="easy-source-grid">

@@ -47,6 +47,11 @@ describe('App beginner diagnosis flow', () => {
     const snapshot = readStorageSnapshot()
     expect(snapshot?.data.bills).toHaveLength(12)
     expect(snapshot?.data.provenance.bills).toBe('pasted')
+    expect(
+      snapshot?.data.bills.every(
+        (bill) => bill.appliedPowerKw === snapshot.data.profile.appliedPowerKw,
+      ),
+    ).toBe(true)
     expect(Date.parse(snapshot?.session.expiresAt ?? '')).toBeGreaterThan(Date.now())
   })
 

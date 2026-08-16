@@ -64,25 +64,25 @@ export function EasyDiagnosisProfileStep({
     <section className="easy-diagnosis-page" aria-labelledby="easy-profile-title">
       <div className="easy-diagnosis-page-heading">
         <span>4단계</span>
-        <h2 id="easy-profile-title">계약정보를 확인해 주세요</h2>
+        <h2 id="easy-profile-title" tabIndex={-1}>계약정보를 확인해 주세요</h2>
         <p>한전 고지서의 계약종별, 수전전압, 현재 요금제, 요금적용전력을 그대로 선택하세요.</p>
       </div>
       <div className="easy-profile-grid">
         <label>
           계약종별
-          <select value={profile.contractType} onChange={(event) => changeContractType(event.target.value)}>
+          <select disabled={saving} value={profile.contractType} onChange={(event) => changeContractType(event.target.value)}>
             {contractTypes.map((value) => <option key={value}>{value}</option>)}
           </select>
         </label>
         <label>
           수전전압
-          <select value={profile.voltageType} onChange={(event) => changeVoltage(event.target.value)}>
+          <select disabled={saving} value={profile.voltageType} onChange={(event) => changeVoltage(event.target.value)}>
             {voltages.map((value) => <option key={value}>{value}</option>)}
           </select>
         </label>
         <label>
           현재 요금제
-          <select value={profile.currentPlan} onChange={(event) => onChange({ ...profile, currentPlan: event.target.value })}>
+          <select disabled={saving} value={profile.currentPlan} onChange={(event) => onChange({ ...profile, currentPlan: event.target.value })}>
             {plans.map((value) => <option key={value}>{value}</option>)}
           </select>
         </label>
@@ -92,6 +92,7 @@ export function EasyDiagnosisProfileStep({
             type="number"
             min="0.01"
             step="0.01"
+            disabled={saving}
             value={profile.appliedPowerKw || ''}
             onChange={(event) => onChange({ ...profile, appliedPowerKw: Number(event.target.value) })}
           />
@@ -100,7 +101,7 @@ export function EasyDiagnosisProfileStep({
       <p className="easy-profile-help">모르면 고지서의 계약사항 또는 요금내역에서 확인하세요.</p>
       {issue && <p className="empty-state" role="status">{issue}</p>}
       <div className="easy-page-actions">
-        <button type="button" className="outline-action" onClick={onBack}>
+        <button type="button" className="outline-action" disabled={saving} onClick={onBack}>
           <ArrowLeft size={17} /> 월별 자료 다시 확인
         </button>
         <button type="button" className="primary-button" disabled={Boolean(issue) || saving} onClick={onAnalyze}>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BillInputCandidate } from '../bills/BillInputPreview'
 import type {
   AutoDiagnosisResult,
@@ -10,6 +10,7 @@ import type {
 import {
   buildEasyDiagnosisReview,
   getEasyDiagnosisProfileIssue,
+  prepareEasyDiagnosisCandidate,
   type EasyDiagnosisSource,
   type EasyDiagnosisStep,
 } from '../../lib/easyDiagnosis'
@@ -42,6 +43,14 @@ const steps: Array<{ id: EasyDiagnosisStep; label: string }> = [
   { id: 'result', label: '진단 결과' },
 ]
 
+const stepTitleIds: Record<EasyDiagnosisStep, string> = {
+  source: 'easy-source-title',
+  import: 'easy-import-title',
+  review: 'easy-review-title',
+  profile: 'easy-profile-title',
+  result: 'easy-result-title',
+}
+
 export function EasyDiagnosisWizard({
   profile,
   ratePlans,
@@ -56,12 +65,21 @@ export function EasyDiagnosisWizard({
   const [profileDraft, setProfileDraft] = useState(profile)
   const [saving, setSaving] = useState(false)
   const [applyMessage, setApplyMessage] = useState('')
+  const didMount = useRef(false)
   const review = useMemo(() => buildEasyDiagnosisReview(candidate), [candidate])
   const profileIssue = useMemo(
     () => getEasyDiagnosisProfileIssue(profileDraft, ratePlans),
     [profileDraft, ratePlans],
   )
   const currentStepIndex = steps.findIndex((item) => item.id === step)
+
+  useEffect(() => {
+    if (!didMount.current) {
+      didMount.current = true
+      return
+    }
+    document.getElementById(stepTitleIds[step])?.focus({ preventScroll: true })
+  }, [step])
 
   const selectSource = (nextSource: EasyDiagnosisSource) => {
     setSource(nextSource)
@@ -81,10 +99,16 @@ export function EasyDiagnosisWizard({
 
   const analyze = async () => {
     if (!candidate || profileIssue) return
+    const preparedCandidate = prepareEasyDiagnosisCandidate(candidate, profileDraft)
+    if (!preparedCandidate) {
+      setApplyMessage('연속 12개월 자료를 다시 확인해 주세요.')
+      setStep('review')
+      return
+    }
     setSaving(true)
     setApplyMessage('')
     try {
-      const applied = await onApply({ candidate, profile: profileDraft })
+      const applied = await onApply({ candidate: preparedCandidate, profile: profileDraft })
       if (applied) setStep('result')
       else setApplyMessage('자료를 적용하지 못했습니다. 입력값을 확인한 뒤 다시 시도해 주세요.')
     } catch {
@@ -109,9 +133,11 @@ export function EasyDiagnosisWizard({
             key={item.id}
             className={index < currentStepIndex ? 'complete' : index === currentStepIndex ? 'current' : ''}
             aria-current={index === currentStepIndex ? 'step' : undefined}
+            aria-label={`${item.label} ${index < currentStepIndex ? '완료' : index === currentStepIndex ? '진행 중' : '대기'}`}
           >
             <strong>{index + 1}</strong>
             <span>{item.label}</span>
+            <small>{index < currentStepIndex ? '완료' : index === currentStepIndex ? '진행 중' : '대기'}</small>
           </div>
         ))}
       </nav>
@@ -153,6 +179,10 @@ export function EasyDiagnosisWizard({
           diagnosis={diagnosis}
           dataProvenance={dataProvenance}
           onNavigate={onNavigate}
+          onReviseData={() => {
+            setApplyMessage('')
+            setStep('import')
+          }}
           onRestart={restart}
         />
       )}

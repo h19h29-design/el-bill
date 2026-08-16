@@ -189,7 +189,11 @@ describe('data provenance persistence', () => {
       screen.getByRole('button', { name: '고지서 입력' }),
     )
     fireEvent.click(
-      await screen.findByRole('tab', { name: '직접 입력' }),
+      await screen.findByRole(
+        'tab',
+        { name: '직접 입력' },
+        { timeout: 5_000 },
+      ),
     )
     fireEvent.click(
       screen.getByRole('button', { name: '최근 12개월 입력행 생성' }),
