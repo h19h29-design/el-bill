@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ClipboardCopy, Download, Upload } from 'lucide-react'
+import { ClipboardCopy, Download, PlayCircle, Upload } from 'lucide-react'
 import {
   externalAiPrivacyWarning,
   gptBillConversionPrompt,
@@ -10,6 +10,7 @@ import { createStandardBillCsv } from '../../lib/billInput'
 interface UsageGuideProps {
   requestedSectionId?: string | null
   onOpenBills: () => void
+  onOpenEasyDiagnosis?: () => void
 }
 
 const defaultSectionId = usageGuideSections[0].id
@@ -17,7 +18,11 @@ const defaultSectionId = usageGuideSections[0].id
 const resolveSectionId = (sectionId?: string | null) =>
   usageGuideSections.find((section) => section.id === sectionId)?.id ?? defaultSectionId
 
-export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps) {
+export function UsageGuide({
+  requestedSectionId,
+  onOpenBills,
+  onOpenEasyDiagnosis = () => undefined,
+}: UsageGuideProps) {
   const [status, setStatus] = useState<{ id: number; message: string } | null>(null)
   const [selectedSectionId, setSelectedSectionId] = useState<string>(() => resolveSectionId(requestedSectionId))
   const statusInvocationId = useRef(0)
@@ -125,6 +130,22 @@ export function UsageGuide({ requestedSectionId, onOpenBills }: UsageGuideProps)
           <h2>사용 방법 안내</h2>
           <p>자료 입력부터 결과 확인과 문서 생성까지, 실제 원본을 확인하며 순서대로 진행합니다.</p>
         </header>
+
+        <section className="guide-section">
+          {sectionHeading('easy-diagnosis', '쉬운 진단 따라하기')}
+          <ol>
+            <li><strong>연속 12개월</strong> 고지서 PDF 또는 학교 요금 정리표를 준비합니다.</li>
+            <li>PDF, XLSX/CSV, 표 붙여넣기, 직접 입력 중 가장 편한 방법 하나를 선택합니다.</li>
+            <li>인식된 12개월과 계약정보를 확인하고 <strong>자동 분석 시작</strong>을 누릅니다.</li>
+            <li>첫 화면의 <strong>변경하세요</strong>, <strong>유지하세요</strong>, <strong>지금은 변경하지 마세요</strong> 결론과 이유를 먼저 확인합니다.</li>
+            <li>필요한 경우에만 상세 비교, 피크관리, 변경신청 문서로 이동합니다.</li>
+          </ol>
+          <p>12개월 미만이거나 중복·누락 월이 있으면 요금제 판단으로 넘어가지 않습니다. 파워플래너 자료는 필수가 아니며 진단 후 피크 분석을 보강할 때 추가할 수 있습니다.</p>
+          <button type="button" className="primary-button" onClick={onOpenEasyDiagnosis}>
+            <PlayCircle size={17} aria-hidden="true" />
+            쉬운 진단 시작
+          </button>
+        </section>
 
         <section className="guide-section">
           {sectionHeading('file-upload', '파일을 그대로 올리기')}

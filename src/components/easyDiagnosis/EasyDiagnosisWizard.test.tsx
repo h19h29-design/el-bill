@@ -128,4 +128,21 @@ describe('EasyDiagnosisWizard', () => {
     expect(screen.getAllByLabelText(/사용량$/)).toHaveLength(12)
     expect(screen.getAllByLabelText(/총 전기요금$/)).toHaveLength(12)
   })
+
+  it('accepts twelve complete direct-entry rows without a spreadsheet', () => {
+    renderWizard()
+    fireEvent.click(screen.getByRole('button', { name: /직접 입력/ }))
+
+    screen.getAllByLabelText(/사용량$/).forEach((input, index) => {
+      fireEvent.change(input, { target: { value: String(40_000 + index * 500) } })
+    })
+    screen.getAllByLabelText(/총 전기요금$/).forEach((input, index) => {
+      fireEvent.change(input, { target: { value: String(6_000_000 + index * 100_000) } })
+    })
+    fireEvent.click(screen.getByRole('button', { name: '직접 입력한 내용 확인' }))
+    fireEvent.click(screen.getByRole('button', { name: '자료 확인으로 이동' }))
+
+    expect(screen.getByText('12/12개월')).toBeTruthy()
+    expect(screen.getByText('12개월 자료를 확인했습니다')).toBeTruthy()
+  })
 })

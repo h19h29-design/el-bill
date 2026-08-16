@@ -1053,6 +1053,7 @@ function App() {
                 <UsageGuide
                   requestedSectionId={guideSectionId}
                   onOpenBills={() => setActiveView('bills')}
+                  onOpenEasyDiagnosis={() => setActiveView('easyDiagnosis')}
                 />
               )}
             </Suspense>

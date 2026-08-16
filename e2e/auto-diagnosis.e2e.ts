@@ -179,12 +179,59 @@ test('production preview serves hashed entry and lazy chunks', async ({ page }) 
   ).toBe(true)
 })
 
+test('beginner diagnosis accepts twelve pasted months and shows a clear decision', async ({
+  page,
+}) => {
+  await clearBrowserStorage(page)
+
+  await page.getByRole('button', { name: '쉬운 진단 시작' }).click()
+  await expect(
+    page.getByRole('heading', { name: '어떤 자료를 가지고 계신가요?' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: /표 붙여넣기/ }).click()
+  await page.getByLabel('12개월 표 붙여넣기').fill(pastedBillText)
+  await page.getByRole('button', { name: '붙여넣은 표 확인' }).click()
+  await page.getByRole('button', { name: '자료 확인으로 이동' }).click()
+
+  await expect(page.getByText('12/12개월')).toBeVisible()
+  await expect(page.getByText('12개월 자료를 확인했습니다')).toBeVisible()
+  await page.getByRole('button', { name: '계약정보 확인으로 이동' }).click()
+  await page.getByRole('button', { name: '자동 분석 시작' }).click()
+
+  await expect(page.locator('.easy-result-command h2')).toHaveText(
+    /변경하지 마세요|변경하세요|유지하세요/,
+  )
+  await expect(page.getByText(/1년에 한 번만 가능/)).toBeVisible()
+  await page.getByText('상세 결과 보기').click()
+  await expect(page.getByRole('heading', { name: '요금제 자동 비교 TOP 3' })).toBeVisible()
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const pointerRaw = localStorage.getItem('el-bill:storage-active')
+        if (!pointerRaw) return null
+        const { sessionId } = JSON.parse(pointerRaw) as { sessionId: string }
+        const raw = localStorage.getItem(
+          `el-bill:storage-snapshot:${encodeURIComponent(sessionId)}`,
+        )
+        if (!raw) return null
+        const snapshot = JSON.parse(raw) as {
+          data: { bills: unknown[]; provenance: { bills: string } }
+        }
+        return {
+          months: snapshot.data.bills.length,
+          origin: snapshot.data.provenance.bills,
+        }
+      }),
+    )
+    .toEqual({ months: 12, origin: 'pasted' })
+})
+
 test('checked-in synthetic XLSX reaches recognized mapping and analysis state', async ({ page }) => {
   await page.goto('/')
   await page.evaluate(() => localStorage.clear())
   await page.reload()
 
-  await page.getByRole('button', { name: '전기요금 자동진단 시작' }).click()
+  await openDesktopView(page, '자동진단')
   await page.getByRole('button', { name: '자료 다시 불러오기' }).click()
   await page
     .locator('input[type="file"][accept=".xlsx,.xls"]')
@@ -698,7 +745,7 @@ test('automatic diagnosis flow remains usable end to end', async ({ page }, test
   await expect(page.locator('.diagnosis-status-card')).toContainText(
     '고지서 출처: 시연 샘플',
   )
-  await page.getByRole('button', { name: '전기요금 자동진단 시작' }).click()
+  await clickSidebar('자동진단')
   await expectViewHeading('자동진단')
 
   await page.getByRole('button', { name: '자료 다시 불러오기' }).click()

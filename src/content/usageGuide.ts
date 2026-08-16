@@ -30,6 +30,7 @@ export const externalAiPrivacyWarning =
   '개인정보 보호 경고: 이 앱이 브라우저 로컬에 보관하는 입력과 적용 자료는 최대 24시간 후 삭제되지만, 외부 AI 서비스에 업로드한 파일에는 이 24시간 삭제 정책이 적용되지 않습니다. 업로드 전에 학교명, 고객번호, 주소, 담당자 이름·전화번호, 계좌나 납부정보를 삭제하고, 외부 AI 서비스의 보관·처리 정책은 해당 서비스에서 확인하세요.'
 
 export const usageGuideSections = [
+  { id: 'easy-diagnosis', title: '쉬운 진단 따라하기' },
   { id: 'file-upload', title: '파일을 그대로 올리기' },
   { id: 'paste-input', title: '표 복사·붙여넣기' },
   { id: 'manual-input', title: '최근 12개월 직접 입력' },

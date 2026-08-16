@@ -8,10 +8,12 @@ import { UsageGuide } from './UsageGuide'
 
 describe('UsageGuide', () => {
   const onOpenBills = vi.fn()
+  const onOpenEasyDiagnosis = vi.fn()
   const scrollIntoView = vi.fn()
 
   beforeEach(() => {
     onOpenBills.mockReset()
+    onOpenEasyDiagnosis.mockReset()
     scrollIntoView.mockReset()
     vi.stubGlobal('URL', {
       ...URL,
@@ -110,6 +112,7 @@ describe('UsageGuide', () => {
   it('covers every input, analysis, security, and caution topic', () => {
     render(<UsageGuide onOpenBills={onOpenBills} />)
 
+    expect(screen.getByRole('heading', { name: '쉬운 진단 따라하기', level: 3 })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '파일을 그대로 올리기', level: 3 })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '표 복사·붙여넣기', level: 3 })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '최근 12개월 직접 입력', level: 3 })).toBeTruthy()
@@ -123,6 +126,19 @@ describe('UsageGuide', () => {
     expect(screen.getAllByText(/개인 사용자는 공식 API 자동연동을 기본 제공받지 않으며/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/내부 진단용 추정/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/1년에 한 번만 가능/).length).toBeGreaterThan(0)
+  })
+
+  it('opens the beginner wizard directly from the guide', async () => {
+    const user = userEvent.setup()
+    render(
+      <UsageGuide
+        onOpenBills={onOpenBills}
+        onOpenEasyDiagnosis={onOpenEasyDiagnosis}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '쉬운 진단 시작' }))
+    expect(onOpenEasyDiagnosis).toHaveBeenCalledTimes(1)
   })
 
   it('focuses and scrolls to a requested guide section', async () => {
