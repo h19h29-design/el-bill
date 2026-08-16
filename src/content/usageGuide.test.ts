@@ -45,6 +45,7 @@ describe('usage guide content', () => {
 
   it('lists the primary workflow and safety sections in order', () => {
     expect(usageGuideSections.map((section) => section.id)).toEqual([
+      'easy-diagnosis',
       'file-upload',
       'paste-input',
       'manual-input',
