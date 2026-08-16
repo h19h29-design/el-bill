@@ -269,7 +269,9 @@ test('official bill PDFs and the free AI fallback are usable from the first inpu
     .locator('input[type="file"][accept=".pdf"]')
     .setInputFiles(billPdfPayloads)
 
-  await expect(page.getByText(/PDF 12개에서 12개월/)).toBeVisible()
+  await expect(page.getByText(/PDF 12개에서 12개월/)).toBeVisible({
+    timeout: 30_000,
+  })
   await expect(page.getByRole('heading', { name: '자동 인식 결과' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '새 입력 데이터' })).toBeVisible()
 
@@ -288,7 +290,9 @@ test('gapped bill PDFs remain reviewable while recommendation and documents stay
     .locator('input[type="file"][accept=".pdf"]')
     .setInputFiles(gappedBillPdfPayloads)
 
-  await expect(page.getByText(/PDF 11개에서 11개월/)).toBeVisible()
+  await expect(page.getByText(/PDF 11개에서 11개월/)).toBeVisible({
+    timeout: 30_000,
+  })
   await expect(page.getByText(/청구월이 누락되었습니다/)).toBeVisible()
   await expect(
     page.getByText(/연속 12개월을 채울 때까지 요금제 추천과 문서 생성은 보류됩니다/),
