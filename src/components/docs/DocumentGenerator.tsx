@@ -6,6 +6,8 @@ import {
   Download,
   Eye,
   FileArchive,
+  ListChecks,
+  Send,
   ShieldAlert,
 } from 'lucide-react'
 import type {
@@ -22,6 +24,7 @@ import {
 } from '../../lib/documentExport'
 import { getDocumentFileNames } from '../../lib/downloadNames'
 import type { PeakOperationPlan } from '../../lib/peakOperations'
+import { NextStepsRail, type NextStepItem } from '../common/NextStepsRail'
 
 interface DocumentGeneratorProps {
   profile: SchoolProfile
@@ -184,6 +187,32 @@ export function DocumentGenerator({
         ? 'letter-preview'
         : 'application-preview'
 
+  const submissionSteps: NextStepItem[] = [
+    {
+      title: '서류 묶음 받기',
+      description: '계획안·한전 공문·변경신청서 PDF 3종이 한 번에 담깁니다.',
+      icon: <FileArchive size={20} />,
+      actionLabel: '전체 다운로드 (ZIP)',
+      onAction: () => void downloadZip(),
+      actionDisabled: !canGenerateChangeDocuments,
+    },
+    {
+      title: '붙임서류 확인',
+      description: "체크리스트에서 '첨부 확인' 항목을 준비합니다.",
+      icon: <ListChecks size={20} />,
+      actionLabel: '체크리스트로 이동',
+      onAction: () =>
+        document
+          .getElementById('doc-checklist')
+          ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
+    },
+    {
+      title: '한전에 제출',
+      description: '공문, 신청서, 붙임 서류를 관할 한전에 제출하면 끝입니다.',
+      icon: <Send size={20} />,
+    },
+  ]
+
   return (
     <div className="view-stack">
       {!canGenerateChangeDocuments && (
@@ -195,6 +224,7 @@ export function DocumentGenerator({
           </div>
         </section>
       )}
+      <NextStepsRail label="변경신청 제출 순서" items={submissionSteps} />
       <section className="document-grid">
         <article className="document-card">
           <h2>전기요금제 변경 계획(안)</h2>
@@ -285,7 +315,7 @@ export function DocumentGenerator({
           </div>
         </article>
 
-        <article className="checklist-card">
+        <article className="checklist-card" id="doc-checklist">
           <h2>붙임 체크리스트</h2>
           <ul className="check-list">
             {bundle.checklist.map((item) => (
@@ -296,46 +326,42 @@ export function DocumentGenerator({
               </li>
             ))}
           </ul>
-          <button
-            type="button"
-            className="outline-download"
-            disabled={!canGenerateChangeDocuments}
-            onClick={() => void downloadZip()}
-          >
-            <FileArchive size={16} />
-            전체 다운로드 (ZIP)
-          </button>
-        </article>
-
-        <article className="checklist-card">
-          <h2>계산 근거 요약표</h2>
-          <p className="mini-document-text">{bundle.calculationSummaryText}</p>
-        </article>
-
-        <article className="checklist-card">
-          <h2>계산 근거 분해표</h2>
-          <div className="document-breakdown-mini">
-            {bundle.calculationBreakdown.map((row) => (
-              <div key={row.label}>
-                <span>{row.label}</span>
-                <strong>{row.differenceWon.toLocaleString('ko-KR')}원</strong>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="checklist-card">
-          <h2>담당자 검토 필요 항목</h2>
-          <ul className="check-list">
-            {bundle.reviewItems.map((item) => (
-              <li key={item}>
-                <CheckCircle2 size={18} />
-                {item}
-              </li>
-            ))}
-          </ul>
         </article>
       </section>
+
+      <details className="fold-panel">
+        <summary>계산 근거 · 담당자 검토 항목 보기</summary>
+        <div className="document-grid">
+          <article className="checklist-card">
+            <h2>계산 근거 요약표</h2>
+            <p className="mini-document-text">{bundle.calculationSummaryText}</p>
+          </article>
+
+          <article className="checklist-card">
+            <h2>계산 근거 분해표</h2>
+            <div className="document-breakdown-mini">
+              {bundle.calculationBreakdown.map((row) => (
+                <div key={row.label}>
+                  <span>{row.label}</span>
+                  <strong>{row.differenceWon.toLocaleString('ko-KR')}원</strong>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="checklist-card">
+            <h2>담당자 검토 필요 항목</h2>
+            <ul className="check-list">
+              {bundle.reviewItems.map((item) => (
+                <li key={item}>
+                  <CheckCircle2 size={18} />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </article>
+        </div>
+      </details>
 
       <section className="panel">
         <div className="panel-title">

@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Gauge, Target } from 'lucide-react'
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  Gauge,
+  Info,
+  Target,
+} from 'lucide-react'
 import {
   Bar,
   BarChart,
@@ -16,7 +23,6 @@ import {
   getPeakRiskLevel,
   getPeakRiskTone,
   peakGuideItems,
-  summerPeakBlocks,
   winterPeakBlocks,
 } from '../../lib/peak'
 import {
@@ -174,68 +180,60 @@ export function PeakManager({
         </article>
       </section>
 
-      <section className="peak-grid">
-        <article className="panel">
-          <div className="panel-title">
-            <h2>하계 피크 관리 타임라인</h2>
-            <span>예시</span>
-          </div>
-          <div className="time-blocks">
-            <div className="time-card safe">예냉 10:30</div>
-            {summerPeakBlocks.map((block) => (
-              <div className="time-card danger" key={block}>
-                최대부하 {block}
+      <section className="panel">
+        <div className="panel-title">
+          <h2>오늘의 운영 순서</h2>
+          <span>시간대별로 그대로 따라 하세요</span>
+        </div>
+        <ol className="peak-timeline">
+          {peakOperationPlan.todayTimeline.map((step, index) => (
+            <li key={`${step.time}-${index}`} className={step.tone}>
+              <span className="peak-timeline-marker" aria-hidden="true">
+                {index + 1}
+              </span>
+              <span className="peak-timeline-time">{step.time}</span>
+              <div>
+                <strong>{step.title}</strong>
+                <p>{step.detail}</p>
               </div>
-            ))}
-          </div>
-          <div className="timeline">
-            {['09:00', '10:30', '11:00', '12:00', '13:00', '17:00', '18:00'].map(
-              (time) => (
-                <span key={time}>{time}</span>
-              ),
-            )}
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-title">
-            <h2>동계 최대부하 시간대</h2>
-            <span>순차 기동 권장</span>
-          </div>
-          <div className="load-window-list">
-            {winterPeakBlocks.map((block) => (
-              <span key={block}>{block}</span>
-            ))}
-          </div>
-          <textarea
-            value={scenario.memo}
-            onChange={(event) => update('memo', event.target.value)}
-            aria-label="피크관리 메모"
-          />
-        </article>
-
-        <article className="panel guide-panel">
-          <div className="panel-title">
-            <h2>운영 가이드 체크리스트</h2>
-            <span>장비 제어 없음</span>
-          </div>
-          <ul className="check-list">
-            {guideItems.map((item) => (
-              <li key={item}>
-                <CheckCircle2 size={17} />
-                {item}
-              </li>
-            ))}
-          </ul>
-          <p className="future-note">
-            향후 BEMS, 스마트미터, 냉난방 제어기 연계 가능. 본 MVP는 운영 가이드만 제공합니다.
-          </p>
-        </article>
+            </li>
+          ))}
+        </ol>
+        <div className="winter-note">
+          <strong>동계 최대부하</strong>
+          <span>
+            {winterPeakBlocks.join(' · ')} — 08:30 예열 후 동시 기동 제한
+          </span>
+        </div>
       </section>
 
       <section className="panel">
         <div className="panel-title">
-          <h2>요금 최대부하·학교 운영시간 중첩</h2>
+          <h2>동시에 켜면 안 되는 조합</h2>
+          <span>피크 위험</span>
+        </div>
+        <ul className="avoid-chip-list">
+          {peakOperationPlan.avoidCombinations.map((item) => (
+            <li key={item}>
+              <Ban size={15} aria-hidden="true" />
+              {item}
+            </li>
+          ))}
+        </ul>
+        <h3 className="exception-heading">예외 조건</h3>
+        <ul className="exception-chip-list">
+          {peakOperationPlan.exceptionConditions.map((item) => (
+            <li key={item}>
+              <Info size={15} aria-hidden="true" />
+              {item}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <h2>요금 최대부하·학교 운영시간 한눈에 보기</h2>
           <span>같은 시간대 설비 동시 기동 주의</span>
         </div>
         <div className="operating-window-grid">
@@ -248,11 +246,8 @@ export function PeakManager({
         </div>
       </section>
 
-      <section className="panel">
-        <div className="panel-title">
-          <h2>피크관리 자동 운영안 입력</h2>
-          <span>학교 설비 운영 조건</span>
-        </div>
+      <details className="fold-panel">
+        <summary>설비 조건 바꾸기</summary>
         <div className="peak-operation-form">
           <label>
             본관 EHP 그룹 수
@@ -329,13 +324,10 @@ export function PeakManager({
             />
           </label>
         </div>
-      </section>
+      </details>
 
-      <section className="panel">
-        <div className="panel-title">
-          <h2>자동 생성 운영안</h2>
-          <span>수업환경 유지 조건 포함</span>
-        </div>
+      <details className="fold-panel">
+        <summary>계절별 운영안 · 전체 순서 · 메모</summary>
         <div className="operation-plan-grid">
           <article>
             <span>오늘의 피크관리 운영안</span>
@@ -364,23 +356,29 @@ export function PeakManager({
             </ol>
           </div>
           <div>
-            <h3>동시에 켜면 안 되는 설비 조합</h3>
-            <ul>
-              {peakOperationPlan.avoidCombinations.map((item) => (
-                <li key={item}>{item}</li>
+            <h3>운영 가이드 체크리스트</h3>
+            <ul className="check-list">
+              {guideItems.map((item) => (
+                <li key={item}>
+                  <CheckCircle2 size={17} />
+                  {item}
+                </li>
               ))}
             </ul>
+            <p className="future-note">
+              향후 BEMS, 스마트미터, 냉난방 제어기 연계 가능. 본 MVP는 운영 가이드만 제공합니다.
+            </p>
           </div>
           <div>
-            <h3>학생 수업환경 예외 조건</h3>
-            <ul>
-              {peakOperationPlan.exceptionConditions.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+            <h3>피크관리 메모</h3>
+            <textarea
+              value={scenario.memo}
+              onChange={(event) => update('memo', event.target.value)}
+              aria-label="피크관리 메모"
+            />
           </div>
         </div>
-      </section>
+      </details>
 
       <section className="panel">
         <div className="panel-title">

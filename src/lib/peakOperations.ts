@@ -1,10 +1,18 @@
 import type { PeakScenario } from '../types'
 
+export interface PeakTimelineStep {
+  time: string
+  title: string
+  detail: string
+  tone: 'safe' | 'warning' | 'danger' | 'neutral'
+}
+
 export interface PeakOperationPlan {
   todayPlan: string
   summerPlan: string
   winterPlan: string
   preCoolingHeating: string
+  todayTimeline: PeakTimelineStep[]
   sequentialOrder: string[]
   avoidCombinations: string[]
   exceptionConditions: string[]
@@ -66,6 +74,40 @@ export const buildPeakOperationPlan = (
       '동계에는 08:30 예열 후 10:00~12:00, 17:00~20:00, 22:00~23:00 최대부하 시간대의 동시 기동을 제한합니다.',
     preCoolingHeating:
       '예냉은 최대부하 30~60분 전, 예열은 등교 전 30분 전부터 시작하고 최대부하 시간대에는 신규 기동보다 유지운전을 우선합니다.',
+    todayTimeline: [
+      {
+        time: '08:30 · 10:30',
+        title: '예열·예냉 시작',
+        detail: scenario.auditoriumCooling
+          ? '동계 08:30 예열 · 하계 10:30 예냉 · 강당 12:30 예냉'
+          : '동계 08:30 예열 · 하계 10:30 예냉',
+        tone: 'safe',
+      },
+      {
+        time: cafeteriaTime,
+        title: '급식실 고전력 기기 사용',
+        detail: '강당 EHP와 동시 기동 금지',
+        tone: 'warning',
+      },
+      {
+        time: '13:00~',
+        title: `본관 EHP ${mainGroups}그룹 순차 기동`,
+        detail: `층별 5분 간격 · 이후 별관 ${annexGroups}그룹 분산 투입`,
+        tone: 'danger',
+      },
+      {
+        time: '13:00~17:00',
+        title: '최대부하 유지운전',
+        detail: '신규 기동 대신 설정온도 유지·순환 운전',
+        tone: 'danger',
+      },
+      {
+        time: '17:00~',
+        title: '피크 종료',
+        detail: '정상 운전으로 복귀',
+        tone: 'neutral',
+      },
+    ],
     sequentialOrder: [
       `제외 공간 상시 유지: ${exemptSpaces}`,
       ...mainSequence,
